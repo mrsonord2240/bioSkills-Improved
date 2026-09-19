@@ -8,7 +8,7 @@ license: MIT
 
 ## Version Compatibility
 
-Reference examples tested with: pertpy 0.9+, scanpy 1.10+, anndata 0.10+, sceptre 0.10+
+Reference examples tested with: pertpy 1.3+, scanpy 1.12+, anndata 0.13+, sceptre 0.10+ (checked 2026-09-19).
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
@@ -16,6 +16,32 @@ Before using code patterns, verify installed versions match. If versions differ:
 
 If code throws ImportError, AttributeError, or TypeError, introspect the installed
 package and adapt the example to match the actual API rather than retrying.
+
+**Prerequisites:**
+
+```bash
+pip install 'pertpy[jax]' scanpy anndata   # [jax] extra is required for assign_mixture_model (below), not optional in practice
+pip install pydeseq2 decoupler             # pseudobulk DE
+```
+
+```r
+install.packages('sceptre')                # conditional-resampling test; requires R >= 4.5 (see caveat below)
+install.packages('Seurat')                 # Mixscape (Seurat v5)
+```
+
+- `pertpy scanpy anndata` alone gives threshold-based guide assignment only.
+  `assign_mixture_model` (the default in Governing Principle, below) needs the `[jax]` extra
+  (pulls `optax`, plus `flax`/`numpyro`/`ott-jax`). Without it, `assign_mixture_model` raises
+  `ImportError` naming the missing extra; fall back to
+  `assign_by_threshold(data, assignment_threshold=<float>, output_layer='assigned_guides')`
+  (positional `assignment_threshold` is required, and it writes a binary cell x guide layer,
+  not a single obs column like the mixture model's `assigned_guides_key` does).
+- `sceptre` requires **R >= 4.5**. Under an older R, `install.packages('sceptre')` /
+  `BiocManager::install('sceptre')` exits 0 and installs nothing — `available.packages()`
+  silently filters version-gated packages rather than erroring. Check
+  `packageVersion('sceptre')` after installing, never the exit code; if it errors
+  ("there is no package called 'sceptre'"), the install silently no-op'd and R needs
+  upgrading.
 
 # Perturb-seq Analysis
 
@@ -25,7 +51,7 @@ package and adapt the example to match the actual API rather than retrying.
 
 ## Governing Principle
 
-Guide assignment is a mixture problem, not a threshold. Each cell's per-guide UMI vector mixes true integration with ambient guide contamination (free transcripts, index hopping, doublets), and the ambient pool is structured: it is dominated by whichever guides are most abundant in the library, so a flat UMI cutoff preferentially mis-assigns cells to common guides and calls rare-guide cells negative. Call guides by a per-guide background/foreground mixture posterior, and report the perturbed fraction. MOI changes the meaning: low-MOI (~1 guide/cell) gives clean single-gene attribution but discards 70-90% of cells; high-MOI is for combinatorial designs but measures every single-gene effect in a co-perturbed background.
+Guide assignment is a mixture problem, not a threshold. Each cell's per-guide UMI vector mixes true integration with ambient guide contamination (free transcripts, index hopping, doublets), and the ambient pool is structured: it is dominated by whichever guides are most abundant in the library, so a flat UMI cutoff preferentially mis-assigns cells to common guides and calls rare-guide cells negative. Call guides by a per-guide background/foreground mixture posterior, and report the perturbed fraction; weak or contaminated non-targeting controls inflate false positives across every downstream test, so treat the NT population itself as something to QC, not just a label. MOI changes the meaning: low-MOI (~1 guide/cell) gives clean single-gene attribution but discards 70-90% of cells; high-MOI is for combinatorial designs but measures every single-gene effect in a co-perturbed background and needs deconvolution (scMAGeCK-LR, or a sparse factor model like GSFA).
 
 Assignment is not effective perturbation. A cell can carry a guide yet be transcriptionally wild-type: incomplete CRISPR-KO editing, in-frame indels, escapers, or weak CRISPRi knockdown. The "perturbed" population is a mixture of truly perturbed and effectively-wild-type cells, which attenuates every effect-size estimate toward the null. Mixscape removes the non-perturbed cells via a local non-targeting-neighbor perturbation signature before testing. Deep caveat: an all-NP result is not evidence the gene is non-functional, because it is confounded with low guide efficiency; Mixscape cannot distinguish "no phenotype" from "no editing".
 
@@ -50,10 +76,20 @@ Cell Ranger and Replogle's `guide_calling` fit mixtures on log counts; require a
 |---|---|---|---|
 | Mixscape (pertpy/Seurat) | Which cells were effectively perturbed; per-perturbation DE after removing escapers | CRISPR-KO with heterogeneous editing; need escaper removal | All-NP confounded with low guide efficiency; KO posteriors not comparable across targets |
 | SCEPTRE | Calibrated perturbation-gene association | Rigorous testing under the depth confounder; element-level screens | Needs the assignment model roughly right; conservative by design |
-| scMAGeCK (LR / RRA) | Per-gene effect across many genes; high-MOI deconvolution | Multi-guide cells; ridge-regression effect estimates | NEGCTRL choice defines the null; runs on scale.data so covariates propagate |
+| scMAGeCK (LR / RRA) [no bundled example - see below] | Per-gene effect across many genes; high-MOI deconvolution | Multi-guide cells; ridge-regression effect estimates | NEGCTRL choice defines the null; runs on scale.data so covariates propagate |
 | E-distance + E-test (pertpy) | Effect-size magnitude; perturbation similarity | Ranking/clustering perturbations by how far they move cells | Embedding-dependent, not cross-study comparable; floored by permutation count |
 | Pseudobulk DE (DESeq2/edgeR) | Average within-state program change | >=2-3 biological replicates per condition | One replicate per guide -> no valid inference; sum raw counts, not means |
 | Milo / scCODA / Augur | Differential abundance / composition | "Does the perturbation move cells across states?" | Conflated with within-state DE if reported alone |
+
+scMAGeCK has no bundled worked example in this Skill: it is not on the CRAN or Bioconductor
+release repos (only Bioconductor's unreleased staging index as of 2026-09-19, `weili-lab/scMAGeCK`
+on GitHub/Bitbucket), needs a compiled C++ component, and was not present in this Skill's tested
+environment — so no runnable code here has been verified against it. Install per the upstream
+repo's own instructions (`https://github.com/weili-lab/scMAGeCK`, or
+`https://bitbucket.org/weililab/scmageck` for the maintained source); its two entry points are
+named `scmageck_lr()` (linear regression) and `scmageck_rra()` (rank-based), per Yang et al. 2020
+(References, below) -- confirm the exact arguments with `?scmageck_lr` / `?scmageck_rra` against
+the version you install rather than trusting any signature not shown there.
 
 Verify the current best-practice default and parameter names against the installed pertpy/sceptre docs before committing; the APIs drift across releases.
 
@@ -77,10 +113,11 @@ import pertpy as pt
 import scanpy as sc
 
 gdo = mdata.mod['gdo']                       # guide-count modality (cells x guides)
+gdo.X = gdo.X.tocsr()                        # ships CSC from most loaders; mixture/threshold assignment need CSR or dense
 gdo.layers['counts'] = gdo.X.copy()
 
 ga = pt.pp.GuideAssignment()
-ga.assign_mixture_model(gdo, assigned_guides_key='assigned_guide')   # background Poisson + foreground Gaussian
+ga.assign_mixture_model(gdo, assigned_guides_key='assigned_guide')   # background Poisson + foreground Gaussian; needs pip install 'pertpy[jax]' (see Prerequisites)
 # Inspect NT/abundant-guide UMI distributions as a contamination floor before trusting calls
 ga.plot_heatmap(gdo, layer='counts')
 ```
@@ -91,10 +128,17 @@ ga.plot_heatmap(gdo, layer='counts')
 
 **Approach:** Build a local perturbation signature by subtracting each cell's NT neighbors, then fit a per-target 2-component mixture to classify cells; drop NP cells.
 
+In a MuData loaded per-modality (e.g. `pt.dt.papalexi_2021()`), the perturbation columns
+(`perturbation`, `gene_target`, `replicate`, ...) live on the joined `mdata.obs`, not on
+`adata.obs` when `adata = mdata.mod['rna']` — pull them across first or Mixscape raises
+`KeyError`:
+
 ```python
+mdata.push_obs(columns=['perturbation', 'gene_target', 'replicate'], mods=['rna'])
+
 ms = pt.tl.Mixscape()
 ms.perturbation_signature(adata, pert_key='perturbation', control='NT', n_neighbors=20)   # pert_key here = the broad perturbed-vs-control column
-ms.mixscape(adata, pert_key='target_gene', control='NT', layer='X_pert')   # pert_key here = the per-target column (intentionally different); renamed from labels; writes adata.obs['mixscape_class_global'] KO/NP/NT
+ms.mixscape(adata, pert_key='gene_target', control='NT', layer='X_pert')   # pert_key here = the per-target column (intentionally different, same name used consistently below); renamed from labels; writes adata.obs['mixscape_class_global'] KO/NP/NT
 # An all-NP target is confounded with low guide efficiency: report perturbed fraction, do not call the gene non-functional
 adata.obs['mixscape_class_global'].value_counts()
 ```
@@ -106,17 +150,22 @@ adata.obs['mixscape_class_global'].value_counts()
 **Approach:** Compute energy distance in a fixed PCA embedding; pin the embedding and metric, and run the permutation E-test against the control.
 
 ```python
+import numpy as np
+
 sc.pp.pca(adata, n_comps=50)
 dist = pt.tl.Distance(metric='edistance', obsm_key='X_pca')   # pin obsm; sqeuclidean vs euclidean default changed across versions
-pairwise = dist.pairwise(adata, groupby='target_gene')
+pairwise = dist.pairwise(adata, groupby='gene_target')
 
+np.random.seed(0)                                             # DistanceTest exposes no seed/random_state of its own; seed the global RNG for reproducible permutations
 etest = pt.tl.DistanceTest('edistance', n_perms=1000)         # smallest p ~ 1/(n_perms+1); crushed by multiple testing
-results = etest(adata, groupby='target_gene', contrast='NT')
+results = etest(adata, groupby='gene_target', contrast='NT')
 ```
 
 ## SCEPTRE: Calibrated Testing (R)
 
 **Goal:** Test perturbation-gene associations with calibration verified on the data itself.
+
+Requires **R >= 4.5** (see Prerequisites); on an older R, the install silently no-ops.
 
 **Approach:** Import counts and guide matrices, set parameters, assign guides by mixture, then run the calibration check (negative controls) before the discovery analysis.
 
@@ -144,9 +193,9 @@ import pertpy as pt
 
 adata.layers['counts'] = adata.layers.get('counts', adata.X.copy())   # stash RAW counts before any log1p
 pb = pt.tl.PseudobulkSpace()
-pdata = pb.compute(adata, target_col='target_gene', groups_col='replicate', layer_key='counts', mode='sum')   # sum RAW counts, not .X (log-normalized)
+pdata = pb.compute(adata, target_col='gene_target', groups_col='replicate', layer_key='counts', mode='sum')   # sum RAW counts, not .X (log-normalized)
 # Drop pseudobulk samples below ~10 cells (verify the per-sample cell-count obs column name with help(pb.compute))
-# Hand pdata to pertpy EdgeR / pydeseq2 with design ~ replicate + target_gene; needs >=2-3 replicates per condition
+# Hand pdata to pertpy EdgeR / pydeseq2 with design ~ replicate + gene_target; needs >=2-3 replicates per condition
 ```
 
 One transfection per guide means no valid biological-replicate inference exists; using guides targeting the same gene as pseudo-replicates partially helps but conflates guide-specific off-targets.
@@ -157,12 +206,31 @@ One transfection per guide means no valid biological-replicate inference exists;
 
 **Approach:** Run a differential-abundance test (Milo neighborhoods or scCODA) for composition, and report it alongside the within-state pseudobulk DE.
 
+`da_nhoods`'s design covariate must be constant within each `sample_col`-defined sample (its
+own docstring example pairs a per-sample-constant `label`/`orig.ident` with `design='~label'`).
+In a pooled Perturb-seq screen, `gene_target` varies cell-by-cell *within* one `replicate`, so
+`sample_col='replicate'` with `design='~ gene_target'` raises `AssertionError: Values ... cannot
+be unambiguously assigned to each sample` -- it is a structural mismatch, not a flag issue.
+Fix it by defining the Milo sample at (replicate x target) granularity, same idea as the
+pseudobulk step above, and testing one target against NT at a time (a per-target-vs-NT subset
+also keeps the design's degrees of freedom sane):
+
 ```python
+target = 'STAT1'                                        # test one target vs NT at a time
+sub = adata[adata.obs['gene_target'].isin([target, 'NT'])].copy()
+sc.pp.neighbors(sub, n_pcs=50)                           # make_nhoods needs a KNN graph in .obsp; not computed above
+
 milo = pt.tl.Milo()
-mdata_milo = milo.load(adata)
-milo.make_nhoods(mdata_milo['rna'])
-milo.count_nhoods(mdata_milo, sample_col='replicate')
-milo.da_nhoods(mdata_milo, design='~ target_gene')   # differential abundance: does the perturbation shift proportions?
+mdata_milo = milo.load(sub)
+milo.make_nhoods(mdata_milo['rna'], prop=0.1, seed=0)
+
+# One Milo "sample" per (replicate, target): gene_target is then constant within each sample,
+# satisfying da_nhoods' per-sample-covariate requirement.
+mdata_milo['rna'].obs['replicate_target'] = (
+    mdata_milo['rna'].obs['replicate'].astype(str) + '_' + mdata_milo['rna'].obs['gene_target'].astype(str)
+)
+milo.count_nhoods(mdata_milo, sample_col='replicate_target')
+milo.da_nhoods(mdata_milo, design='~ gene_target', solver='pydeseq2')   # differential abundance: does the perturbation shift proportions?
 ```
 
 ## Common Errors
@@ -174,6 +242,8 @@ milo.da_nhoods(mdata_milo, design='~ target_gene')   # differential abundance: d
 | "Gene is non-functional" from all-NP | All-NP confounds no-phenotype with no-editing | Do not claim non-functional; check guide efficiency independently |
 | Hundreds of "significant" hits | Naive Wilcoxon/NB miscalibrated by depth + pseudoreplication | SCEPTRE conditional resampling; pseudobulk-per-replicate DE |
 | Huge DE signature but no program change | Perturbation only redistributes cells across states | Run Milo/scCODA; attribute the signal to composition |
+| Milo `da_nhoods` raises `AssertionError` on a per-cell design term | `sample_col` (e.g. `replicate`) doesn't uniquely determine the design covariate (e.g. `gene_target` varies within it) | Define the Milo sample at (replicate x target) granularity; test one target vs NT at a time |
+| `KeyError` on `perturbation`/`gene_target` in Mixscape | Columns live on the joined `mdata.obs`, not on `adata.obs` for a per-modality AnnData | `mdata.push_obs(columns=[...], mods=['rna'])` before calling Mixscape |
 | E-distances disagree with another paper | Embedding/metric/PC count differ; default metric changed | Pin pertpy version, obsm key, and cell_wise_metric; do not cross-compare |
 | Combinatorial cells everywhere | Doublets masquerade as multi-guide | Gate doublets (Scrublet/scDblFinder) before multi-guide analysis |
 | Foundation model "beats" baselines | Cell-level split leakage; all-gene metric hides failure | Hold out whole perturbations; score DE genes vs additive/mean baseline |

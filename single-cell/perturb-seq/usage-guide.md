@@ -6,15 +6,9 @@ Perturb-seq and CROP-seq read out a pooled CRISPR screen with single-cell transc
 
 ## Prerequisites
 
-```bash
-pip install pertpy scanpy anndata
-pip install pydeseq2 decoupler          # pseudobulk DE
-```
-
-```r
-install.packages('sceptre')             # conditional-resampling test
-install.packages('Seurat')              # Mixscape (Seurat v5)
-```
+See SKILL.md's Prerequisites section for exact install commands and version caveats
+(`pertpy[jax]` is required, not optional, for the default guide-assignment method; `sceptre`
+needs R >= 4.5).
 
 ## Quick Start
 
@@ -58,33 +52,9 @@ Tell your AI agent what you want to do:
 6. Run pseudobulk DE per biological replicate (summing raw counts) for the within-state program.
 7. Run a differential-abundance test (Milo/scCODA) and report composition separately from expression.
 
-## Decision Guidance
-
-### Guide assignment
-- Mixture posterior (default): ambient contamination is biased to abundant guides, so a flat threshold mis-assigns; require a dominant-guide UMI fraction.
-- MOI: low-MOI gives clean single-gene attribution but discards most cells; high-MOI is for combinatorial designs and needs deconvolution (scMAGeCK-LR, GSFA).
-
-### Testing
-- SCEPTRE when calibration matters: the depth confounder breaks naive parametric tests.
-- Pseudobulk DE for the within-state program, but only with >=2-3 biological replicates; one transfection per guide has no valid replicate inference.
-- E-distance + E-test for effect-size magnitude and perturbation similarity, pinned to a fixed embedding.
-
-### Composition vs expression
-- Milo/scCODA/Augur answer "does it move cells across states?"
-- Pseudobulk DE/Mixscape/GSFA answer "does it change a state's program?"
-- A perturbation that only redistributes cells produces a fake pseudobulk DE signature; always report both.
-
-## Tips
-
-- **Assignment is a mixture, not a threshold** - ambient guide contamination scales with guide abundance; assign by posterior.
-- **Assignment is not perturbation** - escapers and incomplete KO dilute effect sizes; run Mixscape first.
-- **All-NP is ambiguous** - it confounds "no phenotype" with "no editing"; never call a gene non-functional from Mixscape alone.
-- **Naive DE is miscalibrated** - depth confounding and pseudoreplication inflate type-I error; use SCEPTRE and pseudobulk-per-replicate.
-- **Sum raw counts for pseudobulk** - not means or normalized values; filter pseudobulk samples below ~10 cells.
-- **E-distance is embedding-relative** - pin the pertpy version, obsm key, and metric; do not compare across studies.
-- **Separate moves-cells from changes-cells** - composition vs within-state expression are different questions needing different tools.
-- **Foundation models do not yet beat baselines** - on held-out perturbations they do not exceed additive/mean predictors; always benchmark on DE genes with whole-perturbation holdout.
-- **Non-targeting controls define the null** - weak or contaminated NT inflate false positives across every test.
+Decision guidance (mixture vs threshold, which test, composition vs expression) and the
+reasoning tips behind each are in SKILL.md's Governing Principle, Method Decision Tables, and
+Common Errors sections — that's what the agent loads and acts on, so it's kept in one place.
 
 ## Related Skills
 
