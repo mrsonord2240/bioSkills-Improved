@@ -8,7 +8,7 @@ Single-cell ATAC-seq measures chromatin accessibility per cell, revealing cell-t
 
 ```r
 install.packages('Signac')
-BiocManager::install(c('EnsDb.Hsapiens.v86', 'BSgenome.Hsapiens.UCSC.hg38', 'chromVAR', 'motifmatchr', 'JASPAR2020', 'TFBSTools', 'scDblFinder'))
+BiocManager::install(c('EnsDb.Hsapiens.v86', 'BSgenome.Hsapiens.UCSC.hg38', 'chromVAR', 'motifmatchr', 'JASPAR2020', 'TFBSTools', 'scDblFinder', 'biovizBase'))   # biovizBase is required by GetGRangesFromEnsDb()
 devtools::install_github('GreenleafLab/ArchR')   # large on-disk workflows
 ```
 

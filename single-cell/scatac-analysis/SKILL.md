@@ -122,10 +122,22 @@ da <- FindMarkers(obj, ident.1 = 'cluster1', ident.2 = 'cluster2',
 ```r
 library(JASPAR2020); library(TFBSTools); library(motifmatchr)
 library(BSgenome.Hsapiens.UCSC.hg38)
+library(chromVAR); library(SummarizedExperiment); library(BiocParallel)
+register(SerialParam())   # chromVAR/motifmatchr default to a multicore backend unsupported on Windows
 
 pfm <- getMatrixSet(JASPAR2020, opts = list(collection = 'CORE', tax_group = 'vertebrates', all_versions = FALSE))
 obj <- AddMotifs(obj, genome = BSgenome.Hsapiens.UCSC.hg38, pfm = pfm)
-obj <- RunChromVAR(obj, genome = BSgenome.Hsapiens.UCSC.hg38)   # GC-matched background internally
+
+# Signac::RunChromVAR() was removed in Signac 1.17.0 (chromVAR became unavailable in Bioconductor
+# 3.23, per Signac's own NEWS.md) -- call chromVAR's own lower-level API directly instead; this is
+# the same sequence RunChromVAR used to wrap, and runs on any Signac version.
+se <- SummarizedExperiment(assays = list(counts = as.matrix(GetAssayData(obj, assay = 'peaks', layer = 'counts'))),
+                            rowRanges = granges(obj[['peaks']]))
+se <- addGCBias(se, genome = BSgenome.Hsapiens.UCSC.hg38)
+motif_ix <- matchMotifs(pfm, se, genome = BSgenome.Hsapiens.UCSC.hg38)
+bg_peaks <- getBackgroundPeaks(se)                 # GC- and accessibility-matched background
+dev <- computeDeviations(object = se, annotations = motif_ix, background_peaks = bg_peaks)
+obj[['chromvar']] <- CreateAssayObject(data = deviationScores(dev))   # background-normalized z-scores
 
 DefaultAssay(obj) <- 'chromvar'
 diff_motifs <- FindMarkers(obj, ident.1 = 'cluster1', ident.2 = 'cluster2',
