@@ -122,10 +122,26 @@ da <- FindMarkers(obj, ident.1 = 'cluster1', ident.2 = 'cluster2',
 ```r
 library(JASPAR2020); library(TFBSTools); library(motifmatchr)
 library(BSgenome.Hsapiens.UCSC.hg38)
+library(chromVAR); library(SummarizedExperiment); library(BiocParallel)
+register(SerialParam())   # chromVAR/motifmatchr default to a multicore backend unsupported on Windows
 
 pfm <- getMatrixSet(JASPAR2020, opts = list(collection = 'CORE', tax_group = 'vertebrates', all_versions = FALSE))
 obj <- AddMotifs(obj, genome = BSgenome.Hsapiens.UCSC.hg38, pfm = pfm)
-obj <- RunChromVAR(obj, genome = BSgenome.Hsapiens.UCSC.hg38)   # GC-matched background internally
+
+# Signac::RunChromVAR() was removed in Signac 1.17.0 (chromVAR became unavailable in Bioconductor
+# 3.23, per Signac's own NEWS.md) -- call chromVAR's own lower-level API directly instead; this is
+# the same sequence RunChromVAR used to wrap, and runs on any Signac version.
+se <- SummarizedExperiment(assays = list(counts = as.matrix(GetAssayData(obj, assay = 'peaks', layer = 'counts'))),
+                            rowRanges = granges(obj[['peaks']]))
+se <- addGCBias(se, genome = BSgenome.Hsapiens.UCSC.hg38)
+motif_ix <- matchMotifs(pfm, se, genome = BSgenome.Hsapiens.UCSC.hg38)
+set.seed(1)                                        # getBackgroundPeaks() samples background peaks at
+                                                    # random and is NOT internally seeded -- omitting
+                                                    # this makes chromVAR's differential-motif calls and
+                                                    # rankings change from run to run on identical input
+bg_peaks <- getBackgroundPeaks(se)                 # GC- and accessibility-matched background
+dev <- computeDeviations(object = se, annotations = motif_ix, background_peaks = bg_peaks)
+obj[['chromvar']] <- CreateAssayObject(data = deviationScores(dev))   # background-normalized z-scores
 
 DefaultAssay(obj) <- 'chromvar'
 diff_motifs <- FindMarkers(obj, ident.1 = 'cluster1', ident.2 = 'cluster2',
@@ -176,7 +192,8 @@ TSS scores are not comparable across pipelines/annotations; never port threshold
 | UMAP separates by depth, not biology | Did not drop the depth-correlated LSI component | Run `DepthCor`; drop components above threshold (often #1, verify) |
 | Long flat run of zeros read as "closed" | Zeros are sampling-dominated, ambiguous | Interpret at cluster/pseudobulk level; check effective coverage before structural claims |
 | Gene activity disagrees with RNA for a marker | Repressed/bivalent promoter is open but silent; distal enhancer outside window | Use gene activity for cluster annotation only; validate with multiome RNA |
-| "Everything is GC-rich enriched" in chromVAR | Unmatched background | Use `getBackgroundPeaks`/RunChromVAR GC+accessibility-matched background; report z-scores |
+| "Everything is GC-rich enriched" in chromVAR | Unmatched background | Use `getBackgroundPeaks()`'s GC- and accessibility-matched background; report z-scores |
+| chromVAR motif rankings change between identical reruns | `getBackgroundPeaks()` samples backgrounds at random and is not internally seeded | `set.seed()` immediately before `getBackgroundPeaks()`; `computeDeviations()` itself is deterministic given the same background peaks |
 | Rare cell type never appears | Peaks called from a coarse single-pass clustering missed its elements | Iterative per-cluster peak calling + re-clustering (ArchR iterative LSI) |
 | DA peaks look inflated | Tested on a peak set called from the same clustering (double-dipping) | Call peaks independently of the comparison; treat as ranking |
 | Doublets pass QC | TSS/nucleosome gate debris, not doublets | Run AMULET (homotypic) and ArchR/scDblFinder (heterotypic) and combine |
