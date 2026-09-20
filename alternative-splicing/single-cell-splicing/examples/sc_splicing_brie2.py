@@ -3,20 +3,28 @@
 Single-cell splicing analysis using BRIE2.
 Estimates PSI values with uncertainty quantification for sparse scRNA-seq data.
 '''
-# Reference: brie 2.2+, anndata 0.10+, numpy 1.26+, pandas 2.2+, scanpy 1.10+ | Verify API if version differs
+# Reference: checked on brie 2.3.0 (GitHub install), anndata 0.12, numpy 2.x, pandas 2.3, scanpy 1.11 | Verify API if version differs
 
+import shutil
 import subprocess
+import urllib.request
+
+ANNOTATION_URL = 'https://sourceforge.net/projects/brie-rna/files/annotation/{path}/SE.{tier}.gff3/download'
+ANNOTATION_PATH = {'human': 'human/gencode.v25', 'mouse': 'mouse/gencode.vM12'}
 
 
-def prepare_splicing_events(gtf_file, output_gff):
+def fetch_splicing_events(species, output_gff, tier='most'):
     '''
-    Generate exon-skipping event annotations for BRIE.
+    Download BRIE's precomputed exon-skipping (SE) event annotation.
 
-    BRIE's public interface is CLI-based. Events come from the companion briekit
-    package (briekit-event); alternatively use BRIE's precomputed human/mouse
-    annotation GFF3 from the BRIE documentation.
+    species: 'human' (GENCODE v25) or 'mouse' (GENCODE vM12); align reads to the same or a
+        close genome version. tier: 'gold' (strictest) or 'most' (more events).
+    The briekit-event generator is not used: its entry point crashes on install
+    (ModuleNotFoundError: parseTables).
     '''
-    subprocess.run(['briekit-event', '-a', gtf_file, '-o', output_gff], check=True)
+    url = ANNOTATION_URL.format(path=ANNOTATION_PATH[species], tier=tier)
+    with urllib.request.urlopen(url, timeout=120) as resp, open(output_gff, 'wb') as out:
+        shutil.copyfileobj(resp, out)
 
     print(f'Splicing events written to: {output_gff}')
 
@@ -27,7 +35,7 @@ def count_splicing_reads(bam_file, events_gff, output_dir, barcode_file, n_proc=
 
     Args:
         bam_file: Possorted BAM from Cell Ranger
-        events_gff: Splicing-event GFF3 from prepare_splicing_events
+        events_gff: Splicing-event GFF3 from fetch_splicing_events
         output_dir: Output directory (writes brie_count.h5ad)
         barcode_file: Filtered barcodes (barcodes.tsv[.gz])
         n_proc: Parallel processes
@@ -91,27 +99,48 @@ def find_variable_splicing(adata_splice, cell_type_col='cell_type', min_cells=50
     return variable_events, mean_psi
 
 
-def pseudobulk_by_celltype(adata, cell_type_col='cell_type'):
+def pseudobulk_by_celltype(adata, cell_type_col='cell_type', sample_col='sample',
+                           min_cells=10, min_replicates=3, layer=None):
     '''
-    Create pseudobulk samples by aggregating cells within each type.
+    Create pseudobulk samples by summing counts per (sample, cell type).
     Useful for running bulk splicing tools on scRNA-seq.
+
+    One pooled column per cell type is n = 1 per group and gives false positives, so
+    every cell type needs >= min_replicates samples (donors/batches) with >= min_cells cells.
+    Counts come from adata.X, or adata.layers[layer] (e.g. 'isoform2' from brie-count).
     '''
     import numpy as np
     import pandas as pd
+    from scipy import sparse
+
+    X = adata.layers[layer] if layer else adata.X
+    X = X.toarray() if sparse.issparse(X) else np.asarray(X)
+
+    obs = adata.obs
+    if obs[[cell_type_col, sample_col]].isna().any().any():
+        raise ValueError(f'NaN in obs[{cell_type_col!r}] or obs[{sample_col!r}]: those cells would be dropped')
 
     pseudobulk = {}
+    n_rep = {}
 
-    for ct in adata.obs[cell_type_col].unique():
-        mask = adata.obs[cell_type_col] == ct
-        if mask.sum() >= 20:
-            pseudobulk[ct] = np.array(adata.X[mask].sum(axis=0)).flatten()
+    for (ct, sample), idx in obs.groupby([cell_type_col, sample_col], observed=True).indices.items():
+        if len(idx) >= min_cells:
+            pseudobulk[f'{ct}__{sample}'] = X[idx].sum(axis=0)
+            n_rep[ct] = n_rep.get(ct, 0) + 1
+
+    too_few = {ct: n for ct, n in n_rep.items() if n < min_replicates}
+    if too_few or set(n_rep) != set(obs[cell_type_col].unique()):
+        raise ValueError(f'need >= {min_replicates} samples with >= {min_cells} cells per cell type; got {n_rep}')
 
     return pd.DataFrame(pseudobulk, index=adata.var_names)
 
 
-def differential_splicing_pseudobulk(adata_splice, group1_cells, group2_cells):
+def differential_splicing_per_cell(adata_splice, group1_cells, group2_cells):
     '''
-    Compare splicing between two cell populations using pseudobulk approach.
+    Compare per-cell Psi between two cell populations with a Mann-Whitney test.
+
+    Cells are treated as replicates, so cells from the same donor are pseudo-replicates;
+    this is not a pseudobulk test (use pseudobulk_by_celltype + a bulk tool for that).
 
     Args:
         adata_splice: AnnData with PSI estimates
@@ -172,8 +201,8 @@ if __name__ == '__main__':
     print('BRIE2 Single-Cell Splicing Analysis')
     print('=' * 40)
 
-    # Step 1: Prepare events
-    # prepare_splicing_events('annotation.gtf', 'splicing_events.gff3')
+    # Step 1: Get events
+    # fetch_splicing_events('mouse', 'splicing_events.gff3')
 
     # Step 2: Count reads
     # count_splicing_reads(
