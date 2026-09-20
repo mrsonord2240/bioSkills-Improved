@@ -32,19 +32,22 @@ if [ "${PLATFORM}" = "hifi" ]; then
     PRESET="splice:hq"
     DATA_TYPE="pacbio_ccs"
     STRANDED="none"
+    JUNC_BONUS=9   # minimap2 default; higher values recode skipping reads of some microexons to inclusion on HiFi
 elif [ "${PLATFORM}" = "ont" ]; then
     PRESET="splice -k14"
     DATA_TYPE="nanopore"
     STRANDED="none"
+    JUNC_BONUS=16  # rescues annotated microexons below ~10 nt; see SKILL.md Microexons for why not higher
 elif [ "${PLATFORM}" = "drna" ]; then
     PRESET="splice -uf -k14"
     DATA_TYPE="nanopore"
     STRANDED="forward"
+    JUNC_BONUS=16
 else
     echo "PLATFORM must be hifi, ont or drna" && exit 1
 fi
 
-# 1. Splice-aware alignment; --junc-bed makes minimap2 prefer annotated junctions (rescues annotated microexons)
+# 1. Splice-aware alignment; --junc-bed makes minimap2 prefer annotated junctions (rescues annotated microexons; see SKILL.md Microexons for the bonus)
 gffread "${GTF}" --bed -o "${OUTPUT_DIR}/annotation.bed12"
 
 # $PRESET is intentionally unquoted: it expands to several minimap2 words
@@ -52,6 +55,7 @@ minimap2 -ax ${PRESET} \
     -t "${THREADS}" \
     --secondary=no \
     --junc-bed "${OUTPUT_DIR}/annotation.bed12" \
+    --junc-bonus "${JUNC_BONUS}" \
     "${REFERENCE}" "${FASTQ}" | \
     samtools sort -@ "${THREADS}" -o "${OUTPUT_DIR}/${SAMPLE}_aligned.bam"
 samtools index "${OUTPUT_DIR}/${SAMPLE}_aligned.bam"
@@ -62,6 +66,9 @@ if [ "${PLATFORM}" != "drna" ]; then
     samtools view -F 2308 "${OUTPUT_DIR}/${SAMPLE}_aligned.bam" | \
         awk '{for(i=12;i<=NF;i++) if($i ~ /^ts:A:/){n++; if($i=="ts:A:+") p++}} END{if(n) printf "Spliced reads with ts:A:+ (transcript orientation): %.3f (n=%d)\n", p/n, n}'
 fi
+
+# Reads with an intron next to a soft clip: a --junc-bonus that is too high makes these (expect 0; they crash `flair correct`)
+echo "Reads with an intron next to a soft clip: $(samtools view -F 2308 "${OUTPUT_DIR}/${SAMPLE}_aligned.bam" | awk '$6 ~ /N[0-9]+S$/ || $6 ~ /^[0-9]+S[0-9]+N/' | wc -l)"
 
 # 2a. Isoform discovery and quantification with IsoQuant (entry point is `isoquant`; isoquant.py exists only in a git checkout)
 isoquant \

@@ -8,7 +8,7 @@ license: MIT
 
 ## Version Compatibility
 
-Reference examples checked (2026-09) with: FLAIR 3.0.1, IsoQuant 4.0.0, Bambu 3.8.3 (loads its models only with xgboost 1.x), SQANTI3 6.0.2, minimap2 2.31, samtools 1.24, bedtools 2.31.1, gffread 0.12.9, rMATS-long 2.1.0, uLTRA 0.1, DRIMSeq 1.34.0, stageR 1.28.0. The skera command is checked against `--help` of skera 1.4.0 only.
+Reference examples checked (2026-09) with: FLAIR 3.0.1, IsoQuant 4.0.0, Bambu 3.8.3 (loads its models only with xgboost 1.x), SQANTI3 6.0.2, minimap2 2.31, samtools 1.24, bedtools 2.31.1, gffread 0.12.9, rMATS-long 2.1.0, uLTRA 0.1, DRIMSeq 1.34.0, stageR 1.28.0. skera 1.4.0 was run on a synthetic Kinnex array (see the single-cell section); lima 26.2.1 and isoseq 26.2.0 were checked against `--help` only.
 
 Flags changed between majors: FLAIR 2.x `flair correct` had `--genome` and `--shortread` (3.x: `--junction_tab`/`--junction_bed`, no genome); IsoQuant's entry point is `isoquant` (`isoquant.py` exists only in a git checkout); SQANTI3 6.x has no `--skipORF` (ORF prediction is off unless `--include_ORF`).
 
@@ -64,7 +64,7 @@ conda install -c conda-forge -c bioconda flair isoquant minimap2 samtools bedtoo
 |----------|--------------------|
 | Bulk Iso-Seq transcript discovery in well-annotated organism | minimap2 -ax splice:hq -> IsoQuant or Bambu -> SQANTI3 |
 | Bulk ONT cDNA in well-annotated organism | minimap2 -ax splice -k14 (no -uf) -> IsoQuant or FLAIR -> SQANTI3 |
-| Microexons (3-27 nt) | minimap2 --junc-bed (annotated) or uLTRA -> IsoQuant; junctions from short reads for unannotated ones (see Microexons) |
+| Microexons (3-27 nt) | minimap2 --junc-bed (annotated; ONT also --junc-bonus 16) or uLTRA -> IsoQuant; junctions from short reads for unannotated ones (see Microexons) |
 | End-to-end pipeline for differential analysis | FLAIR (correct -> collapse -> quantify -> diffSplice) |
 | Joint discovery + quantification with calibrated novel rate | Bambu in R |
 | De novo discovery for non-model organism | IsoQuant with --genedb omitted |
@@ -78,7 +78,7 @@ conda install -c conda-forge -c bioconda flair isoquant minimap2 samtools bedtoo
 ## Splice-Aware Alignment
 
 ```bash
-# Annotation junctions for minimap2 (BED12); --junc-bed makes it prefer annotated junctions and rescues annotated microexons
+# Annotation junctions for minimap2 (BED12); --junc-bed makes it prefer annotated junctions and rescues annotated microexons (ONT needs --junc-bonus 16 for the short ones, see Microexons)
 gffread gencode.v45.annotation.gtf --bed -o annotation.bed12
 
 # PacBio HiFi (Iso-Seq) -> minimap2 splice:hq preset
@@ -90,7 +90,7 @@ minimap2 -ax splice:hq --secondary=no --junc-bed annotation.bed12 \
 samtools index isoseq_aligned.bam
 
 # ONT direct cDNA (PCS-114, PCB-114): reads come in both orientations, so no -uf
-minimap2 -ax splice -k14 --secondary=no --junc-bed annotation.bed12 \
+minimap2 -ax splice -k14 --secondary=no --junc-bed annotation.bed12 --junc-bonus 16 \
     -t 16 \
     reference.fa \
     ont_cdna.fastq.gz | \
@@ -98,7 +98,7 @@ minimap2 -ax splice -k14 --secondary=no --junc-bed annotation.bed12 \
 samtools index ont_cdna_aligned.bam
 
 # ONT direct RNA (RNA004): every read is in transcript orientation, so -uf is correct
-minimap2 -ax splice -uf -k14 --secondary=no --junc-bed annotation.bed12 \
+minimap2 -ax splice -uf -k14 --secondary=no --junc-bed annotation.bed12 --junc-bonus 16 \
     -t 16 \
     reference.fa \
     ont_rna.fastq.gz | \
@@ -115,29 +115,53 @@ samtools view -F 2308 aligned.bam | awk '{for(i=12;i<=NF;i++) if($i ~ /^ts:A:/){
 # ~1.000 -> oriented reads (-uf is safe); ~0.5 -> unoriented (never -uf). Measured: oriented HiFi 1.000, unstranded ONT 0.501, real LRGASP cDNA 0.503
 ```
 
-`--secondary=no` discards secondary alignments. `--junc-bed` does not block novel junctions: a novel 24-nt acceptor shift stayed correctly aligned. Without an annotation, drop `--junc-bed`.
+`--secondary=no` discards secondary alignments. `--junc-bed` (with or without `--junc-bonus 16`) does not block novel junctions: a novel 24-nt acceptor shift stayed correctly aligned. Without an annotation, drop `--junc-bed`.
 
 `splice:hq` is the preset for HiFi; plain `splice -k14` is for ONT. The presets matter little on simulated reads (HiFi: same chains within 2 reads; ONT with `splice:hq`: 2.1% versus 1.1% of reads with a false junction), so the main alignment risk is `-uf`, not the preset.
 
 ### Microexons (3-27 nt)
 
-A plain minimap2 alignment drops a microexon even though the read spans it: a 10-nt microexon was kept in 0/150 reads with `splice:hq` and `splice -k14`, and IsoQuant then counted 0 reads for the inclusion isoform (`-k11 -w5` did not help). Give minimap2 the junctions and it is kept; check by counting reads that carry both flanking junctions (pysam CIGAR `N` operations):
+A plain minimap2 alignment drops microexons that the read spans: on simulated reads (minimap2 2.31, pysam CIGAR `N` operations) HiFi lost every 4-9 nt microexon, lost or kept 10-13 nt ones depending on the sequence (a 10-nt one: 199/200 reads in one genome, 0/200 in others) and kept those from 15 nt, ONT cDNA and direct RNA lost them up to about 21-24 nt, and IsoQuant then counted 0 reads for the inclusion isoform (`-k11 -w5` did not help). `--junc-bed` rescues an annotated microexon, but the junction bonus cuts both ways: too high a bonus recodes reads that **skip** the exon into inclusion reads. Measured on 60 microexons of 4-13 nt (three random genomes, each 200 inclusion + 200 skipping reads per gene per platform, annotation containing both isoforms), mean % of reads correct, inclusion reads (both flanking junctions in the CIGAR) / skipping reads (exactly the skip chain):
 
-| Alignment (simulated 10-nt microexon, 150 inclusion reads) | HiFi | ONT (2% sub, 2% indel) |
-|---|---|---|
-| plain `splice:hq` / `splice -k14` | 0/150 | 0/150 |
-| `--junc-bed` from an annotation that contains the exon | 150/150 | 131/150 |
-| same, plus `--junc-bonus 20` | 150/150 | 150/150 |
-| `--junc-bed` from an annotation lacking the exon, plus `--junc-bonus 20` | 0/150 | 0/150 |
-| 6-column intron BED from other evidence, plus `--junc-bonus 20` | 150/150 | 150/150 |
-| uLTRA with an annotation that contains the exon | 150/150 | 150/150 |
-| deSALT without annotation | 0/150 | 0/150 |
+| Alignment | HiFi | ONT cDNA | ONT direct RNA |
+|---|---|---|---|
+| plain `splice:hq` / `splice -k14` | 25 / 100 | 0 / 98 | 0 / 96 |
+| `--junc-bed` (minimap2 default `--junc-bonus 9`) | 100 / 100 | 49 / 100 | 42 / 100 |
+| + `--junc-bonus 16` | 100 / 100 | 99.5 / 100 | 99.1 / 100 |
+| + `--junc-bonus 17` | 100 / 96.7 | 99.9 / 100 | 99.7 / 99.9 |
+| + `--junc-bonus 20` | 100 / 57 | 100 / 91 | 100 / 90 |
 
-IsoQuant on the `--junc-bonus 20` alignments counted 150 inclusion and 150 skipping reads. A microexon that is in no annotation stays lost with every aligner tested; supply its junctions from short reads as a 6-column BED (`chrom, intron start, intron end, name, score, strand`), e.g. from STAR `SJ.out.tab`:
+At bonus 20 the skipping reads of 26 of the 60 microexons (HiFi) and 5 of 60 (ONT, direct RNA) fell below 90% exact, some to 0/200 (4-7 nt exons); a check that counts only inclusion reads cannot see this. Bonus 17 already recoded 2/60 HiFi microexons, and on real ONT reads (LRGASP WTC-11 cDNA, 1883 reads) it produced 12 alignments with an intron directly followed by a soft clip (18 at bonus 18, 27 at 20; none at 16 or below, none at the default): the bonus is paid for a junction with no exon behind it, and `flair correct` then crashed (`juncsToBed12`). **Recipe: HiFi `--junc-bed` alone; ONT cDNA and direct RNA `--junc-bed --junc-bonus 16`** (the alignment recipes above). At 16, 1/60 ONT and 2/60 direct-RNA microexons kept fewer than 90% of their inclusion reads (4-nt exons, worst 83%) and no microexon lost skipping reads. The safe window is narrow and depends on sequence and data, so on your data run the check below on the plain and the rescued BAM for a locus with a known skipped isoform (inclusion must rise while the skipping count stays; if skipping falls as inclusion rises, reads are being recoded, so lower the bonus) and count dangling junctions (must be 0). Bonus 16 changed nothing outside microexons (planted 60-gene set: exact chains within 0.3 points of the default, false-junction reads 0.0%).
+
+```bash
+samtools view -F 2308 aligned.bam | awk '$6 ~ /N[0-9]+S$/ || $6 ~ /^[0-9]+S[0-9]+N/' | wc -l   # reads with an intron next to a soft clip
+```
+
+```python
+# usage: python check.py aligned.bam UP_START UP_END DOWN_START DOWN_END SKIP_START SKIP_END
+# intron coordinates 0-based half-open (BED12 block gaps): UP/DOWN = introns flanking the microexon, SKIP = exon1 end to exon3 start
+import sys, pysam
+bam, *c = sys.argv[1:]; c = list(map(int, c)); up, down, skip = tuple(c[0:2]), tuple(c[2:4]), tuple(c[4:6])
+inc = exc = 0
+for r in pysam.AlignmentFile(bam):
+    if r.is_unmapped or r.is_secondary or r.is_supplementary: continue
+    pos, introns = r.reference_start, set()
+    for op, n in r.cigartuples:
+        if op == 3: introns.add((pos, pos + n))
+        if op in (0, 2, 3, 7, 8): pos += n
+    inc += up in introns and down in introns
+    exc += skip in introns
+print("inclusion reads", inc, "skipping reads", exc)
+```
+
+Example output for a simulated 4-nt exon (200 inclusion + 200 skipping HiFi reads): plain `0 / 399`, default bonus `199 / 201`, bonus 20 `400 / 0` (every skipping read recoded).
+
+Other routes, on 150 simulated 10-nt inclusion reads: `--junc-bed` from an annotation lacking the exon (with `--junc-bonus 20`) 0/150 on HiFi and ONT; deSALT without annotation 0/150; uLTRA with an annotation that contains the exon 150/150 on both. A microexon in no annotation stays lost unless its junctions are supplied from short reads as a 6-column BED (`chrom, intron start, intron end, name, score, strand`), e.g. from STAR `SJ.out.tab` (same bonus rule; on 20 of the microexons above, inclusion / skipping % was 99.9 / 100 for HiFi at the default, 99.9 / 100 for ONT and 99.4 / 100 for direct RNA at 16):
 
 ```bash
 awk 'BEGIN{OFS="\t"} $4>0 {print $1,$2-1,$3,"sj"NR,$7,($4==1?"+":"-")}' SJ.out.tab > sr_junctions.bed
-minimap2 -ax splice:hq --secondary=no --junc-bed sr_junctions.bed --junc-bonus 20 -t 16 reference.fa isoseq.fastq.gz | samtools sort -o isoseq_aligned.bam
+# HiFi; for ONT add --junc-bonus 16
+minimap2 -ax splice:hq --secondary=no --junc-bed sr_junctions.bed -t 16 reference.fa isoseq.fastq.gz | samtools sort -o isoseq_aligned.bam
 # annotation-guided alternative (uLTRA 0.1; --ont for ONT); writes uLTRA_out/reads.sam
 uLTRA pipeline --isoseq --t 16 reference.fa annotation.gtf isoseq.fastq.gz uLTRA_out
 ```
@@ -184,7 +208,7 @@ flair diffSplice \
     --threads 16
 ```
 
-FLAIR (Tang 2020 *Nat Commun*) handles ONT and PacBio with the same workflow. `flair quantify` writes `<output>.counts.tsv` (first column `ids` = `<isoform>_<gene>`, sample columns `<id>_<condition>_<batch>`; `--sample_id_only` gives `ID` and plain sample ids). `flair diffSplice` writes per-event-type (`es`, `alt5`, `alt3`, `ir`) inclusion/exclusion count tables (`diffsplice.<event>.events.quant.tsv`); `--out_dir` must not exist yet (`-of` overwrites). `--test` adds DRIMSeq results per event and needs `Rscript` with the R packages DRIMSeq and argparse on PATH (pip/conda FLAIR alone does not provide them; here it failed with "DRIMSeq failed on `es' event" because the Rscript on PATH had neither, so its output is unchecked). No plots were written in our runs. Checked (real LRGASP test reads, 6 samples): correct -> collapse -> quantify -> diffSplice without `--test`.
+FLAIR (Tang 2020 *Nat Commun*) handles ONT and PacBio with the same workflow. `flair quantify` writes `<output>.counts.tsv` (first column `ids` = `<isoform>_<gene>`, sample columns `<id>_<condition>_<batch>`; `--sample_id_only` gives `ID` and plain sample ids). `flair diffSplice` writes per-event-type (`es`, `alt5`, `alt3`, `ir`) inclusion/exclusion count tables (`diffsplice.<event>.events.quant.tsv`); `--out_dir` must not exist yet (`-of` overwrites). `--test` adds a DRIMSeq test per event type (`drimseq_<event>_<cond1>_v_<cond2>.tsv`, columns `lr` and `adj_pvalue`) and needs an `Rscript` on PATH with DRIMSeq, argparse (which needs python) and data.table; pip/conda FLAIR provides none of them (without an Rscript it dies with `FileNotFoundError: 'Rscript'`). Event types with no events are skipped ("event matrix file empty, not running DRIMSeq"). Checked with an Rscript from a separate env (R 4.4.3, DRIMSeq 1.34.0, argparse 2.3.1, data.table 1.18.6) on a planted 3-vs-3 HiFi set: rc 0, 22 `es` events tested, all 20 planted DTU genes at adj p < 0.05 plus 2 other genes. No plots were written in our runs. Checked (real LRGASP test reads, 6 samples): correct -> collapse -> quantify -> diffSplice without `--test`.
 
 ## IsoQuant for Discovery + Quantification
 
@@ -203,7 +227,7 @@ isoquant \
     --model_construction_strategy default_pacbio
 ```
 
-`--data_type` accepts `pacbio_ccs` (HiFi), `pacbio`, `nanopore`/`ont`, `assembly` or `transcripts`; `--stranded forward` for reads in transcript orientation (direct RNA), default `none`. `--genedb` is optional for de novo discovery. Outputs are in `<output>/<prefix>/`: `<prefix>.transcript_models.gtf` (also holds gene, CDS, UTR and codon rows copied from the annotation), `<prefix>.transcript_counts.tsv` (pooled over all input files; default prefix `OUT`), `<prefix>.transcript_grouped_file_name_counts.tsv` (one column per input file), `<prefix>.transcript_model_counts.tsv`. Transcript counts default to `--transcript_quantification unique_only`, so ambiguous reads are not counted (`__ambiguous` row: 22 of 300 reads in the ONT microexon test). A novel splice site shifted by only ~24 nt from an annotated one is merged into the annotated isoform (all 20 planted reads of one sample counted in it, +13%); confirm such sites with short-read junctions (FLAIR `--junction_tab`). IsoQuant (Prjibelski 2023 *Nat Biotech*) is current SOTA for novel transcript reconstruction; pairs well with SQANTI3 for downstream classification.
+`--data_type` accepts `pacbio_ccs` (HiFi), `pacbio`, `nanopore`/`ont`, `assembly` or `transcripts`; `--stranded forward` for reads in transcript orientation (direct RNA), default `none`. `--genedb` is optional for de novo discovery. Outputs are in `<output>/<prefix>/`: `<prefix>.transcript_models.gtf` (also holds gene, CDS, UTR and codon rows copied from the annotation), `<prefix>.transcript_counts.tsv` (annotated transcripts only, pooled over all input files; default prefix `OUT`) and `<prefix>.discovered_transcript_counts.tsv` (annotated transcripts plus the novel models, ids like `transcript115.chrQ.nnic`), each with a `..._grouped_file_name_counts.tsv` twin (one column per input file; its id column is headed `gene_id` although the rows are transcripts). 4.0.0 writes no `transcript_model_counts.tsv`. Transcript counts default to `--transcript_quantification unique_only`, so ambiguous reads are not counted (`__ambiguous` row: 22 of 300 reads in the ONT microexon test). A novel splice site shifted by only ~24 nt from an annotated one is merged into the annotated isoform (all 20 planted reads of one sample counted in it, +13%); confirm such sites with short-read junctions (FLAIR `--junction_tab`). A planted 30-nt donor shift had no model in a `--genedb` run either, and `--illumina_bam` (125,055 simulated short reads, 40,278 spliced) changed nothing; a run without `--genedb` modelled it (43 reads), as it did an unannotated exon skip (37 reads, also modelled with `--genedb`). IsoQuant (Prjibelski 2023 *Nat Biotech*) is current SOTA for novel transcript reconstruction; pairs well with SQANTI3 for downstream classification.
 
 Memory requirement: >=64 GB for atlas-scale runs.
 
@@ -227,7 +251,7 @@ se <- bambu(
     annotations = bambuAnnotations,
     genome = genome,
     NDR = 0.1,
-    ncore = 8
+    ncore = 8   # BiocParallel workers; on Windows R use ncore = 1
 )
 
 writeBambuOutput(se, path = 'bambu_output/')
@@ -244,7 +268,7 @@ Bambu (Chen 2023 *Nat Methods* 20:1187-1195) uses **NDR** (Novel Discovery Rate)
 | 0.1 | Balanced (default) |
 | 0.2-0.3 | Permissive; more novel discoveries; recall over precision |
 
-Excellent for combined discovery + quantification when statistical filtering matters. NDR needs enough read classes: Bambu warns "NDR approximated" below ~50 read classes, and on a 3.4k-read simulated set NDR 0.05 and 0.1 reported no novel transcript (0.3: one; 1.0: two). Use it on genome-scale data, not a few genes.
+Excellent for combined discovery + quantification when statistical filtering matters. With several BAMs on Windows R, `ncore = 8` stopped with "BiocParallel errors ... could not find function seqlengths" and `ncore = 1` ran (single-BAM runs worked with either; multicore was not tried on Linux). NDR needs enough read classes: Bambu warns "NDR approximated" below ~50 read classes, and on a 3.4k-read simulated set NDR 0.05 and 0.1 reported no novel transcript (0.3: one; 1.0: two). Use it on genome-scale data, not a few genes.
 
 ## SQANTI3 Classification
 
@@ -298,17 +322,24 @@ SQANTI3 (Pardo-Palacios 2024 *Nat Methods* 21:793-797) is the long-read isoform-
 **Approach:** rMATS-long is a multi-script Python pipeline distributed via bioconda; entry point is `rmats-long` followed by the script name. It supports two modes: **abundance-based** (using ESPRESSO-style abundance estimates) and **ASM-based** (Alternative Splicing Modules — sets of isoforms sharing exon-junction structure). Run preprocessing scripts in order before `rmats_long.py`.
 
 ```bash
-conda install -c conda-forge -c bioconda rmats-long
+# conda install -c conda-forge -c bioconda rmats-long   (own env)
+set -euo pipefail   # the steps below otherwise carry on after a failure and write header-only tables
+mkdir -p alignment_info
 
 # Preprocessing pipeline (ASM mode); per-script flag names verified vs Xinglab/rmats-long
 rmats-long organize_gene_info_by_chr.py --gtf annotation.gtf --out-dir gene_info_by_chr/
 
-# simplify_alignment_info processes one BAM at a time -> one TSV
+# simplify_alignment_info processes one sorted, indexed BAM at a time -> one TSV;
+# samples.tsv (sample_id<TAB>tsv_path) is what organize_alignment_info_by_gene_and_chr.py reads
+: > samples.tsv
 for bam in *.bam; do
-    rmats-long simplify_alignment_info.py --in-file "$bam" --out-tsv "alignment_info/${bam%.bam}.tsv"
+    id="${bam%.bam}"
+    rmats-long simplify_alignment_info.py --in-file "$bam" --out-tsv "alignment_info/${id}.tsv"
+    printf '%s\talignment_info/%s.tsv\n' "$id" "$id" >> samples.tsv
 done
+# every per-sample table must exist and be non-empty
+while IFS=$'\t' read -r id tsv; do [ -s "$tsv" ] || { echo "empty or missing $tsv" >&2; exit 1; }; done < samples.tsv
 
-# organize_alignment_info_by_gene_and_chr requires a samples-tsv (sample_id<TAB>tsv_path)
 rmats-long organize_alignment_info_by_gene_and_chr.py \
     --gtf-dir gene_info_by_chr/ \
     --out-dir organized/ \
@@ -335,14 +366,17 @@ rmats-long rmats_long.py \
     --delta-proportion 0.05 \
     --average-reads-per-group 10
 
-# Alternative: abundance-based mode (when you already have ESPRESSO-style estimates)
-rmats-long rmats_long.py \
-    --abundance abundance.esp \
-    --updated-gtf updated.gtf \
-    --group-1 group1.txt \
-    --group-2 group2.txt \
-    --out-dir rmats_long_output/ \
-    --no-splice-graph-plot
+# the result tables must have data rows, not just a header
+for t in differential_asms.tsv differential_isoforms.tsv; do
+    [ "$(wc -l < "rmats_long_output/$t")" -gt 1 ] || { echo "rmats_long_output/$t has no rows" >&2; exit 1; }
+done
+```
+
+Alternative, abundance-based mode (when you already have ESPRESSO-style estimates), instead of the ASM steps:
+
+```bash
+rmats-long rmats_long.py --abundance abundance.esp --updated-gtf updated.gtf \
+    --group-1 group1.txt --group-2 group2.txt --out-dir rmats_long_output/ --no-splice-graph-plot
 ```
 
 Key flags: `--adj-pvalue` (default 0.05), `--delta-proportion` (default 0.05), `--average-reads-per-group` (default 10), `--no-splice-graph-plot` (skip expensive splice-graph rendering).
@@ -405,14 +439,17 @@ The gene id is the text after the last `_` of the FLAIR id, which assumes gene i
 **Approach:** Split 10X library; sequence half short-read for cell typing, half PacBio Kinnex for isoforms; de-array the Kinnex reads with skera, then run the Iso-Seq steps (lima, isoseq refine, isoseq cluster2). Barcode assignment to cells is outside this Skill (see `single-cell-splicing`).
 
 ```bash
-# Demultiplex MAS-Iso-seq reads (command checked against `skera split --help`, skera 1.4.0; not run: no Kinnex data)
+# De-array Kinnex/MAS HiFi reads into segmented reads (S-reads). The adapter FASTA lists the kit's adapters in array order
+# (mas16_primers.fasta for the 16-fold single-cell kit, from PacBio via skera.how/adapters)
 skera split \
     raw_kinnex.bam \
-    mas12_primers.fasta \
-    demuxed.bam
+    mas16_primers.fasta \
+    segmented.bam
 
 # Then lima -> isoseq refine -> isoseq cluster2 (bioconda lima, isoseq; see long-read-sequencing/isoseq-analysis)
 ```
+
+skera 1.4.0 was run on a synthetic 4-fold array (5 adapters from the skera docs; 20 reads -> 80 S-reads whose sequences equal the planted segments, `dl`/`dr` tags 0-1 ... 3-4). lima and isoseq were checked against `--help` only; on that toy BAM lima did not finish, and no real Kinnex data was run.
 
 Joglekar et al 2024 (*Nat Neurosci* 27:1051-1063) used this approach to map single-cell isoforms across developing and adult mouse and human brain. See `single-cell-splicing` for tools that work on the demultiplexed data.
 
@@ -492,10 +529,7 @@ Figures are approximate vendor or literature values, not measured here.
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `IsoQuant: ssw-py not found` | Missing dependency | `pip install ssw-py` |
-| `Bambu: prepareAnnotations failed` | GTF malformed | Validate GTF with `gffread -E` |
-| `SQANTI3: kallisto not found` | sqanti3 expects kallisto for short-read overlap | `conda install -c bioconda kallisto` |
-| `skera: too many mismatches in adapter` | MAS primer mismatch | Verify primer fasta matches kit version |
+| `Bambu: Input annotation file not readable. Requires .gtf/.gff format or TxDb object` (`prepareAnnotations`) | Empty GTF or rows with fewer than 9 tab-separated columns (reproduced with rows cut to 6 columns; `gffread -E` did not flag them) | `awk -F'\t' '!/^#/ && NF!=9' annotation.gtf` lists the bad rows |
 
 ## Quality Thresholds
 
