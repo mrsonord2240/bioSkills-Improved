@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 '''Count alleles at a single position using pysam pileup'''
 # Checked on samtools 1.24, pysam 0.24.1 | Verify API if version differs
-# pysam defaults (no BAQ) equal `samtools mpileup -B`; see SKILL.md for the full parameter table.
+# Without a fastafile pysam applies no BAQ, i.e. equals `samtools mpileup -B`; see SKILL.md for the full parameter table.
 
 import pysam
 import sys

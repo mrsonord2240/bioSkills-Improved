@@ -87,7 +87,7 @@ chr20   1400301  C    6    ,,,.,,    BB<BBB
 |--------|-------------|
 | 1 | Chromosome |
 | 2 | Position (1-based) |
-| 3 | Reference base (`N` if `-f` is missing or lacks the contig) |
+| 3 | Reference base (`N` if `-f` is missing or lacks the contig; lower case where the FASTA is soft-masked) |
 | 4 | Read depth (= number of read symbols in column 5 = number of characters in column 6) |
 | 5 | Read bases |
 | 6 | Base qualities (ASCII - 33; BAQ-adjusted unless `-B`) |
@@ -130,8 +130,8 @@ samtools mpileup -f reference.fa -q 20 -Q 20 input.bam
 
 ### Maximum Depth (Critical Trap)
 ```bash
-# samtools mpileup default -d 8000 silently truncates targeted / mt-DNA / amplicon / UMI-deduped data
-# bcftools mpileup default -d 250 is far lower; set -d explicitly in whichever you use
+# The default -d of each tool (Pileup Options and Defaults) silently truncates targeted / mt-DNA / amplicon /
+# UMI-deduped data; bcftools' is far lower. Set -d explicitly in whichever you use
 samtools mpileup -f reference.fa -d 0 input.bam        # no cap
 samtools mpileup -f reference.fa -d 1000000 input.bam  # explicit high cap
 
@@ -224,19 +224,20 @@ When fragment length < 2 * read_length, R1 and R2 overlap. Both `samtools mpileu
 
 **Depth is `len(pileup_column.pileups)`, not `pileup_column.n`.** `n` counts reads before the base-quality filter and overlap removal, so it exceeds the mpileup depth (on the human test BAM it differs at 1087 of 1157 positions). `len(pileup_column.pileups)` (= `get_num_aligned()`) equals the `samtools mpileup` depth column when the parameters below match.
 
-pysam defaults equal `samtools mpileup -B` (no BAQ). To match `samtools mpileup -f ref.fa`, pass `stepper='samtools'` and `fastafile=pysam.FastaFile(ref)`; the default `stepper='all'` does not apply BAQ even with a `fastafile`.
+**BAQ is switched on by `fastafile`, not by the stepper.** Without `fastafile`, pysam defaults equal `samtools mpileup -B`. With `fastafile=pysam.FastaFile(ref)` BAQ is applied under either stepper (`'all'`, the default, or `'samtools'`) and the pileup equals `samtools mpileup -f ref.fa`; add `compute_baq=False` to get `-B` back. Checked position by position (depth and base counts) on 6 BAMs (human DNA, spliced RNA-seq, 1000G, ARTIC nanopore, 2 synthetic): 0 differing positions for each mapping in the table.
 
 | samtools mpileup | `bam.pileup()` argument | Note |
 |------------------|-------------------------|------|
-| `-f ref.fa` (BAQ on) | `stepper='samtools', fastafile=FastaFile(ref)` | without `-f`/`fastafile`, or with `-B`: leave defaults or `compute_baq=False` |
-| `-E` | `redo_baq=True` | with the two above |
+| `-f ref.fa` (BAQ on) | `fastafile=FastaFile(ref)` | either stepper |
+| `-B` | no `fastafile`, or `compute_baq=False` | |
+| `-E` | `fastafile=FastaFile(ref), redo_baq=True` | recomputes over an existing BQ tag; without it the tag is reused |
 | `-Q 13` (default) | `min_base_quality=13` (default) | pysam default matches |
 | `-q N` | `min_mapping_quality=N` | |
-| `-d N` (default 8000) | `max_depth=N` (default 8000) | `0` is not unlimited |
+| `-d N` (default 8000) | `max_depth=N` (default 8000) | `0` is not unlimited (see Maximum Depth) |
 | `-x` | `ignore_overlaps=False` | default `True` matches |
 | `-A` | `ignore_orphans=False` | default `True` matches |
-| `--ff` (default UNMAP,SECONDARY,QCFAIL,DUP) | `flag_filter=INT` (default 1796) | `--ff 0` = `flag_filter=0`; `stepper='nofilter'` also drops the orphan filter, so it is not `--ff 0` |
-| `--rf` | `flag_require=INT` | |
+| `--ff` | `flag_filter=INT` (default 1796 = the same four flags) | `--ff 0` = `flag_filter=0`; `stepper='nofilter'` also drops the orphan filter, so it is not `--ff 0` |
+| `--rf` | `flag_require=INT` | any of the bits set, like `--rf` |
 | `-C 50` | `adjust_capq_threshold=50` | |
 
 Each read in `pileup_column.pileups` needs three checks in this order: **`is_refskip` first**, because pysam sets `is_del=True` on spliced-read `N` skips as well; then `is_del`; else the base at `query_position`. Testing `is_del` first reports intron positions as deletions. `pileup_read.indel` is the length of the insertion (>0) or deletion (<0) that follows the base.
@@ -265,10 +266,10 @@ with pysam.AlignmentFile('input.bam', 'rb') as bam:
             elif pileup_read.is_del:
                 print('  Deletion')
             else:
+                aln = pileup_read.alignment
                 qpos = pileup_read.query_position
-                base = pileup_read.alignment.query_sequence[qpos]
-                qual = pileup_read.alignment.query_qualities[qpos]
-                print(f'  {base} (Q{qual})')
+                strand = '-' if aln.is_reverse else '+'
+                print(f'  {aln.query_name} {strand} {aln.query_sequence[qpos]} (Q{aln.query_qualities[qpos]})')
 ```
 
 ### Count Alleles at Position
@@ -304,6 +305,8 @@ counts = allele_counts('input.bam', 'chr1', 1000000 - 1)  # 1-based chr1:1,000,0
 print(counts)  # {'A': 45, 'G': 5}
 ```
 
+`examples/allele_counts.py` is the command-line version: `python allele_counts.py input.bam chr1:1000000` (1-based, MAPQ >= 20, base quality >= 20).
+
 ### Calculate Allele Frequency
 ```python
 def allele_frequency(bam_path, chrom, pos, **pileup_kw):
@@ -322,19 +325,24 @@ for base, f in sorted(freq.items(), key=lambda x: -x[1]):
 ### Find Variants in a Region
 ```python
 def find_variants(bam_path, ref_path, chrom, start, end, min_depth=10, min_alt_freq=0.1, **pileup_kw):
-    """SNVs against the reference in 0-based [start, end); indels are not reported. min_base_quality defaults to 20."""
+    """SNVs against the reference in 0-based [start, end); indels are not reported. min_base_quality defaults to 20.
+    Reference-N positions are skipped and read-base N is not counted as an allele (nor in the depth)."""
     variants = []
     pileup_kw.setdefault('min_base_quality', 20)
     with pysam.AlignmentFile(bam_path, 'rb') as bam, pysam.FastaFile(ref_path) as ref:
         for pileup_column in bam.pileup(chrom, start, end, truncate=True, **pileup_kw):
             pos = pileup_column.pos
             ref_base = ref.fetch(chrom, pos, pos + 1).upper()
+            if ref_base == 'N':
+                continue
             alleles = Counter()
             for pileup_read in pileup_column.pileups:
                 if pileup_read.is_refskip or pileup_read.is_del:
                     continue
                 qpos = pileup_read.query_position
-                alleles[pileup_read.alignment.query_sequence[qpos].upper()] += 1
+                base = pileup_read.alignment.query_sequence[qpos].upper()
+                if base != 'N':
+                    alleles[base] += 1
             total = sum(alleles.values())
             if total < min_depth:
                 continue
@@ -360,6 +368,35 @@ with pysam.AlignmentFile('input.bam', 'rb') as bam:
 ### Generate Pileup Text
 ```python
 import pysam
+
+def indel_text(aln, ref, chrom, pos):
+    """Markers such as '+2AC-3CGT' that mpileup prints after aln's base at 0-based pos, read from the CIGAR
+    (pileup_read.indel holds only one of two adjacent I/D events)."""
+    ops = []
+    for op, n in aln.cigartuples:  # samtools treats adjacent identical ops as one
+        if ops and ops[-1][0] == op:
+            ops[-1] = (op, ops[-1][1] + n)
+        else:
+            ops.append((op, n))
+    r, q = aln.reference_start, 0
+    for i, (op, n) in enumerate(ops):
+        if op in (0, 2, 3, 7, 8):  # M D N = X consume the reference
+            if r <= pos < r + n:
+                break
+            r += n
+        if op in (0, 1, 4, 7, 8):  # M I S = X consume the read
+            q += n
+    if pos != r + n - 1:  # markers follow the last reference base of an op
+        return ''
+    if op in (0, 7, 8):
+        q += n
+    rest, s = ops[i + 1:], ''
+    if rest and rest[0][0] == 1:  # insertion, possibly followed by a deletion
+        s += f'+{rest[0][1]}' + aln.query_sequence[q:q + rest[0][1]]
+        rest = rest[1:]
+    if rest and rest[0][0] == 2:
+        s += f'-{rest[0][1]}' + ref.fetch(chrom, pos + 1, pos + 1 + rest[0][1])
+    return s.lower() if aln.is_reverse else s.upper()
 
 def pileup_text(bam_path, ref_path, chrom, start, end, **pileup_kw):
     """Yield 6-column `samtools mpileup -f ref` rows for 0-based [start, end), including ^ $ +N -N and qualities.
@@ -388,12 +425,7 @@ def pileup_text(bam_path, ref_path, chrom, start, end, **pileup_kw):
                         s += ',' if rev else '.'
                     else:
                         s += base.lower() if rev else base.upper()
-                    if pileup_read.indel > 0:
-                        ins = aln.query_sequence[qpos + 1:qpos + 1 + pileup_read.indel]
-                        s += f'+{pileup_read.indel}' + (ins.lower() if rev else ins.upper())
-                    elif pileup_read.indel < 0:
-                        dele = ref.fetch(chrom, pos + 1, pos + 1 - pileup_read.indel)
-                        s += f'{pileup_read.indel}' + (dele.lower() if rev else dele.upper())
+                s += indel_text(aln, ref, chrom, pos)
                 if pileup_read.is_tail:
                     s += '$'
                 bases.append(s)
@@ -414,7 +446,7 @@ for row in pileup_text('input.bam', 'reference.fa', 'chr1', 1000000, 1000100):
 | `-q INT` | Min mapping quality | 0 / 0 | Aligner-dependent semantics |
 | `-Q INT` | Min base quality (after BAQ) | **13 / 1** | Silently drops low-quality bases, and low-quality `*` deletion slots; `-Q 0` with default overlap detection has subtle behavior |
 | `--ff FLAGS` (bcftools `--ns`) | Skip reads with any of these flags | **UNMAP,SECONDARY,QCFAIL,DUP** | Pre-flagged duplicates vanish from depth; `--ff 0` keeps all mapped reads |
-| `--rf FLAGS` (bcftools `--nu`) | Keep only reads with any of these flags set | none | |
+| `--rf FLAGS` (bcftools `--lu`) | Keep only reads with any of these flags set | none | bcftools `--nu` is not this: it skips a read missing any listed bit, i.e. keeps only reads with **all** bits |
 | `-d INT` | Max depth per file | **8000 / 250** | Silently truncates; `-d 0` = no cap |
 | `-B` | Disable BAQ | BAQ on with `-f` | Often correct for long reads, SV, viral, consensus; cannot combine with `-E` |
 | `-A` | Count anomalous pairs (paired, not proper) | dropped | Required for amplicon (reads are by design not properly paired) |
