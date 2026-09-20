@@ -4,12 +4,6 @@
 
 This skill calculates statistical metrics for sequence alignments including identity, conservation, entropy, and substitution patterns. These metrics are essential for assessing alignment quality, identifying conserved regions, and understanding evolutionary relationships.
 
-## Prerequisites
-
-```bash
-pip install biopython numpy
-```
-
 ## Quick Start
 
 Tell your AI agent what you want to do:
@@ -52,31 +46,12 @@ Tell your AI agent what you want to do:
 
 > "What are the most common substitution types?"
 
-> "Build a substitution matrix from this alignment"
-
 ## What the Agent Will Do
 
-1. Load the alignment file
+1. Load the alignment file and normalise gap glyphs (`.` to `-`) and case
 2. Calculate requested metrics (identity, conservation, entropy, etc.)
 3. Summarize results (averages, distributions, extremes)
 4. Identify notable patterns (highly conserved/variable regions)
 5. Output tables, matrices, or profiles as appropriate
 
-## Key Metrics Explained
-
-| Metric | What It Measures | Interpretation |
-|--------|------------------|----------------|
-| Identity | Exact matches | Higher = more similar |
-| Conservation | Most common residue frequency | Higher = less variable |
-| Entropy | Variability | Lower = more conserved |
-| Information Content | Constraint level | Higher = more constrained |
-
-## Tips
-
-- Percent identity has **four common definitions** (different denominators) producing up to 11.5% difference on the same alignment. Always specify which method: PID1 (gap-inclusive), PID2 (aligned pairs only), PID3 (shorter sequence), PID4 (mean length, recommended for evolutionary studies)
-- Conservation and entropy are inversely related; both should be computed ignoring gap characters for interpretable results
-- For proteins, use BLOSUM62 for scoring; for DNA, use simple match/mismatch
-- Gap-rich columns often indicate alignment uncertainty or guide tree artifacts rather than true biology
-- For critical analyses (phylogenetics, selection), quantify alignment confidence per column with GUIDANCE2 or MUSCLE5 ensemble before inference
-- Alignment uncertainty propagates to downstream results: different aligners can support different tree topologies; always report alignment method and consider sensitivity analysis
-- Average pairwise identity <25% (protein) signals the twilight zone where alignment reliability is questionable and structural methods should be considered
+The definitions, thresholds, caveats and related Skills are in `SKILL.md` (Percent Identity Definitions, Alignment Quality Assessment, Common Errors, Related Skills).

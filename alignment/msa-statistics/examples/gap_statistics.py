@@ -1,10 +1,10 @@
 '''Analyze gap distribution in alignment'''
-# Reference: biopython 1.83+ | Verify API if version differs
+# Reference: biopython 1.83+ (checked on 1.88) | Verify API if version differs
 
-from Bio import AlignIO
+from msa_utils import example_path, load_alignment
 
 if __name__ == '__main__':
-    alignment = AlignIO.read('alignment.fasta', 'fasta')
+    alignment = load_alignment(example_path('example_protein.fasta'))
     num_seqs = len(alignment)
     num_cols = alignment.get_alignment_length()
 
