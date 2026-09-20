@@ -102,7 +102,7 @@ rownames(design) <- NULL
 stopifnot(identical(design$sampleID, ids))
 nrep <- table(design$condition)
 if (length(nrep) != 2 || min(nrep) < 2) stop('need exactly 2 conditions with >= 2 replicates each; got: ', paste(names(nrep), nrep, collapse = ', '))
-if (min(nrep) < 3) warning('fewer than 3 replicates per condition: expect low power')
+if (min(nrep) < 3) warning('fewer than 3 replicates per condition: raw-count calls are not reliable (label-shuffled splits of a real 2 v 2 set were called almost as often as the true one); see SKILL.md "Null check"')
 print(design)
 
 aSwitchList <- importRdata(isoformCountMatrix = salmonQuant$counts, isoformRepExpression = salmonQuant$abundance,
@@ -120,6 +120,7 @@ aSwitchList <- if (max(nrep) > 5) {
 f <- aSwitchList$isoformFeatures
 sig <- f[!is.na(f$isoform_switch_q_value) & f$isoform_switch_q_value < 0.05 & abs(f$dIF) > 0.1, ]
 cat(sprintf('\nSignificant switching isoforms (q < 0.05, |dIF| > 0.1): %d in %d genes\n', nrow(sig), length(unique(sig$gene_id))))
+if (!demo) cat('Before trusting these calls, run the label-permutation check (SKILL.md "Null check").\n')
 write.csv(sig[!duplicated(sig$isoform_id), c('gene_id', 'gene_name', 'isoform_id', 'IF1', 'IF2', 'dIF', 'isoform_switch_q_value')],
           file.path(out_dir, 'significant_switches.csv'), row.names = FALSE)
 if (nrow(sig) == 0) {

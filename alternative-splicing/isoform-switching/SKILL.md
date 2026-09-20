@@ -8,7 +8,7 @@ license: MIT
 
 ## Version Compatibility
 
-Checked 2026-09 on R 4.4.3 / Bioconductor 3.20: IsoformSwitchAnalyzeR 2.6.0, DRIMSeq 1.34.0, DEXSeq 1.52.0, satuRn 1.14.0, stageR 1.28.0, fishpond 2.12.0, tximport 1.34.0, tximeta 1.24.0, on Salmon 2.7.0 output. CPC2 (standalone), HMMER 3.4 with Pfam-A (2026-09 release). The Han 2025 IsoformSwitchAnalyzeR v2 preprint describes an auto-selecting DTU wrapper and long-read/single-cell modes; **2.6.0 has neither** (call the DEXSeq or satuRn test explicitly, see below), and no newer release was available to check.
+Checked 2026-09 on R 4.4.3 / Bioconductor 3.20: IsoformSwitchAnalyzeR 2.6.0, DRIMSeq 1.34.0, DEXSeq 1.52.0, satuRn 1.14.0, stageR 1.28.0, fishpond 2.12.0, tximport 1.34.0, tximeta 1.24.0, on Salmon 2.7.0 output. CPC2 (standalone), HMMER 3.4 with Pfam-A (2026-09 release). The IsoformSwitchAnalyzeR v2 paper (Han et al. 2026, *NAR Genom Bioinform*; preprint 2025) says v2 uses DEXSeq for smaller studies and satuRn for larger ones and for single-cell data, and imports quantifications from long-read and single-cell pipelines. **2.6.0 does not choose the test for you** (it only warns; call the DEXSeq or satuRn test explicitly, see below), and no newer release was available to check whether a later one does.
 
 ```r
 BiocManager::install(c('IsoformSwitchAnalyzeR', 'DRIMSeq', 'DEXSeq', 'satuRn', 'stageR', 'fishpond', 'tximeta', 'tximport'))
@@ -87,11 +87,14 @@ salmonQuant <- importIsoformExpression(
 )
 
 # Join the design to the quantification BY SAMPLE NAME. importIsoformExpression sorts samples
-# alphabetically, so a hand-typed condition vector silently mislabels samples (audit: on SRR-style IDs
-# it recovered 0/20 planted switches with no warning; joined by name, 20/20).
+# alphabetically, so a hand-typed condition vector silently mislabels samples (on SRR-style IDs it
+# recovered 0/20 planted switches with no warning; joined by name, 20/20).
 meta <- read.delim('sample_metadata.tsv')     # columns: sample_id (= quant sub-directory name), condition, [batch]
 ids <- setdiff(colnames(salmonQuant$counts), 'isoform_id')
-stopifnot(setequal(ids, meta$sample_id), !anyDuplicated(meta$sample_id))
+if (!setequal(ids, meta$sample_id))
+    stop('sample IDs differ between quantification and metadata.\n  only in quant: ', paste(setdiff(ids, meta$sample_id), collapse = ', '),
+         '\n  only in metadata: ', paste(setdiff(meta$sample_id, ids), collapse = ', '))
+stopifnot('duplicated sample_id in metadata' = !anyDuplicated(meta$sample_id))
 design <- data.frame(sampleID = ids, condition = meta$condition[match(ids, meta$sample_id)])
 # design$batch <- meta$batch[match(ids, meta$sample_id)]   # extra columns = covariates, see below
 print(table(design$condition))
@@ -135,13 +138,13 @@ sum(f$isoform_switch_q_value < 0.05 & abs(f$dIF) > 0.1, na.rm = TRUE)   # 0 -> s
 - `removeSingleIsoformGenes = TRUE` — drop genes with only one detectable isoform (cannot have DTU)
 - `keepIsoformInAllConditions = TRUE` — require expression across all conditions
 
-**Replicates and covariates.** IsoformSwitchAnalyzeR stops on 1 replicate per condition ("A statistical test cannot be performed without replicates"); 2 per condition runs (real chrX 2 v 2, below) but is underpowered, so plan >=3. Any extra `designMatrix` column is treated as a covariate: on the audit's batch-confounded synthetic set a batch column removed the batch artefacts (19/30 artefact genes called without it, 0 with it) at no cost to the 20/20 planted switches; a covariate identical to condition stops with "not full rank", and a constant one with "Contain constant information". With a covariate the reported dIF is no longer the plain mean of per-sample isoform fractions (up to 0.08 from a hand computation on the synthetic 3 v 3 set with a batch column; 7e-5 without), consistent with an IF adjusted for the covariate (not traced in the source).
+**Replicates and covariates.** IsoformSwitchAnalyzeR stops on 1 replicate per condition ("A statistical test cannot be performed without replicates"). 2 per condition runs but is not trustworthy on the raw-count route (see "Count route": label-shuffled 2 v 2 splits of real data are called almost as often as the true split); plan >=3, ideally >=5. Any extra `designMatrix` column is treated as a covariate: on a batch-confounded synthetic set a batch column removed the batch artefacts (19/30 artefact genes called without it, 0 with it) at no cost to the 20/20 planted switches; a covariate identical to condition stops with "not full rank", and a constant one with "Contain constant information". `importRdata(detectUnwantedEffects = TRUE)` (the default) also runs `sva` and adds any surrogate variables it finds to the model (`sv1` appeared for one of the label-shuffled chrX 2 v 2 splits; check `colnames(aSwitchList$designMatrix)`). Per `?importRdata` and the package NEWS, abundance, IF and dIF are then corrected for these covariates (counts stay unmodified but the test includes them), so with a covariate the reported dIF is no longer the plain mean of per-sample isoform fractions (up to 0.08 from a hand computation on the synthetic 3 v 3 set with a batch column; 7e-5 without).
 
-For long-read data pass the long-read transcript count matrix to `importRdata` directly (audit: count-only import recovered 20/20 planted switches) — no Salmon EM uncertainty.
+For long-read data pass the long-read transcript count matrix to `importRdata` directly (a count-only import recovered 20/20 planted switches on the synthetic set) — no Salmon EM uncertainty.
 
 ### Count route (`calculateCountsFromAbundance`)
 
-`importIsoformExpression()` derives counts from abundance by default (`calculateCountsFromAbundance = TRUE` = tximport `scaledTPM`); the package vignette recommends this because it carries Salmon's bias correction into the counts. The tests use those counts, while dIF comes from the abundance in either route. **On real data this default lost every call, so this Skill uses raw NumReads (`FALSE`) and asks you to compare when the result matters.**
+`importIsoformExpression()` derives counts from abundance by default (`calculateCountsFromAbundance = TRUE` = tximport `scaledTPM`); the package vignette recommends this because it carries Salmon's bias correction into the counts. The tests use those counts, while dIF comes from the abundance in either route. **On real chrX data this default called nothing in every label split (below), so it cannot be validated there. This Skill uses raw NumReads (`FALSE`), which does find switches but is not validated either: label-shuffled splits of the same data are called almost as often as the true one. Read "Null check" before trusting a call.**
 
 Real chrX RNA-seq, 2 GBR v 2 YRI (nf-core rnasplice, Salmon 2.7.0, GRCh37), `isoformSwitchTestDEXSeq`, switching isoform = q < 0.05 and |dIF| > 0.1:
 
@@ -152,10 +155,57 @@ Real chrX RNA-seq, 2 GBR v 2 YRI (nf-core rnasplice, Salmon 2.7.0, GRCh37), `iso
 | default (`scaledTPM`) | 0 / 0 | 1 |
 | tximport `dtuScaledTPM` | 0 / 0 | 1 |
 
-- **Cause (consistent with, not proven by, the runs below):** scaledTPM counts are proportional to TPM, i.e. each isoform's counts are divided by its length. Here the factor median(length)/length ranges 0.019-205 across the 5,895 isoforms, so short isoforms are inflated and stop behaving like counts, and DEXSeq's isoform-versus-rest test degrades. Multiplying the raw counts by the same per-isoform factors reproduced the result (0 switches, RPL10 q = 1); multiplying by the same factors shuffled across isoforms did not (34 switches).
+- **Cause (consistent with, not proven by, the runs below):** scaledTPM counts are proportional to TPM, i.e. each isoform's counts are divided by its length. The factor median(length)/length ranges 0.019-576 across the 5,895 isoforms with `EffectiveLength` (0.023-18 with `Length`), so short isoforms are inflated and stop behaving like counts, and DEXSeq's isoform-versus-rest test degrades. Multiplying the raw counts by either factor (`Length` or `EffectiveLength`) reproduced the result (0 switches, RPL10 q = 1); multiplying by the same factors shuffled across isoforms did not (34 switches / 27 genes with `Length`, 31 / 23 with `EffectiveLength`). satuRn was not compared across routes on real data; the manual-pipeline route numbers are under "Manual DTU Pipeline".
 - The synthetic planted set has near-uniform isoform lengths and recovered 20/20 with either route, so a clean simulation will not reveal the problem.
-- The manual DRIMSeq/DEXSeq pipeline shows the same direction (13 genes with raw or `lengthScaledTPM` counts, 2 with `scaledTPM`; see below). satuRn was not compared across routes on real data.
-- Practical rule: run raw counts; if you also try `TRUE`, compare the two switch lists and inspect the top switches (`switchPlot`) before trusting either. A large gap means the count route, not biology, drove the result.
+
+### Null check: shuffle the condition labels
+
+The four chrX samples are 2 GBR + 2 YRI. Splits that put one GBR and one YRI in each group carry no population signal, so any calls there are individual-level differences that the n = 2 dispersion estimate does not absorb. Genes with a switching isoform (q < 0.05, |dIF| > 0.1), raw counts unless stated:
+
+| Split | ISAR DEXSeq | ISAR default route | manual DEXSeq gene q < 0.05 | manual DRIMSeq | manual both | ISAR calls also DEXSeq-confirmed |
+|-------|-------------|--------------------|-----------------------------|----------------|-------------|----------------------------------|
+| true GBR v YRI | 20 | 0 | 13 | 11 | 7 | 12 |
+| mixed 1 | 11 | 0 | 0 | 4 | 0 | 0 |
+| mixed 2 | 15 | 0 | 4 | 3 | 1 | 4 |
+
+- **The raw route is not validated at n = 2.** The mixed splits are called at 55% and 75% of the true split's count, and only 1 of the 20 true-split genes recurs in either. No cutoff separates them cleanly (genes, true / mixed 1 / mixed 2: q < 0.01: 12 / 3 / 7; q < 1e-4: 8 / 2 / 5; q < 1e-6: 5 / 2 / 1; |dIF| > 0.3: 17 / 7 / 10; a higher gene-TPM or isoform-TPM filter changed nothing). Report a 2 v 2 list as exploratory. The default route's zeros show only that it has no power on this data, not that it is the safe choice.
+- **What reduced it here:** keep only calls that the manual gene-level DEXSeq test above also makes (12 of 20 true-split genes, 0 and 4 of the mixed-split calls; DRIMSeq as well: 6, 0, 1). It cuts the shuffled calls but does not remove them (4 of 15 remain), and the counts are from one 4-sample data set.
+- **Run the permutation check on every real data set** (this block reuses `salmonQuant` and `design` from the workflow; each call repeats the import, about 20-40 s on chrX). Trust an observed list only when it is far above every permuted count. Group sizes of 2 give only two alternative splits (no p-value); 3 v 3 gives nine, 6 v 6 hundreds. Splits that share half of the true split keep part of the signal, so they overstate the null (conservative).
+
+```r
+# Same import, filter and test as the workflow, on any design; returns the genes called
+call_genes <- function(design) {
+    sl <- importRdata(isoformCountMatrix = salmonQuant$counts, isoformRepExpression = salmonQuant$abundance,
+                      designMatrix = design, isoformExonAnnoation = 'annotation.gtf', isoformNtFasta = 'transcripts.fa',
+                      addAnnotatedORFs = FALSE, showProgress = FALSE, quiet = TRUE)
+    sl <- preFilter(sl, geneExpressionCutoff = 1, isoformExpressionCutoff = 0, IFcutoff = 0.01,
+                    removeSingleIsoformGenes = TRUE, keepIsoformInAllConditions = TRUE, quiet = TRUE)
+    sl <- if (max(table(design$condition)) > 5) {
+        isoformSwitchTestSatuRn(sl, reduceToSwitchingGenes = FALSE, alpha = 0.05, dIFcutoff = 0.1, diagplots = FALSE, quiet = TRUE)
+    } else {
+        isoformSwitchTestDEXSeq(sl, reduceToSwitchingGenes = FALSE, alpha = 0.05, dIFcutoff = 0.1, quiet = TRUE)
+    }
+    f <- sl$isoformFeatures
+    unique(f$gene_id[!is.na(f$isoform_switch_q_value) & f$isoform_switch_q_value < 0.05 & abs(f$dIF) > 0.1])
+}
+
+# Shuffled labels that keep the group sizes and share only the chance overlap with the true split
+lab <- design$condition; n <- length(lab); in1 <- lab == lab[1]; k <- sum(in1)
+canon <- function(v) paste(v == v[1], collapse = '')          # a split and its mirror image are the same split
+seen <- canon(in1); perms <- list(); set.seed(1)
+for (i in 1:5000) {
+    if (length(perms) >= 10) break
+    p <- sample(lab); key <- canon(p == lab[1])
+    if (abs(sum(p == lab[1] & in1) - k * k / n) <= 0.5 && !key %in% seen) { seen <- c(seen, key); perms[[length(perms) + 1]] <- p }
+}
+observed <- length(call_genes(design))
+permuted <- sapply(perms, function(p) { d <- design; d$condition <- p; tryCatch(length(call_genes(d)), error = function(e) NA) })
+cat('observed', observed, 'genes; label-permuted:', permuted, '\n')
+```
+
+Checked with this block: real chrX 2 v 2 observed 20, permuted 15 and 11. Synthetic 6 v 6 (satuRn branch, batch covariate kept): observed 24 (20/20 planted, 0 null-type genes), permuted 0 0 0 1 0 0 0 0 0 0 over 10 splits. Synthetic 3 v 3 (DEXSeq): observed 25 (20/20 planted, 2 null-type genes), permuted 0 2 0 0 0 0 0 0 0 over the 9 other splits.
+
+**Recommended route:** raw NumReads (`FALSE`); at least 3 replicates per condition, ideally 5 or more; run the permutation check; confirm calls with the manual gene-level test; if you also try `TRUE`, compare the two switch lists and inspect the top switches (`switchPlot`). A large gap between routes means the count route, not biology, drove the result.
 
 ## Functional Consequence Annotation
 
@@ -166,7 +216,7 @@ Real chrX RNA-seq, 2 GBR v 2 YRI (nf-core rnasplice, Salmon 2.7.0, GRCh37), `iso
 Order (each step needs the previous one; verified on a synthetic GTF without CDS and on the real chrX GTF with CDS):
 
 1. **ORFs first.** `importRdata(addAnnotatedORFs = TRUE)` loads CDS from a GTF that has CDS lines (`orf_origin` = Annotation). Only if the GTF has no CDS (or isoforms are novel) run `analyzeORF(aSwitchList, orfMethod = 'longest', genomeObject = NULL)`. `extractSequence()` and `analyzePFAM()` stop without ORFs ("Please run the 'addORFfromGTF()' ... function(s) to detect ORFs").
-2. **Do not run `analyzeORF()` over annotated ORFs** (for novel isoforms the package vignette adds `addORFfromGTF()` + `analyzeNovelIsoformORF()`; not run here). It overwrites all of them (real chrX: `orf_origin` Annotation 1738 -> Predicted 1738) and worsens the NMD call: PTC flag versus Ensembl `nonsense_mediated_decay` biotype was sensitivity 0.96 / specificity 1.00 with annotated ORFs and 0.64 / 0.89 after `analyzeORF('longest')`.
+2. **Do not run `analyzeORF()` over annotated ORFs** (for novel isoforms the package vignette adds `addORFfromGTF()` + `analyzeNovelIsoformORF()`; not run here). It overwrites all of them (real chrX: `orf_origin` Annotation 1738 -> Predicted 1738) and worsens the NMD call: PTC flag versus Ensembl `nonsense_mediated_decay` biotype was sensitivity 0.96 / specificity 1.00 with annotated ORFs and 0.64 / 0.95 after `analyzeORF('longest')`.
 3. `analyzeAlternativeSplicing(aSwitchList, onlySwitchingGenes = TRUE)` — needed for `intron_retention`.
 4. `extractSequence(aSwitchList, onlySwitchingGenes = TRUE, pathToOutput = 'sequences/', writeToFile = TRUE)` (create the directory first) writes `isoformSwitchAnalyzeR_isoform_nt.fasta` and `..._AA.fasta`.
 5. Run the annotators (table) and import each result.
@@ -196,7 +246,7 @@ aSwitchList <- analyzeSwitchConsequences(
 
 | External tool | Purpose | Consequence types it enables | Status |
 |----------------|---------|------------------------------|--------|
-| CPC2 (standalone, Python 2 code) | Coding vs non-coding | `coding_potential` | Ran in the audit on `isoformSwitchAnalyzeR_isoform_nt.fasta`: `python CPC2.py -i <nt.fasta> -o cpc2_result` (needs a Python 2.7 env and its bundled libsvm built) |
+| CPC2 (standalone, Python 2 code) | Coding vs non-coding | `coding_potential` | Ran on `isoformSwitchAnalyzeR_isoform_nt.fasta`: `python CPC2.py -i <nt.fasta> -o cpc2_result` (needs a Python 2.7 env and its bundled libsvm built) |
 | Pfam: `hmmscan --cut_ga --domtblout` against Pfam-A, then `examples/hmmscan_to_pfamscan.py` | Protein domains | `domains_identified` | Ran (HMMER 3.4 output; below) |
 | SignalP 6.0 | Signal peptides | `signal_peptide_identified` | Licence-gated, **not run**; import per `?analyzeSignalP` |
 | IUPred2A or NetSurfP-2 | Intrinsically disordered regions | `IDR_identified`; `IDR_type` needs IUPred2A | Licence/registration-gated, **not run**; read from source: `IDR_identified` needs `analyzeIUPred2A()` or `analyzeNetSurfP2()` |
@@ -296,7 +346,16 @@ stageRObj <- stageWiseAdjustment(stageRObj, method = 'dtu', alpha = 0.05)
 results <- getAdjustedPValues(stageRObj, order = FALSE, onlySignificantGenes = FALSE)   # geneID, txID, gene, transcript
 ```
 
-Checked (synthetic 6 v 6, planted truth): `perGeneQValue` < 0.05 in 27 genes = 20/20 planted + 1 null-gene false positive + 5 planted 0.15-shift and 1 planted 0.06-shift genes; DRIMSeq (`dmPrecision`/`dmFit`/`dmTest`) called 27 genes, Jaccard 0.93 with DEXSeq; stageR confirmed the truly switching transcript (poison B or skip C) in 20/20. Control-versus-control split: 2 gene calls of 291. Real chrX 2 v 2 (same filter): DEXSeq 13 genes with raw or `lengthScaledTPM` counts and 2 with `scaledTPM`; DRIMSeq 11 / 11 / 7; DEXSeq and DRIMSeq overlap 7 genes with raw counts.
+Confirm IsoformSwitchAnalyzeR calls (`aSwitchList` from the workflow) with the gene-level test above; see "Count route" for why:
+
+```r
+f <- aSwitchList$isoformFeatures
+hit <- unique(f$isoform_id[!is.na(f$isoform_switch_q_value) & f$isoform_switch_q_value < 0.05 & abs(f$dIF) > 0.1])
+called <- unique(tx2gene$gene[match(hit, tx2gene$tx)])            # gene IDs of the tx2gene table, not gene names
+confirmed <- intersect(called, names(qval)[!is.na(qval) & qval < 0.05])
+```
+
+Checked (synthetic 6 v 6, planted truth): `perGeneQValue` < 0.05 in 27 genes = 20/20 planted + 1 null-gene false positive + 5 planted 0.15-shift and 1 planted 0.06-shift genes; DRIMSeq (`dmPrecision`/`dmFit`/`dmTest`) called 27 genes, Jaccard 0.93 with DEXSeq; stageR confirmed the truly switching transcript (poison B or skip C) in 20/20. Control-versus-control split: 2 gene calls of 291. Real chrX 2 v 2 (same filter; raw / `lengthScaledTPM` / `scaledTPM` counts): DEXSeq 13 / 13 / 2 genes; DRIMSeq 11 / 11 / 7; DEXSeq and DRIMSeq overlap 7 genes with raw counts. Label-shuffled splits: see "Null check".
 
 **Importing with tximeta instead.** `tximeta(coldata)` needs a linked transcriptome that matches the Salmon index; on Salmon 2.7.0 with tximeta 1.24.0 it did not match ("couldn't find matching transcriptome") and returned an empty `rowData`, so `rowData(se)$gene_id` / `tx_id` could **not** be run here. Simulated only: `gene_id` is a list-like column, so `unlist()` it before building the `data.frame` above. `tximeta(coldata, skipMeta = TRUE)` works (used for swish below) but carries no gene mapping.
 
@@ -332,7 +391,7 @@ dte_results <- as.data.frame(mcols(y))     # log2FC, pvalue, qvalue, meanInfRV
 sig <- subset(dte_results, qvalue < 0.05)
 ```
 
-Checked on real chrX Gibbs samples (fishpond 2.12.0, 2 v 2): 391 transcripts tested, 6 at q < 0.05 (top ENST00000380861, log2FC -1.45 with NumReads 75/63 vs 9/34); with a character `condition` swish stops with "is.factor(condition) is not TRUE". In the audit, on a synthetic 6 v 6 set with planted DTE, swish called 33/35 planted up-transcripts (all log2FC > 0) with 29/848 false positives.
+Checked on real chrX Gibbs samples (fishpond 2.12.0, 2 v 2): 391 transcripts tested, 6 at q < 0.05 (top ENST00000380861, log2FC -1.45 with NumReads 75/63 vs 9/34); with a character `condition` swish stops with "is.factor(condition) is not TRUE". On a synthetic 6 v 6 set with planted DTE, swish called 33/35 planted up-transcripts (all log2FC > 0) with 29/848 false positives.
 
 **`infRV`** (inferential relative variance) is a per-feature uncertainty diagnostic (`meanInfRV`); high-infRV transcripts are unreliable and can be filtered before testing (e.g. `y[mcols(y)$meanInfRV < 1, ]`, choose the cut from `summary(mcols(y)$meanInfRV)`; median 0.69 on the chrX set). Critical for genes with many similar isoforms (TTN, MAPT, NEFM) where Salmon's EM is uncertain.
 
@@ -352,7 +411,7 @@ Checked on real chrX Gibbs samples (fishpond 2.12.0, 2 v 2): 391 transcripts tes
 
 **Trigger:** `dmFilter` thresholds that do not fit the cohort.
 
-**Mechanism:** `dmFilter`'s own defaults are all 0 (no filtering; DRIMSeq 1.34.0). The values in the manual pipeline are suggestions scaled to group size: features need >= 10 counts in `n_small` samples and proportion >= 0.1 in `n_small` samples. `min_samps_*` larger than the number of samples stops with "min_samps_gene_expr <= ncol(x@counts) is not TRUE", and thresholds nothing passes with "!No genes left after filtering!".
+**Mechanism:** `dmFilter`'s own defaults are all 0 (no filtering; DRIMSeq 1.34.0). The values in the manual pipeline are suggestions scaled to group size: features need >= 10 counts in `n_small` samples and proportion >= 0.1 in `n_small` samples. `min_samps_*` larger than the number of samples stops with "min_samps_gene_expr >= 0 && min_samps_gene_expr <= ncol(x@counts) is not TRUE", and thresholds nothing passes with "!No genes left after filtering!".
 
 **Symptom:** Most candidate genes filtered out; few testable genes.
 
@@ -446,7 +505,7 @@ Messages quoted from runs (IsoformSwitchAnalyzeR 2.6.0, DRIMSeq 1.34.0, fishpond
 | `The 'removeNoncodinORFs' argument must be supplied` | `analyzeCPC2()` called without it | Pass `FALSE` (see above) |
 | `analyzePFAM: more columns than column names` | Raw `hmmscan --domtblout` file | Convert with `examples/hmmscan_to_pfamscan.py` |
 | `The file(s) 'pathToSignalPresultFile' points to does not exist` (also `pathToIUPred2AresultFile`) | Annotator output missing or wrong path | Check the path; run the annotator |
-| `dmFilter: !No genes left after filtering!` / `min_samps_gene_expr <= ncol(x@counts) is not TRUE` | Thresholds nothing passes / more samples than exist | Scale thresholds to the design |
+| `dmFilter: !No genes left after filtering!` / `min_samps_gene_expr >= 0 && min_samps_gene_expr <= ncol(x@counts) is not TRUE` | Thresholds nothing passes / more samples than exist | Scale thresholds to the design |
 | `swish: is.factor(condition) is not TRUE` | Character condition column | `factor()` it |
 | `scaleInfReps: there are no inferential replicates in the assays of 'y'` | Salmon run without `--numGibbsSamples` | Re-run Salmon with `--numGibbsSamples 20` |
 | `unable to find an inherited method for function 'samples' for signature 'object = "dmDSdata"'` | DEXSeq attached after DRIMSeq masks `samples()` | `DRIMSeq::samples(d)` |
@@ -472,7 +531,7 @@ Messages quoted from runs (IsoformSwitchAnalyzeR 2.6.0, DRIMSeq 1.34.0, fishpond
 
 ## References
 
-- Han et al 2025 *bioRxiv* 10.64898/2025.12.08.693027 - IsoformSwitchAnalyzeR v2
+- Han et al 2026 *NAR Genom Bioinform* 8(3):lqag098, 10.1093/nargab/lqag098 (preprint *bioRxiv* 10.64898/2025.12.08.693027) - IsoformSwitchAnalyzeR v2
 - Vitting-Seerup & Sandelin 2019 *Bioinformatics* 35:4469-4471 - IsoformSwitchAnalyzeR original
 - Anders et al 2012 *Genome Res* - DEXSeq
 - Nowicka & Robinson 2016 *F1000Research* - DRIMSeq
