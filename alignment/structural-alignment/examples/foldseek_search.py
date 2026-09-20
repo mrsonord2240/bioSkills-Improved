@@ -3,9 +3,10 @@
 Returns best hits with TM-score, e-value, and structural alignment metadata.
 --alignment-type 2 (3Di+AA Gotoh local) is Foldseek's default and is the right
 choice for the same-fold regime; --alignment-type 1 (TMalign) refines top hits
-with a full global TM-score at higher cost.
+with a full global TM-score at higher cost. E-values are not meaningful under type 1
+(true homologs report 0.88-0.99), so confident_hits() filters on alntmscore there.
 '''
-# Reference: foldseek 8+ | Verify CLI flags if version differs
+# Reference: foldseek 8+ (checked on 10.941cd33) | Verify CLI flags if version differs
 
 import subprocess
 import csv
@@ -36,9 +37,19 @@ def parse_results(output_m8):
             hits.append(hit)
     return hits
 
+def confident_hits(hits, alignment_type=2):
+    '''alnTM > 0.5 always; also E-value < 1e-3 for alignment type 2 (E-value is uninformative under type 1).'''
+    keep = [h for h in hits if not math.isnan(h['alntmscore']) and h['alntmscore'] > 0.5]
+    if alignment_type != 1:
+        keep = [h for h in keep if h['evalue'] < 1e-3]
+    return keep
+
 if __name__ == '__main__':
-    foldseek_search('query.pdb', '/path/to/afdb', 'result.m8')
+    alignment_type, max_seqs = 2, 200
+    foldseek_search('query.pdb', '/path/to/afdb', 'result.m8', alignment_type=alignment_type, max_seqs=max_seqs)
     hits = parse_results('result.m8')
+    if len(hits) >= max_seqs:
+        print(f'Warning: {len(hits)} rows = the --max-seqs cap; the database has more hits. Raise max_seqs to count them all.')
 
     print('Top 20 Foldseek hits:')
     print(f'{"target":<25} {"evalue":>10} {"alnTM":>7} {"qTM":>7} {"lddt":>6} {"%id":>5}')
@@ -46,5 +57,6 @@ if __name__ == '__main__':
         print(f'{hit["target"][:25]:<25} {hit["evalue"]:>10.2e} {hit["alntmscore"]:>7.3f} '
               f'{hit["qtmscore"]:>7.3f} {hit["lddt"]:>6.3f} {hit["pident"]:>5.1f}')
 
-    confident_homologs = [h for h in hits if not math.isnan(h['alntmscore']) and h['alntmscore'] > 0.5 and h['evalue'] < 1e-3]
-    print(f'\nConfident structural homologs (alnTM > 0.5, e-value < 1e-3): {len(confident_homologs)}')
+    confident_homologs = confident_hits(hits, alignment_type)
+    criterion = 'alnTM > 0.5' if alignment_type == 1 else 'alnTM > 0.5, e-value < 1e-3'
+    print(f'\nConfident structural hits ({criterion}) among {len(hits)} rows: {len(confident_homologs)}')
