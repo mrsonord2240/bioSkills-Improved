@@ -3,39 +3,49 @@
 # Checked on: pysam 0.24.1, samtools 1.24 | Verify API if version differs
 # Counts follow `samtools flagstat` (QC-passed column): rates use primary alignments only;
 # secondary/supplementary records and QC-failed reads are counted separately.
+# Usage: qc_report.py <input.bam|cram> [reference.fa]   (CRAM needs the reference FASTA)
 
 import pysam
 import sys
 
+# Longest insert size kept in the summary (samtools stats default, `-i 8000`); not a 1000 bp library limit
+MAX_INSERT = 8000
+
 def pct(part, whole):
     return f'{part / whole * 100:.2f}%' if whole else 'n/a'
 
-def qc_report(bam_path):
+def qc_report(bam_path, reference=None):
     s = {'records': 0, 'secondary': 0, 'supplementary': 0, 'primary': 0, 'qcfail': 0,
          'mapped': 0, 'paired': 0, 'proper_pair': 0, 'duplicate': 0}
     insert_sizes = []
 
-    with pysam.AlignmentFile(bam_path, 'rb') as bam:
-        for read in bam:
-            s['records'] += 1
-            if read.is_secondary or read.is_supplementary:
-                s['secondary'] += read.is_secondary
-                s['supplementary'] += read.is_supplementary
-                continue
-            s['primary'] += 1
-            if read.is_qcfail:
-                s['qcfail'] += 1
-                continue
-            if not read.is_unmapped:
-                s['mapped'] += 1
-            if read.is_paired:
-                s['paired'] += 1
-            if read.is_proper_pair:
-                s['proper_pair'] += 1
-                if read.is_read1 and 0 < read.template_length < 1000:
-                    insert_sizes.append(read.template_length)
-            if read.is_duplicate:
-                s['duplicate'] += 1
+    is_cram = bam_path.lower().endswith('.cram')
+    try:
+        # check_sq=False: unaligned BAM/uBAM has no @SQ lines; reference is only used for CRAM
+        with pysam.AlignmentFile(bam_path, 'rb', check_sq=False, reference_filename=reference) as bam:
+            for read in bam:
+                s['records'] += 1
+                if read.is_secondary or read.is_supplementary:
+                    s['secondary'] += read.is_secondary
+                    s['supplementary'] += read.is_supplementary
+                    continue
+                s['primary'] += 1
+                if read.is_qcfail:
+                    s['qcfail'] += 1
+                    continue
+                if not read.is_unmapped:
+                    s['mapped'] += 1
+                if read.is_paired:
+                    s['paired'] += 1
+                if read.is_proper_pair:
+                    s['proper_pair'] += 1
+                    if read.is_read1 and 0 < read.template_length < MAX_INSERT:
+                        insert_sizes.append(read.template_length)
+                if read.is_duplicate:
+                    s['duplicate'] += 1
+    except (OSError, ValueError, NotImplementedError) as e:
+        hint = ' (CRAM cannot be decoded without its reference: pass the FASTA as 2nd argument)' if is_cram and not reference else ''
+        sys.exit(f'qc_report.py: cannot read {bam_path}: {e}{hint}')
 
     passed = s['primary'] - s['qcfail']
     print(f'=== QC Report: {bam_path} ===\n')
@@ -59,7 +69,7 @@ def qc_report(bam_path):
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print('Usage: qc_report.py <input.bam>')
+        print('Usage: qc_report.py <input.bam|cram> [reference.fa]')
         sys.exit(1)
 
-    qc_report(sys.argv[1])
+    qc_report(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)

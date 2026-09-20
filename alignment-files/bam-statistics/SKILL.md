@@ -67,7 +67,8 @@ Mate-overlap handling differs between tools, so **mean depth differs 2x on the s
 |------|-------------------|
 | `samtools depth`, `samtools coverage`, pysam `pileup()`, `mosdepth --fast-mode` | counted twice (16.77x); no overlap option in `coverage` |
 | `samtools depth -s`, `mosdepth` (default) | counted once (8.86x) |
-| `samtools mpileup`, `bcftools mpileup` | counted once at the default `-Q 13` (8.85x); `-x` disables it (16.75x). The lower-quality mate base is zeroed, so `-Q 0` defeats the removal |
+| `samtools mpileup` | counted once at the default `-Q 13` (8.85x); `-x` disables it (16.75x). The lower-quality mate base is zeroed, so `-Q 0` defeats the removal (16.77x) |
+| `bcftools mpileup` | counted once in `FORMAT/DP` (`-a FORMAT/DP`) and in the bases used for calling: 8.85x at the default, 16.77x with `-x` or `-Q 0`. `INFO/DP` is 16.77x either way (counted before overlap removal) |
 
 ## samtools flagstat
 
@@ -101,11 +102,6 @@ Output:
 ### Multi-threaded
 ```bash
 samtools flagstat -@ 4 input.bam
-```
-
-### Output to File
-```bash
-samtools flagstat input.bam > flagstat.txt
 ```
 
 ### Machine-readable
@@ -267,12 +263,13 @@ mosdepth -t 4 --by exome.bed --thresholds 1,10,20,30,100 --no-per-base sample in
 mosdepth -t 4 --quantize 0:1:10:100: sample input.bam                                # CNV-style bands
 mosdepth -t 4 -f ref.fa sample input.cram                                            # CRAM: needs the reference and a .crai (samtools index input.cram)
 ```
-`mosdepth` excludes unmapped, secondary, QC-fail, and duplicate reads by default (`--flag 1796`); supplementary reads are NOT excluded (use `--flag 3844` to drop them too). Configurable via `--flag`. Memory ~ 4 bytes x longest chrom (1 GB for human chr1, 12+ GB for axolotl). Does not honor base quality; use `samtools depth -q INT` if needed.
+`mosdepth` excludes unmapped, secondary, QC-fail, and duplicate reads by default (`--flag 1796`); supplementary reads are NOT excluded (use `--flag 3844` to drop them too). Configurable via `--flag`. Memory ~ 4 bytes x longest chrom (1 GB for human chr1, 12+ GB for axolotl). Does not honor base quality; use `samtools depth -q INT` if needed. The summary `total` row covers only contigs that have reads (19000 of 22000 bp, 2.95x against 2.57x from `samtools coverage` / `depth -aa` on a BAM with one read-less contig); `--fast-mode` also counts deletion (D) bases as covered (69.97x vs 68.84x on an amplicon BAM). For a whole-reference mean use `samtools coverage` or `depth -aa`.
 
 ### Depth from BED Regions
 ```bash
-samtools depth -a -b regions.bed input.bam    # every base of every region, zeros included
+samtools depth -aa -b regions.bed input.bam   # every base of every region, zeros included
 ```
+`-a` alone drops regions on contigs that have no reads (checked: 2810 of 3110 rows on a BAM with one read-less contig); `-aa` keeps them.
 
 ### Depth on Large Files
 Restrict to a region, or subsample reproducibly (seed 42, 10%; approximate):
@@ -283,7 +280,7 @@ samtools view -s 42.1 -b -o sub.bam input.bam && samtools depth -a sub.bam
 
 ## samtools coverage
 
-Per-chromosome or per-region coverage statistics (faster than depth).
+Per-chromosome or per-region coverage statistics.
 
 ```bash
 samtools coverage input.bam
@@ -309,6 +306,7 @@ samtools coverage -r chr1:1000000-2000000 input.bam
 `-b` is `--bam-list` in `samtools coverage` (not a BED option; a BED there fails with `Cannot open file list`). Loop over the BED (0-based start -> 1-based region) or use `mosdepth --by`:
 ```bash
 while read -r chrom start end _; do
+    case $chrom in ''|'#'*|track*|browser*) continue;; esac   # skip BED header lines
     samtools coverage -H -r "$chrom:$((start+1))-$end" input.bam
 done < regions.bed
 ```
@@ -320,6 +318,8 @@ samtools coverage -m input.bam
 
 ## pysam Python Alternative
 
+Two inputs break a plain `AlignmentFile(path, 'rb')`: an unaligned BAM has no `@SQ` lines (`ValueError: file has no sequences defined`), so the read-only snippets pass `check_sq=False`; and a CRAM needs `reference_filename='ref.fa'`, without which iterating fails with `OSError: truncated file` (region and pileup calls also need a `.crai`; `samtools flagstat` needs no reference, `samtools stats` needs `--reference`). `examples/qc_report.py` takes the reference as an optional second argument and exits 1 with a message when a CRAM cannot be decoded.
+
 ### Count Reads
 
 **Goal:** Reproduce `samtools flagstat` (QC-passed column) counts and rates.
@@ -329,7 +329,7 @@ samtools coverage -m input.bam
 ```python
 import pysam
 
-with pysam.AlignmentFile('input.bam', 'rb') as bam:
+with pysam.AlignmentFile('input.bam', 'rb', check_sq=False) as bam:
     primary = mapped = paired = proper = 0
     for read in bam:
         if read.is_secondary or read.is_supplementary or read.is_qcfail:
@@ -369,12 +369,14 @@ with pysam.AlignmentFile('input.bam', 'rb') as bam:
 ```python
 import pysam
 
-def region_depth_stats(bam_path, chrom, start, end, thresholds=(10, 20)):
+def region_depth_stats(bam_path, chrom, start, end, thresholds=(10, 20), reference=None):
     """Depth over the 0-based half-open region [start, end); every base is in the denominator.
-    A single position is the 1-bp region (pos - 1, pos)."""
+    A single position is the 1-bp region (pos - 1, pos). `reference` is the FASTA for a CRAM."""
     length = end - start
+    if length <= 0:
+        raise ValueError(f'empty region [{start}, {end})')
     depths = [0] * length
-    with pysam.AlignmentFile(bam_path, 'rb') as bam:
+    with pysam.AlignmentFile(bam_path, 'rb', reference_filename=reference) as bam:
         # truncate=True: only columns inside the region (otherwise whole read footprints are returned)
         # max_depth: pysam's default cap is 8000; ignore_orphans=False: default drops paired reads
         #   that lack the proper-pair flag; min_base_quality=0: default is 13 (samtools depth: 0)
@@ -407,7 +409,7 @@ from collections import Counter
 
 insert_sizes = Counter()
 
-with pysam.AlignmentFile('input.bam', 'rb') as bam:
+with pysam.AlignmentFile('input.bam', 'rb', check_sq=False) as bam:
     for read in bam:
         if read.is_secondary or read.is_supplementary or read.is_qcfail:
             continue
@@ -421,17 +423,6 @@ mean_insert = sum(s * c for s, c in insert_sizes.items()) / sum(insert_sizes.val
 print(f'Mean insert size: {mean_insert:.0f}')
 print(f'Min: {min(sizes)}, Max: {max(sizes)}')
 ```
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Quick counts | `samtools flagstat input.bam` |
-| Per-chrom counts | `samtools idxstats input.bam` |
-| Full stats | `samtools stats input.bam` |
-| Coverage summary | `samtools coverage input.bam` |
-| Per-position depth | `samtools depth -a input.bam` |
-| Mean depth | `samtools coverage input.bam` (`meandepth`), or the `-aa` awk under "Mean Depth and Breadth" |
 
 ## QC Thresholds Are Assay-Specific
 
@@ -491,6 +482,7 @@ A 99% flagstat mapping rate does NOT mean the data is usable. Common false-posit
 
 `samtools stats` reports the IS section for every pair with both mates mapped and splits the pairs into `inward oriented`, `outward oriented` and `other orientation` counts (checked on a synthetic mate-pair library with the proper-pair flag set and unset: `insert size average` 2000.0, 100 outward pairs both times). So:
 - Mate-pair libraries (RF orientation): IS is reported, with outward-oriented counts dominating. The pysam snippets and `qc_report.py` only look at properly paired reads, so they report nothing when the aligner leaves the proper-pair flag unset
+- `qc_report.py` keeps insert sizes below `MAX_INSERT` = 8000 (the `samtools stats` default, `-i`); longer templates are dropped from its mean and median
 - ATAC-seq: bimodal/multimodal expected (nucleosome ladder ~50/~180/~370 bp). Unimodal suggests poor transposition.
 - RNA-seq: TLEN includes intron span -- mean meaningless
 - Bisulfite (PBAT): orientation reversed; samtools may not flag proper pair
