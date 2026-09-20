@@ -224,11 +224,11 @@ When fragment length < 2 * read_length, R1 and R2 overlap. Both `samtools mpileu
 
 **Depth is `len(pileup_column.pileups)`, not `pileup_column.n`.** `n` counts reads before the base-quality filter and overlap removal, so it exceeds the mpileup depth (on the human test BAM it differs at 1087 of 1157 positions). `len(pileup_column.pileups)` (= `get_num_aligned()`) equals the `samtools mpileup` depth column when the parameters below match.
 
-**BAQ is switched on by `fastafile`, not by the stepper.** Without `fastafile`, pysam defaults equal `samtools mpileup -B`. With `fastafile=pysam.FastaFile(ref)` BAQ is applied under either stepper (`'all'`, the default, or `'samtools'`) and the pileup equals `samtools mpileup -f ref.fa`; add `compute_baq=False` to get `-B` back. Checked position by position (depth and base counts) on 6 BAMs (human DNA, spliced RNA-seq, 1000G, ARTIC nanopore, 2 synthetic): 0 differing positions for each mapping in the table.
+**BAQ is switched on by `fastafile`, and only under pysam's default stepper.** The default stepper is `'samtools'` (not `'all'`); leave `stepper` unset or pass `'samtools'`. Without `fastafile`, pysam defaults equal `samtools mpileup -B`. With `fastafile=pysam.FastaFile(ref)` BAQ is applied and the pileup equals `samtools mpileup -f ref.fa`; add `compute_baq=False` to get `-B` back. An explicit `stepper='all'` applies no BAQ even with `fastafile` (it equals `-B`) and also drops overlap and orphan handling, so it matches neither mpileup default. Checked position by position (depth and base counts) on 6 BAMs (human DNA, spliced RNA-seq, 1000G, ARTIC nanopore, 2 synthetic): 0 differing positions for each mapping in the table.
 
 | samtools mpileup | `bam.pileup()` argument | Note |
 |------------------|-------------------------|------|
-| `-f ref.fa` (BAQ on) | `fastafile=FastaFile(ref)` | either stepper |
+| `-f ref.fa` (BAQ on) | `fastafile=FastaFile(ref)` | default stepper (`'samtools'`) only; `stepper='all'` gives no BAQ |
 | `-B` | no `fastafile`, or `compute_baq=False` | |
 | `-E` | `fastafile=FastaFile(ref), redo_baq=True` | recomputes over an existing BQ tag; without it the tag is reused |
 | `-Q 13` (default) | `min_base_quality=13` (default) | pysam default matches |
