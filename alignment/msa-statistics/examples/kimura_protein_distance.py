@@ -5,11 +5,13 @@ at the same site: d = -log(1 - p - 0.2 * p^2). Valid up to ~85% divergence; satu
 beyond. Use Bio.Phylo.TreeConstruction.DistanceCalculator('blosum62') for matrix-based
 alternatives or IQ-TREE for full ML distance estimation.
 '''
-# Reference: biopython 1.83+, numpy 1.26+ | Verify API if version differs
+# Reference: biopython 1.83+ (checked on 1.88), numpy 1.26+ | Verify API if version differs
 
-from Bio import AlignIO
-import numpy as np
 import math
+
+import numpy as np
+
+from msa_utils import example_path, load_alignment
 
 def kimura_protein_distance(seq1, seq2):
     matches = sum(a == b and a != '-' and b != '-' for a, b in zip(seq1, seq2))
@@ -19,10 +21,10 @@ def kimura_protein_distance(seq1, seq2):
     p = 1 - matches / aligned
     if p >= 0.85:
         return float('inf')
-    return -math.log(1 - p - 0.2 * p ** 2)
+    return -math.log(1 - p - 0.2 * p ** 2) + 0.0  # + 0.0 turns -0.0 into 0.0
 
 if __name__ == '__main__':
-    alignment = AlignIO.read('alignment.fasta', 'fasta')
+    alignment = load_alignment(example_path('example_protein.fasta'))
     n = len(alignment)
     distance = np.zeros((n, n))
     for i in range(n):
