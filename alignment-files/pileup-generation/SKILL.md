@@ -8,7 +8,9 @@ license: MIT
 
 ## Version Compatibility
 
-Reference examples tested with: bcftools 1.19+, pysam 0.22+, samtools 1.19+
+Reference examples checked on: samtools 1.24, bcftools 1.24, pysam 0.24.1 (earlier tested with 1.19+ / 0.22+)
+
+Install: `conda install -c bioconda samtools bcftools`, `pip install pysam`. The reference must be indexed (`samtools faidx reference.fa`) and the BAM must be indexed for `-r` and for `bam.pileup()`.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
@@ -51,7 +53,7 @@ Pileup shows all reads covering each position in the reference, used for:
 | Ultra-low-frequency (ctDNA / MRD) | fgbio consensus -> `bcftools call` or hot-spot Mutect2 |
 | Per-position allele counts (custom) | pysam pileup |
 
-`samtools mpileup` (without `-g`) is still the standard tool for human-readable per-position read summaries.
+`samtools mpileup` (without `-g`) is still the standard tool for human-readable per-position read summaries. Its output is **text, not VCF/BCF**, so it cannot feed `bcftools call` (see Maximum Depth below).
 
 ### Basic Pileup
 ```bash
@@ -75,20 +77,22 @@ samtools mpileup -f reference.fa sample1.bam sample2.bam sample3.bam > pileup.tx
 
 ## Output Format
 
-Text pileup format (6 columns per sample):
+Text pileup format: 3 shared columns, then 3 columns per input BAM (6 columns for one BAM, 9 for two):
 ```
-chr1    1000    A    15    ...............    FFFFFFFFFFF
-chr1    1001    T    12    ............      FFFFFFFFFFFF
+chr20   1400300  G    6    ,,,.,,    BBB<BB
+chr20   1400301  C    6    ,,,.,,    BB<BBB
 ```
 
 | Column | Description |
 |--------|-------------|
 | 1 | Chromosome |
 | 2 | Position (1-based) |
-| 3 | Reference base |
-| 4 | Read depth |
+| 3 | Reference base (`N` if `-f` is missing or lacks the contig) |
+| 4 | Read depth (= number of read symbols in column 5 = number of characters in column 6) |
 | 5 | Read bases |
-| 6 | Base qualities |
+| 6 | Base qualities (ASCII - 33; BAQ-adjusted unless `-B`) |
+
+A covered position whose bases are all filtered prints depth 0 and `*` in columns 5 and 6 (e.g. `chr22 1952 T 0 * *`); uncovered positions are absent unless `-a`/`-aa`.
 
 ### Read Bases Encoding
 
@@ -98,14 +102,16 @@ chr1    1001    T    12    ............      FFFFFFFFFFFF
 | `,` | Match on reverse strand |
 | `ACGT` | Mismatch (uppercase = forward) |
 | `acgt` | Mismatch (lowercase = reverse) |
-| `^Q` | Start of read (Q = MAPQ as ASCII) |
-| `$` | End of read |
-| `+NNN` | Insertion of N bases |
-| `-NNN` | Deletion of N bases |
-| `*` | Deleted base |
-| `>` / `<` | Reference skip (intron) |
+| `^Q` | Start of read (Q = MAPQ + 33 as ASCII, e.g. `^]` = MAPQ 60) |
+| `$` | End of read (follows the read's last base) |
+| `+2AC` | Insertion of the 2 bases AC after this base (adds no depth; lowercase = reverse) |
+| `-3CGT` | Deletion of the 3 reference bases CGT after this base |
+| `*` | Deleted base (counted in depth; `#` with `--reverse-del` on the reverse strand) |
+| `>` / `<` | Reference skip (intron, `N` in CIGAR), forward / reverse read; counted in depth |
 
 ## Quality Filtering Options
+
+The defaults also drop data silently; they are listed in Pileup Options and Defaults below.
 
 ### Minimum Mapping Quality
 ```bash
@@ -125,34 +131,32 @@ samtools mpileup -f reference.fa -q 20 -Q 20 input.bam
 ### Maximum Depth (Critical Trap)
 ```bash
 # samtools mpileup default -d 8000 silently truncates targeted / mt-DNA / amplicon / UMI-deduped data
-# bcftools mpileup default -d 250 is far lower; both must be set explicitly when piping
+# bcftools mpileup default -d 250 is far lower; set -d explicitly in whichever you use
 samtools mpileup -f reference.fa -d 0 input.bam        # no cap
 samtools mpileup -f reference.fa -d 1000000 input.bam  # explicit high cap
 
-# WRONG -- samtools 8000 cap, then bcftools 250 cap re-applied
+# WRONG -- samtools mpileup writes text; bcftools call reads VCF/BCF and stops with
+# "Failed to read from standard input: unknown file type"
 samtools mpileup -f ref.fa in.bam | bcftools call -mv
 
-# RIGHT -- single tool, explicit -d
+# RIGHT -- bcftools mpileup writes the BCF that bcftools call reads; set -d explicitly
 bcftools mpileup -d 1000000 -f ref.fa in.bam | bcftools call -mv
 ```
+pysam `pileup()` also caps at `max_depth=8000`, and `max_depth=0` is **not** unlimited (still 8000); pass a large number such as `max_depth=1000000`.
 
 ## BAQ: Base Alignment Quality (Critical Default)
 
-When `-f ref.fa` is passed, BAQ is enabled by default. BAQ Phred-scales the probability that a base is misaligned (HMM realignment over a small window) and reduces base quality near indels. Tradeoffs: ~30% slower; suppresses FP SNVs near indels; hurts indel detection sensitivity.
+When `-f ref.fa` is passed, BAQ is enabled by default. BAQ Phred-scales the probability that a base is misaligned (HMM realignment against the reference over a small window) and reduces base quality near indels. Tradeoffs: slower; suppresses FP SNVs near indels; hurts indel detection sensitivity. In a **text** pileup it can hide an indel completely: with BAQ on, the bases of reads carrying a 3 bp deletion fall below `-Q 13` next to it (depth 8 -> 4, no `-3CGT` marker); `-B` shows all 8 reads and the marker.
 
 | Flag | Behavior |
 |------|----------|
-| (default with `-f`) | BAQ on (computed from CIGAR if MD missing) |
+| (default with `-f`) | BAQ on (computed against the reference; an existing BQ tag is reused) |
 | `-B` / `--no-BAQ` | Disable BAQ -- raw qualities |
-| `-E` / `--redo-BAQ` | Force recompute (after BQSR; if MD stale) |
+| `-E` / `--redo-BAQ` | Force recompute, ignoring existing BQ tags (cannot be combined with `-B`) |
 
 **BAQ ON for:** short-read germline SNV (BWA, Bowtie2, HISAT2), short-read somatic SNV.
 
 **BAQ OFF (`-B`) for:** long-read variant calling (ONT, PacBio HiFi), SV calling, RNA-seq near splice junctions, viral / amplicon, ultra-deep ctDNA from consensus reads (consensus quality already inflated), aDNA (qualities pre-rescaled by mapDamage).
-
-`-A` (count anomalous read pairs / orphans) is required for amplicon -- amplicon reads are by design not properly paired.
-
-`-aa` (output all positions, including zero-coverage) is required for ARTIC SARS-CoV-2 consensus generation.
 
 ### Library-Typed Flags Cheat Sheet
 
@@ -161,7 +165,7 @@ When `-f ref.fa` is passed, BAQ is enabled by default. BAQ Phred-scales the prob
 | Short-read germline WGS (BWA) | `-q 20 -Q 20 -d 0` (BAQ on default) |
 | Short-read tumor WGS | `-q 1 -Q 13 -d 0 -B` (low MAPQ kept; BAQ off) |
 | Amplicon viral (ARTIC) | `-aa -A -d 600000 -B -Q 20` |
-| Capture / exome | `-q 20 -Q 20 -d 250` |
+| Capture / exome | `-q 20 -Q 20 -d 0` |
 | Long-read ONT R10.4+ | `-q 30 -Q 0 -B -d 0`; for `bcftools mpileup` add `--max-BQ 30` (its `ont` preset value) |
 | PacBio HiFi | `-q 20 -Q 0 -B -d 0` |
 | RNA-seq variants | `-q 20 -Q 20 -B -d 0` |
@@ -182,28 +186,68 @@ bcftools mpileup -f reference.fa -d 1000000 -q 20 -Q 20 \
 bcftools index -t variants.vcf.gz
 ```
 
+### BCF Intermediate (re-run `bcftools call` without repeating mpileup)
+```bash
+bcftools mpileup -f reference.fa -d 1000000 -Ob -o raw.bcf input.bam
+bcftools call -mv raw.bcf -o variants.vcf
+```
+
 ### Multi-Sample Joint Calling
 ```bash
-bcftools mpileup -f reference.fa --threads 4 -d 250 -q 20 -Q 20 \
+bcftools mpileup -f reference.fa --threads 4 -d 100000 -q 20 -Q 20 \
     -a FORMAT/AD,FORMAT/DP s1.bam s2.bam s3.bam | \
   bcftools call -mv --threads 4 -Oz -o joint.vcf.gz
+```
+
+Joint calling over all samples beats merging per-sample VCFs. `-d` is per file: set it above the expected depth, but `-d 1000000` with several samples makes bcftools warn "Potential memory hog" (checked with 2 samples).
+
+### Parallel by Contig
+```bash
+# Merge in header order: a chr*.vcf.gz glob sorts chr1, chr10, chr11, chr2 ... and bcftools concat
+# accepts that silently (exit 0, valid index). Keep contigs.txt to primary contigs (no ':' or '*' names).
+samtools idxstats input.bam | cut -f1 | grep -v '^\*$' > contigs.txt
+xargs -a contigs.txt -P 4 -I{} bash -c \
+    'set -o pipefail; bcftools mpileup -f reference.fa -r {} -d 1000000 input.bam | bcftools call -mv -Oz -o {}.vcf.gz' \
+  && sed 's/$/.vcf.gz/' contigs.txt > vcf_list.txt \
+  && bcftools concat -f vcf_list.txt -Oz -o all.vcf.gz && bcftools index all.vcf.gz
 ```
 
 For somatic / low-VAF, prefer Mutect2 / Strelka2 / DeepVariant -- materially better than mpileup-based callers.
 
 ### Overlap Detection Defaults
 
-When fragment length < 2 * read_length, R1 and R2 overlap. Both `samtools mpileup` and `bcftools mpileup` enable overlap detection by default (per samtools-mpileup(1)) and count overlapping bases once; pass `-x` to disable (long form is `--disable-overlap-removal` in samtools since 1.16, but `--ignore-overlaps` in bcftools). Disabling overlap correction can inflate somatic VAFs at sites covered by overlapping pairs (especially in cfDNA / FFPE).
+When fragment length < 2 * read_length, R1 and R2 overlap. Both `samtools mpileup` and `bcftools mpileup` enable overlap detection by default and count overlapping bases once; pass `-x` to disable (long forms: `--disable-overlap-removal` / `--ignore-overlaps-removal` in samtools 1.24, `--ignore-overlaps` in bcftools). Disabling overlap correction can inflate somatic VAFs at sites covered by overlapping pairs (especially in cfDNA / FFPE).
 
 ## pysam Python Alternative
+
+`bam.pileup(contig, start, stop)` is 0-based, half-open; pass `truncate=True` or it also yields the columns of every overlapping read outside the region. `pileup_column.pos` is 0-based.
+
+**Depth is `len(pileup_column.pileups)`, not `pileup_column.n`.** `n` counts reads before the base-quality filter and overlap removal, so it exceeds the mpileup depth (on the human test BAM it differs at 1087 of 1157 positions). `len(pileup_column.pileups)` (= `get_num_aligned()`) equals the `samtools mpileup` depth column when the parameters below match.
+
+pysam defaults equal `samtools mpileup -B` (no BAQ). To match `samtools mpileup -f ref.fa`, pass `stepper='samtools'` and `fastafile=pysam.FastaFile(ref)`; the default `stepper='all'` does not apply BAQ even with a `fastafile`.
+
+| samtools mpileup | `bam.pileup()` argument | Note |
+|------------------|-------------------------|------|
+| `-f ref.fa` (BAQ on) | `stepper='samtools', fastafile=FastaFile(ref)` | without `-f`/`fastafile`, or with `-B`: leave defaults or `compute_baq=False` |
+| `-E` | `redo_baq=True` | with the two above |
+| `-Q 13` (default) | `min_base_quality=13` (default) | pysam default matches |
+| `-q N` | `min_mapping_quality=N` | |
+| `-d N` (default 8000) | `max_depth=N` (default 8000) | `0` is not unlimited |
+| `-x` | `ignore_overlaps=False` | default `True` matches |
+| `-A` | `ignore_orphans=False` | default `True` matches |
+| `--ff` (default UNMAP,SECONDARY,QCFAIL,DUP) | `flag_filter=INT` (default 1796) | `--ff 0` = `flag_filter=0`; `stepper='nofilter'` also drops the orphan filter, so it is not `--ff 0` |
+| `--rf` | `flag_require=INT` | |
+| `-C 50` | `adjust_capq_threshold=50` | |
+
+Each read in `pileup_column.pileups` needs three checks in this order: **`is_refskip` first**, because pysam sets `is_del=True` on spliced-read `N` skips as well; then `is_del`; else the base at `query_position`. Testing `is_del` first reports intron positions as deletions. `pileup_read.indel` is the length of the insertion (>0) or deletion (<0) that follows the base.
 
 ### Basic Pileup
 ```python
 import pysam
 
 with pysam.AlignmentFile('input.bam', 'rb') as bam:
-    for pileup_column in bam.pileup('chr1', 1000000, 1001000):
-        print(f'{pileup_column.reference_name}:{pileup_column.pos} depth={pileup_column.n}')
+    for pileup_column in bam.pileup('chr1', 1000000, 1001000, truncate=True):
+        print(f'{pileup_column.reference_name}:{pileup_column.pos + 1} depth={len(pileup_column.pileups)}')
 ```
 
 ### Access Reads at Position
@@ -213,13 +257,13 @@ import pysam
 with pysam.AlignmentFile('input.bam', 'rb') as bam:
     for pileup_column in bam.pileup('chr1', 1000000, 1000001, truncate=True):
         print(f'Position: {pileup_column.pos}')
-        print(f'Depth: {pileup_column.n}')
+        print(f'Depth: {len(pileup_column.pileups)}')
 
         for pileup_read in pileup_column.pileups:
-            if pileup_read.is_del:
-                print('  Deletion')
-            elif pileup_read.is_refskip:
+            if pileup_read.is_refskip:
                 print('  Reference skip')
+            elif pileup_read.is_del:
+                print('  Deletion')
             else:
                 qpos = pileup_read.query_position
                 base = pileup_read.alignment.query_sequence[qpos]
@@ -232,19 +276,23 @@ with pysam.AlignmentFile('input.bam', 'rb') as bam:
 import pysam
 from collections import Counter
 
-def allele_counts(bam_path, chrom, pos):
+def allele_counts(bam_path, chrom, pos, **pileup_kw):
+    """Base counts (plus 'DEL') at 0-based pos: pass 1-based position minus 1.
+    Reference skips are not counted. SNVs only: insertions/deletions after pos (pileup_read.indel)
+    are not counted; see pileup_text or bcftools mpileup. pileup_kw go to bam.pileup()
+    (e.g. min_mapping_quality=20, min_base_quality=20; see the table above)."""
     counts = Counter()
 
     with pysam.AlignmentFile(bam_path, 'rb') as bam:
-        for pileup_column in bam.pileup(chrom, pos, pos + 1, truncate=True):
+        for pileup_column in bam.pileup(chrom, pos, pos + 1, truncate=True, **pileup_kw):
             if pileup_column.pos != pos:
                 continue
 
             for pileup_read in pileup_column.pileups:
-                if pileup_read.is_del:
-                    counts['DEL'] += 1
-                elif pileup_read.is_refskip:
+                if pileup_read.is_refskip:
                     continue
+                elif pileup_read.is_del:
+                    counts['DEL'] += 1
                 else:
                     qpos = pileup_read.query_position
                     base = pileup_read.alignment.query_sequence[qpos]
@@ -252,40 +300,49 @@ def allele_counts(bam_path, chrom, pos):
 
     return dict(counts)
 
-counts = allele_counts('input.bam', 'chr1', 1000000)
+counts = allele_counts('input.bam', 'chr1', 1000000 - 1)  # 1-based chr1:1,000,000
 print(counts)  # {'A': 45, 'G': 5}
 ```
 
 ### Calculate Allele Frequency
 ```python
-import pysam
-from collections import Counter
-
-def allele_frequency(bam_path, chrom, pos, min_qual=20):
-    counts = Counter()
-
-    with pysam.AlignmentFile(bam_path, 'rb') as bam:
-        for pileup_column in bam.pileup(chrom, pos, pos + 1, truncate=True,
-                                         min_base_quality=min_qual):
-            if pileup_column.pos != pos:
-                continue
-
-            for pileup_read in pileup_column.pileups:
-                if pileup_read.is_del or pileup_read.is_refskip:
-                    continue
-                qpos = pileup_read.query_position
-                base = pileup_read.alignment.query_sequence[qpos]
-                counts[base.upper()] += 1
-
-    total = sum(counts.values())
+def allele_frequency(bam_path, chrom, pos, **pileup_kw):
+    counts = allele_counts(bam_path, chrom, pos, **pileup_kw)
+    total = sum(n for base, n in counts.items() if base != 'DEL')
     if total == 0:
         return {}
 
-    return {base: count / total for base, count in counts.items()}
+    return {base: n / total for base, n in counts.items() if base != 'DEL'}
 
-freq = allele_frequency('input.bam', 'chr1', 1000000)
+freq = allele_frequency('input.bam', 'chr1', 1000000 - 1, min_base_quality=20)
 for base, f in sorted(freq.items(), key=lambda x: -x[1]):
     print(f'{base}: {f:.1%}')
+```
+
+### Find Variants in a Region
+```python
+def find_variants(bam_path, ref_path, chrom, start, end, min_depth=10, min_alt_freq=0.1, **pileup_kw):
+    """SNVs against the reference in 0-based [start, end); indels are not reported. min_base_quality defaults to 20."""
+    variants = []
+    pileup_kw.setdefault('min_base_quality', 20)
+    with pysam.AlignmentFile(bam_path, 'rb') as bam, pysam.FastaFile(ref_path) as ref:
+        for pileup_column in bam.pileup(chrom, start, end, truncate=True, **pileup_kw):
+            pos = pileup_column.pos
+            ref_base = ref.fetch(chrom, pos, pos + 1).upper()
+            alleles = Counter()
+            for pileup_read in pileup_column.pileups:
+                if pileup_read.is_refskip or pileup_read.is_del:
+                    continue
+                qpos = pileup_read.query_position
+                alleles[pileup_read.alignment.query_sequence[qpos].upper()] += 1
+            total = sum(alleles.values())
+            if total < min_depth:
+                continue
+            for base, count in alleles.items():
+                if base != ref_base and count / total >= min_alt_freq:
+                    variants.append({'chrom': chrom, 'pos': pos + 1, 'ref': ref_base, 'alt': base,
+                                     'depth': total, 'alt_count': count, 'freq': count / total})
+    return variants
 ```
 
 ### Pileup with Quality Filtering
@@ -297,73 +354,87 @@ with pysam.AlignmentFile('input.bam', 'rb') as bam:
                                      truncate=True,
                                      min_mapping_quality=20,
                                      min_base_quality=20):
-        print(f'{pileup_column.pos}: {pileup_column.n}')
+        print(f'{pileup_column.pos + 1}: {len(pileup_column.pileups)}')
 ```
 
 ### Generate Pileup Text
 ```python
 import pysam
 
-def pileup_text(bam_path, ref_path, chrom, start, end):
-    with pysam.AlignmentFile(bam_path, 'rb') as bam:
-        with pysam.FastaFile(ref_path) as ref:
-            for pileup_column in bam.pileup(chrom, start, end, truncate=True):
-                pos = pileup_column.pos
-                ref_base = ref.fetch(chrom, pos, pos + 1)
-                depth = pileup_column.n
-
-                bases = []
-                for pileup_read in pileup_column.pileups:
-                    if pileup_read.is_del:
-                        bases.append('*')
-                    elif pileup_read.is_refskip:
-                        bases.append('>')
+def pileup_text(bam_path, ref_path, chrom, start, end, **pileup_kw):
+    """Yield 6-column `samtools mpileup -f ref` rows for 0-based [start, end), including ^ $ +N -N and qualities.
+    For `-B` pass compute_baq=False; other mpileup options: see the table above."""
+    kw = dict(stepper='samtools', truncate=True)
+    kw.update(pileup_kw)
+    with pysam.AlignmentFile(bam_path, 'rb') as bam, pysam.FastaFile(ref_path) as ref:
+        for pileup_column in bam.pileup(chrom, start, end, fastafile=ref, **kw):
+            pos = pileup_column.pos
+            ref_base = ref.fetch(chrom, pos, pos + 1)
+            bases, quals = [], []
+            for pileup_read in pileup_column.pileups:
+                aln = pileup_read.alignment
+                rev = aln.is_reverse
+                s = ''
+                if pileup_read.is_head:
+                    s += '^' + chr(min(aln.mapping_quality, 93) + 33)
+                if pileup_read.is_refskip:
+                    s += '<' if rev else '>'
+                elif pileup_read.is_del:
+                    s += '*'
+                else:
+                    qpos = pileup_read.query_position
+                    base = aln.query_sequence[qpos]
+                    if base.upper() == ref_base.upper():
+                        s += ',' if rev else '.'
                     else:
-                        qpos = pileup_read.query_position
-                        base = pileup_read.alignment.query_sequence[qpos]
-                        if base.upper() == ref_base.upper():
-                            bases.append('.' if not pileup_read.alignment.is_reverse else ',')
-                        else:
-                            bases.append(base.upper() if not pileup_read.alignment.is_reverse else base.lower())
+                        s += base.lower() if rev else base.upper()
+                    if pileup_read.indel > 0:
+                        ins = aln.query_sequence[qpos + 1:qpos + 1 + pileup_read.indel]
+                        s += f'+{pileup_read.indel}' + (ins.lower() if rev else ins.upper())
+                    elif pileup_read.indel < 0:
+                        dele = ref.fetch(chrom, pos + 1, pos + 1 - pileup_read.indel)
+                        s += f'{pileup_read.indel}' + (dele.lower() if rev else dele.upper())
+                if pileup_read.is_tail:
+                    s += '$'
+                bases.append(s)
+                quals.append(chr(min(aln.query_qualities[pileup_read.query_position_or_next], 93) + 33))
+            yield f"{chrom}\t{pos + 1}\t{ref_base}\t{len(pileup_column.pileups)}\t{''.join(bases) or '*'}\t{''.join(quals) or '*'}"
 
-                print(f'{chrom}\t{pos+1}\t{ref_base}\t{depth}\t{"".join(bases)}')
-
-pileup_text('input.bam', 'reference.fa', 'chr1', 1000000, 1000100)
+for row in pileup_text('input.bam', 'reference.fa', 'chr1', 1000000, 1000100):
+    print(row)
 ```
 
-## Pileup Options Summary
+## Pileup Options and Defaults
 
-| Option | Description | Common pitfall |
-|--------|-------------|----------------|
-| `-f FILE` | Reference FASTA | Triggers BAQ ON by default |
-| `-r REGION` | Restrict to region | |
-| `-l FILE` | BED file of regions | |
-| `-q INT` | Min mapping quality | Aligner-dependent semantics |
-| `-Q INT` | Min base quality | `-Q 0` with default overlap detection has subtle behavior |
-| `-d INT` | Max depth | **Default 8000 silently truncates**; bcftools mpileup default is 250 |
-| `-B` | Disable BAQ | Often correct for long reads, SV, viral, consensus |
-| `-A` | Count anomalous pairs | Required for amplicon |
-| `-aa` | Output all positions | Required for consensus generation |
-| `-x` (`--disable-overlap-removal`; bcftools: `--ignore-overlaps`) | Disable mate-overlap correction | Rarely correct |
-| `--max-BQ INT` (`bcftools mpileup` only) | Cap baseQ/BAQ (default 60) | Not a `samtools mpileup` option; useful for ONT/HiFi (Q values inflated) |
-| `-g` (REMOVED in 1.15) | Old BCF output | Use `bcftools mpileup` instead |
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Basic pileup | `samtools mpileup -f ref.fa in.bam` |
-| Quality filter | `samtools mpileup -f ref.fa -q 20 -Q 20 in.bam` |
-| Region | `samtools mpileup -f ref.fa -r chr1:1-1000 in.bam` |
-| To bcftools | `bcftools mpileup -f ref.fa -d 1000000 in.bam \| bcftools call -mv` |
+| Option | Description | Default (samtools / bcftools mpileup) | Common pitfall |
+|--------|-------------|---------------------------------------|----------------|
+| `-f FILE` | Reference FASTA | required by bcftools (`--no-reference` to skip) | Triggers BAQ ON by default; a missing file or contig gives reference base `N` |
+| `-r REGION` | Restrict to region | | |
+| `-l FILE` | BED file of regions | | |
+| `-q INT` | Min mapping quality | 0 / 0 | Aligner-dependent semantics |
+| `-Q INT` | Min base quality (after BAQ) | **13 / 1** | Silently drops low-quality bases, and low-quality `*` deletion slots; `-Q 0` with default overlap detection has subtle behavior |
+| `--ff FLAGS` (bcftools `--ns`) | Skip reads with any of these flags | **UNMAP,SECONDARY,QCFAIL,DUP** | Pre-flagged duplicates vanish from depth; `--ff 0` keeps all mapped reads |
+| `--rf FLAGS` (bcftools `--nu`) | Keep only reads with any of these flags set | none | |
+| `-d INT` | Max depth per file | **8000 / 250** | Silently truncates; `-d 0` = no cap |
+| `-B` | Disable BAQ | BAQ on with `-f` | Often correct for long reads, SV, viral, consensus; cannot combine with `-E` |
+| `-A` | Count anomalous pairs (paired, not proper) | dropped | Required for amplicon (reads are by design not properly paired) |
+| `-a` / `-aa` | `-a`: every position of each contig that has reads, incl. zero coverage; `-aa`: also contigs with no reads | off | Required for ARTIC SARS-CoV-2 consensus generation; `-a` = `-aa` for a single-contig reference |
+| `-x` (`--disable-overlap-removal`; bcftools: `--ignore-overlaps`) | Disable mate-overlap correction | overlaps counted once | Rarely correct |
+| `--max-BQ INT` (`bcftools mpileup` only) | Cap baseQ/BAQ | 60 | Not a `samtools mpileup` option; useful for ONT/HiFi (Q values inflated) |
 
 ## Common Errors
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `No FASTA reference` | Missing -f option | Add `-f reference.fa` |
-| `Reference mismatch` | Wrong reference | Use same reference as alignment |
-| Out of memory | High coverage region | Use `-d` to cap depth |
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| `[E::faidx_adjust_position] The sequence "X" was not found`, **exit status 0**, output rows with reference `N` | `-f` FASTA lacks the BAM's contig (`MN908947.3` vs `MT192765.1`, `chr1` vs `1`) | Compare `samtools view -H in.bam \| grep '^@SQ'` with `cut -f1 ref.fa.fai` before running; do not trust the exit status |
+| Reference column all `N`, no error | `samtools mpileup` run without `-f` | Add `-f reference.fa` (`bcftools mpileup` refuses: "requires the --fasta-ref option") |
+| `[E::mpileup] fail to parse region '22:3000-3005'` | Contig name mismatch (`chr22` vs `22`) | Use the name from the `@SQ` header |
+| `[E::idx_find_and_load] Could not retrieve index file for 'in.bam'` | `-r` (or `bam.pileup()`) on an unindexed BAM | `samtools index in.bam` |
+| Empty output | Region has no reads | `samtools view in.bam chr1:1000-2000 \| head`; check `ls reference.fa.fai` |
+| Out of memory | High coverage region | Cap with `-d`, set well above the expected coverage (reads above the cap are dropped); or restrict with `-l targets.bed`; process contigs in parallel |
+| `Failed to read from standard input: unknown file type` | Text `samtools mpileup` piped into `bcftools call` | Use `bcftools mpileup` |
+
+Text pileup is for debugging and small regions; BCF is far cheaper to process at scale.
 
 ## Related Skills
 
