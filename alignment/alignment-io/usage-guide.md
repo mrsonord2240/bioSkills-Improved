@@ -2,16 +2,7 @@
 
 ## Overview
 
-This skill handles reading, writing, and converting multiple sequence alignment (MSA) files. It uses Biopython's `AlignIO` module which provides a consistent interface for many alignment formats used in phylogenetics and sequence analysis.
-
-## Prerequisites
-
-```bash
-pip install biopython
-
-# Optional for Pfam-scale streaming and A2M/A3M handling:
-pip install pyhmmer
-```
+This skill handles reading, writing, and converting multiple sequence alignment (MSA) files. It uses Biopython's `AlignIO` module (plus `pyhmmer` for Pfam-scale streaming) which provides a consistent interface for many alignment formats used in phylogenetics and sequence analysis.
 
 ## Quick Start
 
@@ -58,21 +49,6 @@ Tell your AI agent what you want to do:
 4. Write output in specified format
 5. Report alignment statistics (length, sequence count)
 
-## Format Selection for Downstream Tools
+## Notes
 
-| Downstream Tool | Format | BioPython String |
-|----------------|--------|-----------------|
-| RAxML-NG, IQ-TREE | PHYLIP relaxed | `'phylip-relaxed'` |
-| MrBayes | NEXUS | `'nexus'` |
-| HMMER, Infernal | Stockholm | `'stockholm'` |
-| PAML/codeml | PHYLIP sequential | `'phylip-sequential'` |
-| Most tools | FASTA | `'fasta'` |
-
-## Tips
-
-- **Always use `phylip-relaxed` over `phylip`** unless the downstream tool explicitly requires strict format. Strict PHYLIP truncates names to 10 characters, which can silently merge distinct sequences with shared prefixes
-- Stockholm format preserves annotations (secondary structure, per-residue quality, metadata) that all other formats lose. Keep a Stockholm master copy if annotations matter
-- PHYLIP has two incompatible layout variants (interleaved vs sequential); tools expecting one will fail silently on the other. Use `phylip-sequential` for PAML
-- FASTA is the most portable but carries zero annotation information
-- For large alignments, `parse()` is more memory efficient than `read()`
-- When converting, check what metadata the target format supports. Stockholm-to-FASTA conversion silently discards all annotations
+Install steps, the downstream-format table (which format for IQ-TREE, MrBayes, HMMER, PAML), PHYLIP naming pitfalls and annotation loss on conversion are all in `SKILL.md` ("Version Compatibility", "Format Selection for Downstream Tools", "Format-Specific Notes").

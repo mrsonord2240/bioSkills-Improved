@@ -8,7 +8,12 @@ license: MIT
 
 ## Version Compatibility
 
-Reference examples tested with: BioPython 1.83+
+Checked on Biopython 1.88 and pyhmmer 0.12.3 (2026-09-19); patterns need Biopython 1.83+.
+
+```bash
+pip install biopython
+pip install pyhmmer   # optional: Pfam-scale streaming, A2M reading
+```
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
@@ -35,32 +40,33 @@ from Bio.Seq import Seq
 
 ## Format Coverage Map
 
-Three Python libraries cover the alignment-format space, with overlapping but non-identical support. Pick by what is actually required.
+Three Python libraries cover the alignment-format space, with overlapping but non-identical support. Pick by what is actually required. Checked on Biopython 1.88 / pyhmmer 0.12.3.
 
-| Format | `Bio.AlignIO` | `Bio.Align` (modern) | `pyhmmer.easel` | Notes |
+| Format | `Bio.AlignIO` (`MultipleSeqAlignment`) | `Bio.Align` (`Alignment`) | `pyhmmer.easel` (`format=`) | Notes |
 |--------|---------------|----------------------|-----------------|-------|
-| Aligned FASTA | R/W | R/W | R/W | Most portable; loses annotations |
-| Clustal | R/W | R/W | R | Clustal conservation marks NOT round-tripped |
-| PHYLIP (interleaved/sequential/relaxed) | R/W | R/W | R | Strict 10-char names is silent footgun |
-| Stockholm | R/W | R/W | R/W | Only format preserving GS/GR/GC/GF annotations |
-| NEXUS | R/W | R/W | -- | MrBayes / PAUP* input |
+| Aligned FASTA | R/W | R/W | R/W (`afa`) | Most portable; loses annotations |
+| Clustal | R/W | R/W | R/W | Clustal conservation marks NOT round-tripped |
+| PHYLIP (interleaved/sequential/relaxed) | R/W | R/W | R/W (`phylip`, `phylips`) | Strict 10-char names: see PHYLIP pitfalls |
+| Stockholm | R/W | R (plain files only; TypeError on real Pfam), W (AttributeError) | R/W | Only format preserving GS/GR/GC annotations (GF header lines are dropped by AlignIO) |
+| NEXUS | R/W | R/W | -- | MrBayes / PAUP* input; write needs a molecule type |
 | MAF (Multiple Alignment Format) | R/W | R/W | -- | UCSC whole-genome alignments |
-| A2M / A3M | -- (use `'fasta'` parser then post-process) | -- | R/W | HMMER (a2m), HHsuite/ColabFold (a3m) |
-| MSF (GCG) | R | -- | -- | GCG legacy |
-| EMBOSS / Mauve XMFA / FASTA-m10 | R | partial | -- | One-way: read-only |
+| A2M | -- (`'fasta'` parser works on padded A2M only) | R (padded A2M) | R/W | HMMER `hmmalign` writes ragged A2M |
+| A3M | -- | -- | -- | HH-suite / ColabFold; convert to A2M first (below) |
+| MSF (GCG) | R | R | -- | GCG legacy |
+| EMBOSS / Mauve XMFA / FASTA-m10 | R (Mauve also W; FASTA-m10 AlignIO only) | R (Mauve also W; no FASTA-m10) | -- | Mostly one-way |
+| PSL / chain / BED / SAM | -- | R/W (pairwise alignments, not MSAs) | -- | Use Kent tools for manipulation |
 
 **Formats NOT in BioPython** (use dedicated tools):
 
 | Format | Tool | Why |
 |--------|------|-----|
 | HAL | progressiveCactus, halTools | HDF5-backed multi-genome alignments at TB scale |
-| chain / net | UCSC Kent tools (`liftOver`, `chainNet`) | Pairwise genome alignment |
+| net | UCSC Kent tools (`chainNet`) | Pairwise genome alignment |
 | AXT | BLASTZ / lastz native | Pairwise alignment blocks |
-| PSL | UCSC Kent tools (`pslPretty`, `blat`) | BLAT alignment summary |
 | GFA / rGFA | `vg`, `odgi`, `pggb`, gfatools | Pangenome graph |
 | GAF | `vg surject`, `vg call` | Graph alignment format (read-to-graph) |
 
-Recommend `Bio.Align` (modern API) over `Bio.AlignIO` (legacy) for new code; it returns `Alignment` objects with built-in `.counts()` and `.substitutions` properties. For multi-gigabyte Stockholm databases such as Pfam-A.full, `pyhmmer.easel.MSAFile` streams record-by-record where `Bio.AlignIO.parse` works but at higher per-record cost.
+Use `Bio.AlignIO` for MSA files, especially Stockholm and NEXUS; use `Bio.Align` (`Alignment` objects with `.counts()` and `.substitutions`, see "Alternative: Bio.Align Module I/O") when those features are needed. For multi-gigabyte Stockholm databases such as Pfam-A.full, `pyhmmer.easel.MSAFile` streams record-by-record where `Bio.AlignIO.parse` works but at higher per-record cost.
 
 ## Reading Alignments
 
@@ -125,12 +131,18 @@ with open('output.aln', 'w') as handle:
 
 ### Direct Conversion (Most Efficient)
 ```python
-AlignIO.convert('input.aln', 'clustal', 'output.phy', 'phylip')
+AlignIO.convert('input.aln', 'clustal', 'output.phy', 'phylip-relaxed')
 ```
 
-### With Alphabet Specification
+### NEXUS Output Needs a Molecule Type
+Readers for Clustal, Stockholm, PHYLIP and FASTA leave `molecule_type` unset, and the NEXUS writer raises `ValueError: Need the molecule type to be defined` (leaving a 0-byte file). Pass it to `convert()`, or set it on each record before `write()` (`'DNA'`, `'RNA'` or `'protein'`):
 ```python
 AlignIO.convert('input.sto', 'stockholm', 'output.nex', 'nexus', molecule_type='DNA')
+
+alignment = AlignIO.read('input.aln', 'clustal')
+for record in alignment:
+    record.annotations['molecule_type'] = 'DNA'
+AlignIO.write(alignment, 'output.nex', 'nexus')
 ```
 
 ### Manual Conversion (When Modification Needed)
@@ -162,30 +174,15 @@ column_slice = alignment[:, 10:20]  # Columns 10-19
 
 # Get specific column
 column = alignment[:, 5]  # Column 5 as string
-```
 
-## Working with Alignment Objects
+# Subset of sequences, and sequences plus columns together
+subset = alignment[0:5]              # First 5 sequences
+region = alignment[0:5, 50:150]      # 5 sequences, columns 50-149
 
-### Get Alignment Properties
-```python
-alignment = AlignIO.read('alignment.aln', 'clustal')
-
-length = alignment.get_alignment_length()
-num_seqs = len(alignment)
 seq_ids = [record.id for record in alignment]
 ```
 
-### Slice Alignments
-```python
-# Get subset of sequences
-subset = alignment[0:5]  # First 5 sequences
-
-# Get subset of columns
-trimmed = alignment[:, 50:150]  # Columns 50-149
-
-# Combine slicing
-region = alignment[0:5, 50:150]  # 5 sequences, columns 50-149
-```
+Column slices past the alignment length silently return 0 columns (and 0-length records on write); check `alignment.get_alignment_length()` first.
 
 ## Creating Alignments Programmatically
 
@@ -233,21 +230,22 @@ Not all formats support annotations. Converting between formats can silently dis
 | PHYLIP | No | No | No |
 | FASTA | No | No | No |
 
-Converting Stockholm to FASTA or PHYLIP discards all annotations, secondary structure markup, and per-residue quality scores. If annotations matter, keep a Stockholm master copy.
+Converting Stockholm to FASTA or PHYLIP discards all annotations, secondary structure markup, and per-residue quality scores. Even Stockholm to Stockholm through `AlignIO` drops the `#=GF` header lines (`ID`, `AC`, `DE`, ...; verified on Pfam PF00042). If annotations matter, keep the original Stockholm file as the master copy.
 
 ## Format-Specific Notes
 
 ### PHYLIP Format Pitfalls
 
-PHYLIP has two incompatible variants (interleaved vs sequential) and two name-length modes (strict vs relaxed). Confusing these causes silent data corruption.
+PHYLIP has two incompatible variants (interleaved vs sequential) and two name-length modes (strict vs relaxed). Mixing them up usually fails loudly (`ValueError` on read), but strict names are truncated to 10 characters.
 
-**Strict PHYLIP** truncates sequence names to exactly 10 characters. This can silently merge distinct sequences whose names share a 10-character prefix (e.g., `Homo_sapiens_chr1` and `Homo_sapiens_chr2` both become `Homo_sapie`).
+**Strict PHYLIP** truncates sequence names to exactly 10 characters. Writing distinct names that share a 10-character prefix (e.g., `Homo_sapiens_chr1` and `Homo_sapiens_chr2`) raises `ValueError: Repeated name 'Homo_sapie'` (`phylip-sequential` truncates and raises the same way). The silent case is *reading* a foreign strict file whose names collide: both records are accepted with the same id. Names that stay unique are truncated without warning.
 
 ```python
 # Strict PHYLIP (10-char names, interleaved) -- only for tools requiring it
 alignment = AlignIO.read('file.phy', 'phylip')
 
-# Sequential PHYLIP (10-char names, one sequence at a time) -- PAML/codeml
+# Sequential PHYLIP (10-char names, one sequence at a time) -- PAML/codeml.
+# Shorten ids to <=10 unique characters first (NCBI headers such as 'lcl|NM_001...' collide)
 alignment = AlignIO.read('file.phy', 'phylip-sequential')
 
 # Relaxed PHYLIP (no name limit) -- RAxML-NG, IQ-TREE (recommended default)
@@ -265,27 +263,42 @@ Biopython's `'phylip-relaxed'` writes a single space between name and sequence. 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | RAxML-NG: `terminating with uncaught exception ... bad alphabet` | Stop codons (`*`) in protein alignment | Replace `*` with `X` before writing |
-| IQ-TREE: `not a valid PHYLIP file` | Sequence name contains `:` (NEXUS-tree-style refs) | Sanitize names: `re.sub(r'[():,]', '_', record.id)` |
+| IQ-TREE 3.1.3: `WARNING: Some sequence names are changed` | Foreign file with `:` in a name (IQ-TREE renames it; Biopython's relaxed writer already turns `:` into `|` and drops `(` `,`) | Sanitize names yourself: `re.sub(r'[():,]', '_', record.id)` |
 | PhyML: silently truncated names | Names >100 chars | PhyML truncates without warning at 100 chars in current build |
-| codeml: `cannot read sequences` | Used `phylip-relaxed` instead of `phylip-sequential` | codeml requires strict sequential |
+| codeml: `Error in sequence data file ... separate the sequence from its name by 2 or more spaces` | Used `phylip-relaxed` (single space, interleaved) instead of `phylip-sequential` | codeml requires sequential with short unique names |
 
-Always verify by running the downstream tool's "validate input only" mode (e.g. `iqtree2 -s file.phy --check`) before committing to a long compute.
+IQ-TREE has no validate-only flag (`--check` is invalid). Before a long run, check the input with a zero-iteration run (checked on IQ-TREE 3.1.3; a wrong sequence length gives `ERROR: Line N: Sequence X has wrong sequence length`), or re-read the file with `AlignIO.read`:
+
+```bash
+iqtree3 -s file.phy -n 0 -m LG -redo -pre check   # prints 'Alignment has N sequences with M columns'
+```
 
 ### MAF Block Coordinate Conventions
 
 UCSC MAF (read via `AlignIO.parse(file, 'maf')`) returns blocks with per-row `annotations`:
 - `start` (0-based; converts directly to BED but is off-by-one vs GFF)
 - `size` (length on src strand)
-- `strand` (`+` or `-`)
+- `strand` (an **int**, `1` or `-1`, not the file's `+` / `-` characters; comparing to `'-'` never matches and silently returns unconverted minus-strand starts)
 - `srcSize` (length of source chromosome)
 
 For minus-strand rows, `start` is measured from the END of the source contig: the corresponding plus-strand start is `srcSize - start - size`. Without this conversion, lifting MAF to genome coordinates places minus-strand blocks at the wrong locus. Reference: UCSC MAF spec at genome.ucsc.edu/FAQ/FAQformat.html#format5.
 
 ```python
 def maf_to_plus_strand_coords(row_anno):
-    if row_anno['strand'] == '-':
+    if row_anno['strand'] == -1:
         return row_anno['srcSize'] - row_anno['start'] - row_anno['size']
     return row_anno['start']
+
+# Ground-truth check against your own reference (contigs: dict name -> str). Bio.Seq.reverse_complement
+# of the plus-strand slice must equal the ungapped minus-strand row.
+for block in AlignIO.parse('blocks.maf', 'maf'):
+    for record in block:
+        a = record.annotations
+        start = maf_to_plus_strand_coords(a)
+        fragment = Seq(contigs[record.id.split('.', 1)[1]][start:start + a['size']])
+        if a['strand'] == -1:
+            fragment = fragment.reverse_complement()
+        assert str(fragment).upper() == str(record.seq).replace('-', '').upper()
 ```
 
 ### Stockholm Format Annotations
@@ -314,46 +327,43 @@ for record in alignment:
 ss_cons = alignment.column_annotations.get('secondary_structure')
 ```
 
-**Round-trip caveat:** `AlignIO.write(alignment, 'out.fasta', 'fasta')` discards every Stockholm annotation silently. Re-reading and re-writing as Stockholm preserves GC/GR but dropped/added sequences invalidate the per-residue annotations -- regenerate annotations after edits.
+**Round-trip caveat:** re-reading and re-writing as Stockholm preserves GS/GR/GC, but dropped/added sequences invalidate the per-residue annotations -- regenerate annotations after edits.
 
-**Pfam-style `name/start-end` identifier convention:** Pfam, Rfam, and Dfam Stockholm IDs (e.g. `Q9Y6Y0/45-198`) encode a 1-based inclusive region. Biopython does not split this; before passing to RAxML or IQ-TREE, parse the suffix into `record.annotations['start']` / `['end']` and strip from `record.id`, then restore it after.
+**Pfam-style `name/start-end` identifier convention:** Pfam, Rfam, and Dfam Stockholm IDs (e.g. `Q9Y6Y0/45-198`) encode a 1-based inclusive region. `AlignIO` already copies the region into `record.annotations['start']` / `['end']` (and the name into `['accession']`) but leaves the suffix on `record.id`. IQ-TREE 3.1.3 accepts ids with `/`; strip the suffix from `record.id` only for a tool that rejects it, then restore it after.
 
 ### A2M / A3M Conventions
 
-A2M (HMMER) and A3M (HHsuite, ColabFold) encode match vs insert columns by case (uppercase / `-` = match column, lowercase / `.` = insert column). A2M pads inserts across rows so it loads as a rectangular MSA; A3M does not, so convert with HHsuite `reformat.pl a3m a2m in.a3m out.a2m` (or `pyhmmer.easel.MSAFile(..., format='a2m')`) before parsing as a normal alignment.
+A2M (HMMER) and A3M (HHsuite, ColabFold) encode match vs insert columns by case (uppercase / `-` = match column, lowercase = insert; `.` pads insert columns in padded A2M). HMMER `hmmalign --outformat A2M` writes **ragged** rows (lowercase inserts, no `.` padding), so `AlignIO.read(..., 'fasta')` raises `ValueError: Sequences must all be the same length`. A2M padded by HH-suite loads as a rectangular MSA (`AlignIO.read(..., 'fasta')` or `Align.read(..., 'a2m')`). A3M is not padded and has no reader in AlignIO or pyhmmer (`format='a3m'` raises `InvalidParameter`; pyhmmer reads `a2m`), so convert it first with HHsuite `reformat.pl a3m a2m in.a3m out.a2m`, or take the match columns straight from the ragged rows.
 
-**reformat.pl pitfall:** HHsuite's `reformat.pl a3m a2m` uses the FIRST sequence in the A3M as the match-state reference. ColabFold MSAs typically place the query first, which is the desired reference; merged or sorted A3Ms can have a non-query first sequence, producing match-state assignments that mis-align the query. Either (a) verify the first sequence is the query before reformatting, or (b) renormalise with `hhfilter -i in.a3m -o out.a3m -id 100 -qid 0 -cov 0` before running `reformat.pl`. A3M files emitted by `hhblits` always have the query first; A3M files concatenated from MSA databases do not.
+**reformat.pl pitfall:** HHsuite's `reformat.pl a3m a2m` uses the FIRST sequence in the A3M as the match-state reference (verified: the same A3M with a different first record gives different padding/case for the other rows). ColabFold MSAs typically place the query first, which is the desired reference; merged or sorted A3Ms can have a non-query first sequence, producing match-state assignments that mis-align the query. Move the query record to the first position before reformatting (`hhfilter` does not reorder records, so it is not a fix). A3M files emitted by `hhblits` always have the query first; A3M files concatenated from MSA databases do not.
 
 ```python
-alignment = AlignIO.read('hhsearch.a2m', 'fasta')
-match_only_seqs = [
-    ''.join(c for c in str(r.seq) if c.isupper() or c == '-')
-    for r in alignment
-]
+from Bio import SeqIO
+
+# SeqIO.parse does not require equal row lengths, so this works for ragged hmmalign A2M and padded A2M alike
+match_only_seqs = {
+    r.id: ''.join(c for c in str(r.seq) if c.isupper() or c == '-')
+    for r in SeqIO.parse('hits.a2m', 'fasta')
+}   # every row has one character per model match state (117 for the Pfam PF00042 HMM)
 ```
 
 ### Streaming Large Stockholm Databases
 
-`Bio.AlignIO.read()` is in-memory; for Pfam-A.full (multi-gigabyte; ~22,000 family alignments in Pfam 37) or BFD (>2 TB), use `pyhmmer.easel.MSAFile` for streaming Stockholm or A3M.
+`Bio.AlignIO.read()` is in-memory; for Pfam-A.full (multi-gigabyte; ~22,000 family alignments in Pfam 37) or BFD (>2 TB), use `pyhmmer.easel.MSAFile` for streaming Stockholm or A2M (checked on pyhmmer 0.12.3).
 
 ```python
 import pyhmmer
 
 with pyhmmer.easel.MSAFile('Pfam-A.full', digital=True) as msa_file:
     for msa in msa_file:
-        if msa.nseq < 50:
+        nseq, alen = len(msa.sequences), len(msa.alignment[0])   # DigitalMSA has no .nseq / .alen
+        if nseq < 50:
             continue
         weights = msa.compute_weights(method='pb')
-        print(msa.name.decode(), msa.nseq, msa.alen, f'sum_w={sum(weights):.1f}')
+        print(msa.name, nseq, alen, f'sum_w={sum(weights):.1f}')   # msa.name is str, not bytes
 ```
 
 `msa.compute_weights(method='pb')` computes Henikoff PB weights via the same Easel routine HMMER uses; the weights sum to the number of sequences (not Neff). For an Henikoff-style Neff estimate, see `msa-parsing/examples/neff.py`.
-
-### Clustal Format
-```python
-# Clustal preserves conservation symbols in file but not when parsed
-alignment = AlignIO.read('clustal.aln', 'clustal')
-```
 
 ## Batch Processing Multiple Files
 
@@ -375,21 +385,20 @@ for input_file in input_dir.glob('*.aln'):
 
 ## Alternative: Bio.Align Module I/O
 
-**Goal:** Use the modern Bio.Align module for alignment I/O with access to newer features like counts and substitutions.
+**Goal:** Use the newer Bio.Align module for alignment I/O with access to features like counts and substitutions.
 
-**Approach:** Use `Align.read()`, `Align.parse()`, and `Align.write()` which return `Alignment` objects instead of `MultipleSeqAlignment`.
-
-The newer `Bio.Align` module provides its own I/O functions that return `Alignment` objects (instead of `MultipleSeqAlignment`). These support additional formats and provide access to modern alignment features.
+**Approach:** Use `Align.read()`, `Align.parse()`, and `Align.write()` which return `Alignment` objects instead of `MultipleSeqAlignment`. Stick to FASTA, Clustal, PHYLIP and MAF here; on Biopython 1.88 Stockholm through `Bio.Align` fails (see Common Errors) and its NEXUS writer needs `molecule_type`, so use `Bio.AlignIO` for those.
 
 ```python
 from Bio import Align
 
 # Read single alignment (returns Alignment object)
 alignment = Align.read('alignment.aln', 'clustal')
+print(alignment.shape, alignment.counts())   # (n_seqs, n_columns), AlignmentCounts
 
-# Parse multiple alignments
-for alignment in Align.parse('multi.sto', 'stockholm'):
-    print(f'Alignment with {len(alignment)} sequences')
+# Parse multiple alignments (e.g. MAF blocks)
+for block in Align.parse('blocks.maf', 'maf'):
+    print(f'Alignment with {len(block)} sequences')
 
 # Write alignment
 Align.write(alignment, 'output.fasta', 'fasta')
@@ -400,8 +409,9 @@ Align.write(alignment, 'output.fasta', 'fasta')
 | Use Case | Module |
 |----------|--------|
 | Legacy code, MultipleSeqAlignment needed | `Bio.AlignIO` |
-| Modern features (counts, substitutions) | `Bio.Align` |
-| Format conversion | Either works |
+| Stockholm (annotations), NEXUS, `molecule_type` handling | `Bio.AlignIO` |
+| Modern features (counts, substitutions) on FASTA / Clustal / PHYLIP / MAF | `Bio.Align` |
+| Format conversion | `Bio.AlignIO` (works for every format above) |
 | Working with pairwise alignments | `Bio.Align` |
 
 ## Quick Reference: Common Operations
@@ -420,10 +430,13 @@ Align.write(alignment, 'output.fasta', 'fasta')
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `ValueError: No records` | Empty file | Check file path and format |
-| `ValueError: More than one record` | Multiple alignments with `read()` | Use `parse()` instead |
-| `ValueError: Sequences different lengths` | Invalid alignment | Ensure all sequences same length |
-| `ValueError: unknown format` | Unsupported format string | Check supported formats list |
+| `ValueError: No records found in handle` | Empty file | Check file path and format |
+| `ValueError: More than one record found in handle` | Multiple alignments with `read()` | Use `parse()` instead |
+| `ValueError: Sequences must all be the same length` | Unaligned or ragged input (e.g. `hmmalign` A2M, raw A3M) | Align first, or pad (see A2M / A3M Conventions) |
+| `ValueError: Unknown format 'a2m'` | Format string not supported by `AlignIO` | Use `'fasta'` for padded A2M, or `Align.read(..., 'a2m')` |
+| `ValueError: Need the molecule type to be defined` | NEXUS write without `molecule_type` | See "NEXUS Output Needs a Molecule Type" |
+| `TypeError: Any per-letter annotation should be a Python sequence ...` from `Align.read/parse(..., 'stockholm')` | Bio.Align Stockholm reader on real Pfam (Biopython 1.88) | Use `AlignIO.read(..., 'stockholm')` |
+| `AttributeError: ... no attribute 'column_annotations'` from `Align.write(..., 'stockholm')` | Bio.Align Stockholm writer needs an annotated alignment | Use `AlignIO.write(..., 'stockholm')` |
 
 ## Related Skills
 
