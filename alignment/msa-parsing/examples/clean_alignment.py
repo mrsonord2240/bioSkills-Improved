@@ -3,34 +3,37 @@
 
 from Bio import AlignIO
 from Bio.Align import MultipleSeqAlignment
-from Bio.SeqRecord import SeqRecord
-from Bio.Seq import Seq
+
+from msa_utils import example_path, guess_format, normalize_alignment, select_columns
+
+
+def find_gappy_columns(alignment, threshold=0.5):
+    alignment = normalize_alignment(alignment)
+    num_seqs = len(alignment)
+    return [i for i in range(alignment.get_alignment_length())
+            if alignment[:, i].count('-') / num_seqs >= threshold]
+
 
 def remove_gappy_columns(alignment, threshold=0.5):
-    num_seqs = len(alignment)
-    keep_columns = []
-    for col_idx in range(alignment.get_alignment_length()):
-        column = alignment[:, col_idx]
-        gap_fraction = column.count('-') / num_seqs
-        if gap_fraction < threshold:
-            keep_columns.append(col_idx)
+    gappy = set(find_gappy_columns(alignment, threshold))
+    keep = [i for i in range(alignment.get_alignment_length()) if i not in gappy]
+    return select_columns(alignment, keep)  # keeps record and column annotations
 
-    new_records = []
-    for record in alignment:
-        new_seq = ''.join(str(record.seq)[i] for i in keep_columns)
-        new_records.append(SeqRecord(Seq(new_seq), id=record.id, description=record.description))
-    return MultipleSeqAlignment(new_records)
 
 def filter_by_gap_content(alignment, max_gap_fraction=0.2):
-    filtered = []
-    for record in alignment:
-        gap_fraction = str(record.seq).count('-') / len(record.seq)
-        if gap_fraction <= max_gap_fraction:
-            filtered.append(record)
-    return MultipleSeqAlignment(filtered)
+    normalized = normalize_alignment(alignment)
+    fractions = [str(r.seq).count('-') / len(r.seq) for r in normalized]
+    kept = [r for r, f in zip(alignment, fractions) if f <= max_gap_fraction]
+    if not kept:
+        raise ValueError(f'max_gap_fraction={max_gap_fraction} removes all {len(alignment)} sequences '
+                         f'(lowest gap fraction is {min(fractions):.2f})')
+    return MultipleSeqAlignment(kept, annotations=alignment.annotations,
+                                column_annotations=alignment.column_annotations)
+
 
 if __name__ == '__main__':
-    alignment = AlignIO.read('alignment.fasta', 'fasta')
+    path = example_path('example_alignment.fasta')
+    alignment = AlignIO.read(path, guess_format(path))
     print(f'Original: {len(alignment)} sequences, {alignment.get_alignment_length()} columns')
 
     # threshold=0.5: Remove columns with >=50% gaps. Standard cutoff for phylogenetics.
@@ -43,5 +46,5 @@ if __name__ == '__main__':
     cleaned = filter_by_gap_content(cleaned, max_gap_fraction=0.2)
     print(f'After sequence filtering: {len(cleaned)} sequences, {cleaned.get_alignment_length()} columns')
 
-    AlignIO.write(cleaned, 'cleaned_alignment.fasta', 'fasta')
+    AlignIO.write(normalize_alignment(cleaned, upper=False), 'cleaned_alignment.fasta', 'fasta')  # FASTA gaps as '-'
     print('Saved to cleaned_alignment.fasta')

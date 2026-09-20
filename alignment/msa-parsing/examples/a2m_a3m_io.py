@@ -1,20 +1,24 @@
 '''Read A2M / A3M alignments (HMMER, HHsuite, ColabFold) and extract match-only columns.
 
-A2M: each sequence has identical match-column count; lowercase = insert state.
+A2M: each sequence has identical match-column count; lowercase = insert state, '.' = gap
+in an insert column, '-' = gap in a match column.
 A3M: insert columns are not padded; lowercase characters appear inline per sequence.
 '''
 # Reference: biopython 1.83+ | Verify API if version differs
 
 from Bio import AlignIO
 
+from msa_utils import example_path
+
 def match_only_columns(a2m_alignment):
+    # Keep upper-case residues and '-' (match columns); drops lowercase inserts and their '.' padding.
     return [
         ''.join(c for c in str(record.seq) if c.isupper() or c == '-')
         for record in a2m_alignment
     ]
 
 if __name__ == '__main__':
-    alignment = AlignIO.read('hhsearch_output.a2m', 'fasta')
+    alignment = AlignIO.read(example_path('example.a2m'), 'fasta')
     print(f'A2M alignment: {len(alignment)} sequences, {alignment.get_alignment_length()} columns')
 
     match_columns = match_only_columns(alignment)
