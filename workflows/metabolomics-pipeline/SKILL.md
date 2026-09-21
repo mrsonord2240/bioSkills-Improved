@@ -43,6 +43,8 @@ This pipeline is only as honest as its weakest stage: a flawless feature table f
 If code throws ImportError, AttributeError, or TypeError, introspect the installed
 package and adapt the example to match the actual API rather than retrying.
 
+Install: `BiocManager::install(c('xcms', 'CAMERA', 'MetaboAnalystR', 'ropls', 'pmp', 'imputeLCMD'))`
+
 # Metabolomics Pipeline
 
 **"Process my LC-MS metabolomics data end-to-end"** -> Chain xcms feature extraction, QC/normalization, confidence-stratified annotation, validated statistics, and background-aware pathway mapping, treating each stage's output as a hypothesis its component skill scrutinizes.
@@ -67,6 +69,20 @@ This skill is an orchestrator: it sequences the five component skills and enforc
 | 3. Annotation | the MSI/Schymanski confidence level of every name | A database hit is Level 4-5, not an identification; ambiguous m/z inflates downstream pathways | metabolomics/metabolite-annotation |
 | 4. Statistics | univariate FDR + permutation-validated multivariate, reconciled | A clean PLS-DA score plot is the generic output of p>>n; R2 is no evidence; scaling changes conclusions | metabolomics/statistical-analysis |
 | 5. Pathway mapping | ORA on IDs vs mummichog on m/z, with an explicit background | The background IS the null; enrichment launders annotation uncertainty into confident biology | metabolomics/pathway-mapping |
+
+## Required Inputs
+
+1. Raw MS data: centroided mzML/mzXML (convert vendor formats with ProteoWizard msConvert, centroiding during conversion).
+2. Sample metadata: one row per file with sample, condition, batch, injection_order and a `sample_group` column marking QCs (`QC`/`Control`/`Treatment`); biological groups randomized across batches.
+3. Pooled QC injections bracketing the run and about one per 5-10 samples: drift correction, RSD/D-ratio filtering and the PQN reference all depend on them, so without QCs there is no honest pipeline.
+
+```csv
+sample,sample_group,condition,batch,injection_order
+QC1.mzML,QC,QC,1,1
+Sample1.mzML,Control,Control,1,2
+Sample2.mzML,Treatment,Treatment,1,3
+QC2.mzML,QC,QC,1,4
+```
 
 ## Pipeline Flow
 
@@ -160,11 +176,12 @@ if (any(wiped)) {
 # QRILC (MNAR / left-censored) is only valid on log-scale intensities; on raw intensities it
 # silently draws negative (impossible) values. Round-trip through log2/2^x, per normalization-qc.
 log_mat <- log2(nm)
+set.seed(123)   # impute.QRILC draws random values; seed it so the imputed matrix is reproducible
 imputed <- 2^(impute.QRILC(log_mat, tune.sigma = 1)[[1]])
 stopifnot(min(imputed, na.rm = TRUE) >= 0, !anyNA(imputed))  # no NAs may reach Stage 4 (opls() cannot tolerate them)
 ```
 
-Drift correction should lower QC RSD AND leave biological-sample RSD unchanged; if biological RSD rises, the spline absorbed signal. Mechanism-aware imputation (QRILC/GSimp for left-censored zeros) replaces the old half-min step, which collapses imputed-subset variance and inflates false significance. `imputed` (not `normalized`) is what Stage 4 receives -- feeding `normalized` directly, unimputed and still carrying any wiped samples, is exactly the bug that crashes real multi-batch data (see Stage 4 below). Verified end to end on real MTBLS79 data (2433 features, 172 samples, 8 batches): 90 wiped samples dropped, 82 survive with only sparse residual NAs (max 18% per sample), QRILC imputes cleanly, and the Stage 4 OPLS-DA below fits successfully (`pR2Y = pQ2 = 0.001`).
+Drift correction should lower QC RSD AND leave biological-sample RSD unchanged; if biological RSD rises, the spline absorbed signal. `imputed` (not `normalized`) is what Stage 4 receives. Verified end to end on real MTBLS79 data (2433 features, 172 samples, 8 batches): 90 wiped samples dropped, 82 survive with only sparse residual NAs (max 18% per sample), QRILC imputes cleanly, and the Stage 4 OPLS-DA below fits successfully (`pR2Y = pQ2 = 0.001`).
 
 ## Stage 3 -- Annotation Before Claiming IDs
 
@@ -256,6 +273,27 @@ mSet <- CalculateOraScore(mSet, 'rbc', 'hyperg')
 ## Alternative Front End -- MS-DIAL
 
 When peak detection happens in the MS-DIAL GUI/console (MS2Dec deconvolution, GC-EI, DIA/SWATH), import the alignment-result table and enter the pipeline at Stage 2. The framing is unchanged: the imported table is still a parameterized hypothesis. See metabolomics/msdial-preprocessing for the export-parsing details, then continue with normalization-qc onward.
+
+The block below turns the export into the objects Stage 2 expects (`feat`, `defs`, `sample_class`, `injection_order`, `batch_id`); run Stage 2 from `fm <- feat` on. Checked on a real MSDIALCUI 5.5.260820 export, whose 4 header rows (`Class`, `File type`, `Injection order`, `Batch ID`) precede the column header and whose `Class` cell marks where the per-sample columns start.
+
+```r
+export_file <- Sys.glob('AlignResult-*.mdalign')[1]
+hdr <- strsplit(readLines(export_file, n = 4), '\t', fixed = TRUE)   # class / file type / order / batch
+msdial <- read.csv(export_file, sep = '\t', skip = 4, check.names = FALSE)
+s_idx <- (which(hdr[[1]] == 'Class') + 1):length(hdr[[1]])          # sample columns follow the "Class" cell
+file_type <- hdr[[2]][s_idx]
+use <- file_type %in% c('Sample', 'QC')      # Blank/Standard injections leave the matrix (blank filter: normalization-qc)
+
+feat <- as.matrix(msdial[, colnames(msdial)[s_idx][use]]); storage.mode(feat) <- 'numeric'
+feat[feat == 0] <- NA                        # MS-DIAL writes not-detected as 0; Stage 2's detection filter counts NA
+rownames(feat) <- paste0('FT', msdial[['Alignment ID']])
+defs <- data.frame(mzmed = msdial[['Average Mz']], rtmed = msdial[['Average Rt(min)']] * 60,  # seconds, as xcms
+                   row.names = rownames(feat))
+sample_class <- ifelse(file_type[use] == 'QC', 'QC', hdr[[1]][s_idx][use])   # pooled QCs must be labelled 'QC'
+injection_order <- as.integer(hdr[[3]][s_idx][use])
+batch_id <- as.integer(hdr[[4]][s_idx][use])
+stopifnot(ncol(feat) == length(sample_class), !anyNA(injection_order), !anyNA(batch_id))
+```
 
 ## QC Checkpoints
 
