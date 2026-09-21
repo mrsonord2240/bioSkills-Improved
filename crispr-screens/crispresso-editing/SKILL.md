@@ -43,19 +43,27 @@ Required inputs:
 | Experimental design | Mode | Key parameters |
 |---------------------|------|----------------|
 | Single amplicon, single sample (e.g. pilot edit validation) | `CRISPResso` | `--amplicon_seq`, `--guide_seq` |
-| Same amplicon, many samples (e.g. timecourse, dose response) | `CRISPRessoBatch` | `--batch_settings` table |
-| Many amplicons, pooled in one library (e.g. arrayed validation pool) | `CRISPRessoPooled` | `--amplicons_file` |
-| Off-target survey from whole-genome BAM | `CRISPRessoWGS` | `--bam_file`, `--reference_file`, `--region_file` |
+| Same amplicon, many samples (e.g. timecourse, dose response) | `CRISPRessoBatch` | `--batch_settings` table; see `references/batch-pooled-wgs.md` |
+| Many amplicons, pooled in one library (e.g. arrayed validation pool) | `CRISPRessoPooled` | `--amplicons_file`; read `references/batch-pooled-wgs.md` first (default `--min_reads_to_use_region` silently yields all-`NA` rows) |
+| Off-target survey from whole-genome BAM | `CRISPRessoWGS` | `--bam_file`, `--reference_file`, `--region_file`; read `references/batch-pooled-wgs.md` (low-read regions come back `NA`) |
 | Comparing two CRISPResso runs (e.g. condition A vs B) | `CRISPRessoCompare` | two positional output folders |
 | HDR / knock-in validation | `CRISPResso` with `--expected_hdr_amplicon_seq` | Same as base CRISPResso |
-| Cytosine base editor (C->T) | `CRISPResso --base_editor_output` | `--conversion_nuc_from C --conversion_nuc_to T` |
-| Adenine base editor (A->G) | `CRISPResso --base_editor_output` | `--conversion_nuc_from A --conversion_nuc_to G` |
-| Prime editor (templated edit) | `CRISPResso` with pegRNA parameters | `--prime_editing_pegRNA_spacer_seq`, `--prime_editing_pegRNA_extension_seq`, `--prime_editing_pegRNA_scaffold_seq` |
+| Cytosine base editor (C->T) | `CRISPResso --base_editor_output` | `--conversion_nuc_from C --conversion_nuc_to T`; see `references/base-editor.md` |
+| Adenine base editor (A->G) | `CRISPResso --base_editor_output` | `--conversion_nuc_from A --conversion_nuc_to G`; see `references/base-editor.md` |
+| Prime editor (templated edit) | `CRISPResso` with pegRNA parameters | `--prime_editing_pegRNA_spacer_seq`, `--prime_editing_pegRNA_extension_seq`, `--prime_editing_pegRNA_scaffold_seq`; see `references/prime-editor.md` |
 
 **Fails when:**
 - Pooled-amplicon mode applied to amplicons that share primer sequences -- reads get assigned to whichever amplicon comes first. Design primers with >=3-bp distinguishing regions or use unique molecular identifiers.
 - Base editor mode without specifying `--conversion_nuc_from`/`--conversion_nuc_to` -- defaults assume CBE (C->T); ABE runs will misclassify.
 - Prime editor mode without `--prime_editing_pegRNA_extension_seq` -- the RTT template is missing, no edit is detectable.
+
+## Reference Files
+
+| File | Read when |
+|------|-----------|
+| `references/base-editor.md` | Quantifying CBE/ABE editing: worked commands, target vs bystander reading table, bystander-inflation failure mode |
+| `references/prime-editor.md` | Quantifying pegRNA-templated edits: worked command, intended-edit / scaffold reading table, high-scaffold failure mode |
+| `references/batch-pooled-wgs.md` | Running CRISPRessoBatch, CRISPRessoPooled or CRISPRessoWGS: settings-file formats, output layout, the `NA`-row thresholds |
 
 ## The Quantification Window
 
@@ -124,173 +132,6 @@ how much filtering happened.
 | `Quantification_window_nucleotide_percentage_table.txt` | Same, restricted to quantification window (base-editor analysis) |
 
 
-## Base Editor Quantification
-
-**Goal:** Distinguish target base conversion from bystander edits and indel byproducts.
-
-**Approach:** Run CRISPResso with `--base_editor_output` flag and specify the conversion direction; widen the quantification window to cover the editing window.
-
-```bash
-# Cytosine Base Editor (CBE): C->T conversion
-CRISPResso \
-    --fastq_r1 cbe_sample.fastq.gz \
-    --amplicon_seq <amplicon_seq> \
-    --guide_seq <20nt_protospacer> \
-    --base_editor_output \
-    --conversion_nuc_from C \
-    --conversion_nuc_to T \
-    --quantification_window_size 10 \
-    --quantification_window_center -10 \
-    --output_folder cbe_results \
-    --name cbe_sample
-
-# Adenine Base Editor (ABE): A->G conversion
-CRISPResso \
-    --fastq_r1 abe_sample.fastq.gz \
-    --amplicon_seq <amplicon_seq> \
-    --guide_seq <20nt_protospacer> \
-    --base_editor_output \
-    --conversion_nuc_from A \
-    --conversion_nuc_to G \
-    --quantification_window_size 10 \
-    --quantification_window_center -10 \
-    --output_folder abe_results \
-    --name abe_sample
-```
-
-**Reading the output:**
-
-| Metric | Where | Interpretation |
-|--------|-------|----------------|
-| Target editing % | `Quantification_window_nucleotide_percentage_table.txt`, target C/A row | Primary endpoint |
-| Bystander editing % | Same table, other C/A positions in window | Off-target byproduct in window |
-| Indel rate | `CRISPResso_quantification_of_editing_frequency.txt` | Cas9-like cut artifacts (limit in Quantitative Thresholds) |
-| Substitution-vs-indel ratio | Derived | Distinguishes clean BE from cut-mediated mutagenesis (cutoffs in Quantitative Thresholds) |
-
-**Critical:** Bystander editing is intrinsic to base editors (the deaminase acts across a 5-nt window); it is not noise. Report bystander rates alongside target rates. See [[base-editing-analysis]] for variant-call implications.
-
-## Prime Editor Quantification
-
-**Goal:** Quantify pegRNA-templated edits versus indel byproducts and partial edits.
-
-**Approach:** Provide spacer, extension (PBS + RTT), and scaffold sequences; CRISPResso identifies reads matching the intended edit.
-
-```bash
-CRISPResso \
-    --fastq_r1 pe_sample.fastq.gz \
-    --amplicon_seq <amplicon_seq> \
-    --guide_seq <20nt_protospacer> \
-    --prime_editing_pegRNA_spacer_seq <20nt_protospacer> \
-    --prime_editing_pegRNA_extension_seq <RTT+PBS_sequence> \
-    --prime_editing_pegRNA_scaffold_seq <scaffold_sequence> \
-    --output_folder pe_results \
-    --name pe_sample
-
-# Output adds:
-#   Prime-editing outcomes are extra amplicon rows (Reference / Prime-edited / Scaffold-incorporated)
-#   inside CRISPResso_quantification_of_editing_frequency.txt
-```
-
-**Reading prime-editor output:**
-
-| Metric | Interpretation |
-|--------|----------------|
-| Intended edit % | The pegRNA-encoded edit was correctly installed |
-| Scaffold incorporation % | Reverse transcription read into scaffold instead of stopping at edit; failure mode |
-| Indel % | Nick-only editing without templated repair; common at low-PE-activity sites |
-| Unmodified % | Read matches the reference exactly |
-
-Acceptance levels are in Quantitative Thresholds. See [[prime-editing-screens]] for pegRNA design rules.
-
-## Batch Mode (Multi-Sample, Same Amplicon)
-
-**Goal:** Process tens to hundreds of samples with same amplicon design (e.g., a timecourse, dose response, or replicate panel).
-
-**Approach:** Provide a tab-separated batch settings file with per-sample parameters; CRISPRessoBatch runs all in parallel.
-
-```bash
-# batch_settings.txt (tab-separated, headers required)
-# name    fastq_r1                fastq_r2                amplicon_seq    guide_seq
-# t0      t0_R1.fq.gz             t0_R2.fq.gz             ACGT...         GUIDE
-# t6      t6_R1.fq.gz             t6_R2.fq.gz             ACGT...         GUIDE
-# t12     t12_R1.fq.gz            t12_R2.fq.gz            ACGT...         GUIDE
-# t24     t24_R1.fq.gz            t24_R2.fq.gz            ACGT...         GUIDE
-
-CRISPRessoBatch \
-    --batch_settings batch_settings.txt \
-    --batch_output_folder batch_run \
-    --skip_failed \
-    --n_processes 8
-
-# Outputs:
-#   batch_run/CRISPRessoBatch_on_<batch file name>/CRISPRessoBatch_RUNNING_LOG.txt
-#   batch_run/CRISPRessoBatch_on_<batch file name>/CRISPRessoBatch_quantification_of_editing_frequency.txt  (aggregated)
-#   batch_run/CRISPRessoBatch_on_<batch file name>/CRISPResso_on_<name>/ for each sample
-```
-
-## Pooled-Amplicon Mode
-
-**Goal:** Process multi-amplicon sequencing libraries (e.g., arrayed validation pools).
-
-**Approach:** Provide an amplicon table with one row per target; CRISPRessoPooled de-multiplexes reads to the correct amplicon.
-
-```bash
-# amplicons.txt (tab-separated; header may vary by CRISPResso2 version)
-# amplicon_name  amplicon_seq    guide_seq
-# BRCA1_exon3    ACGT...         GUIDE1
-# TP53_exon7     ACGT...         GUIDE2
-# KRAS_codon12   ACGT...         GUIDE3
-
-# --min_reads_to_use_region 100: see the note below (the default of 1000 skips small amplicons)
-CRISPRessoPooled \
-    --fastq_r1 pooled_R1.fastq.gz \
-    --fastq_r2 pooled_R2.fastq.gz \
-    --amplicons_file amplicons.txt \
-    --output_folder pooled_run \
-    --min_reads_to_use_region 100 \
-    --n_processes 8
-
-# Outputs:
-#   pooled_run/CRISPRessoPooled_on_<fastq name>/SAMPLES_QUANTIFICATION_SUMMARY.txt
-#   pooled_run/CRISPRessoPooled_on_<fastq name>/CRISPResso_on_<amplicon>/ for each amplicon
-```
-
-**`--min_reads_to_use_region` defaults to 1000.** Any amplicon with fewer aligned reads than this is silently
-skipped -- CRISPRessoPooled still exits 0 and writes a complete-looking `SAMPLES_QUANTIFICATION_SUMMARY.txt`,
-but every field for that amplicon is `NA` (confirmed: a real 2-amplicon, ~250-reads/amplicon pilot pool --
-exactly the "arrayed validation pool" use case this mode is for -- returns all-NA at the default). Set
-`--min_reads_to_use_region` below the expected per-amplicon read depth for pilot/validation-scale pools.
-Always check `SAMPLES_QUANTIFICATION_SUMMARY.txt` for `NA` rows before trusting the output.
-
-## WGS Off-Target Mode
-
-**Goal:** Quantify off-target editing from whole-genome sequencing.
-
-**Approach:** Provide BAM file + reference + BED file of suspected off-target sites; CRISPResso extracts reads from each region and quantifies edits.
-
-```bash
-CRISPRessoWGS \
-    --bam_file aligned.bam \
-    --reference_file genome.fa \
-    --region_file off_targets.txt \
-    --output_folder wgs_run \
-    --n_processes 8
-
-# Outputs:
-#   wgs_run/CRISPRessoWGS_on_<bam name>/SAMPLES_QUANTIFICATION_SUMMARY.txt
-#   wgs_run/CRISPRessoWGS_on_<bam name>/CRISPResso_on_<region>/ for each analysed region
-```
-
-The flag names are exact: `--bam` alone is rejected (`ambiguous option: --bam could match --bam_output, --bam_file`).
-`--region_file` is a tab-separated `chr  start  end  name` table with no header (e.g. `chr9  962  1198  HEK3`).
-**`--min_reads_to_use_region` defaults to 10 for WGS:** a region with fewer reads is skipped, its row in
-`SAMPLES_QUANTIFICATION_SUMMARY.txt` is `NA`, and the run still exits 0. Check for `NA` rows, and lower the
-threshold when the BAM is a small slice. Checked on CRISPResso2 2.3.4 with the CRISPResso2 repo's `tests/`
-`smallGenome.fa` (chr9/chr11 slices) and `Both.Cas9.fastq.smallGenome.bam`: FANCF 23 reads, 26.09% Modified;
-HEK3 2 reads, `NA` at the default and 50% Modified with `--min_reads_to_use_region 1`.
-
-**Use case:** Validate empirically that an in vivo / clinical-grade edit has minimal off-target activity (combine with GUIDE-seq or CIRCLE-seq predicted sites; randomly chosen regions yield no useful comparison).
-
 ## Parse Output in Python
 
 **Goal:** Pull editing metrics into downstream analysis or reports.
@@ -343,20 +184,6 @@ def parse_crispresso(output_dir):
 **Mechanism:** Random substitutions inflate the per-position substitution rate without true indels.
 **Symptom:** Substitutions >2% at base positions outside the cut site; alignment metrics look fine.
 **Fix:** Increase `--min_average_read_quality` to 30+; filter contaminating amplicons; check primer-dimer in `CRISPResso_RUNNING_LOG.txt`.
-
-### Bystander C/A editing inflates "editing efficiency"
-
-**Trigger:** Base-editor sample with wide quantification window; bystander Cs at adjacent positions counted as edits.
-**Mechanism:** A wide window (`--quantification_window_size 10`; the CRISPResso default is 1) includes all positions in the editing window; bystander edits are real but distinct from target edit.
-**Symptom:** Editing efficiency 80%+ but target SNV is 30%; bystander rate is 50%.
-**Fix:** Always read the per-position table (`Quantification_window_nucleotide_percentage_table.txt`), not just the aggregate. Report target and bystander rates separately. See [[base-editing-analysis]].
-
-### Prime editor sample with high scaffold incorporation
-
-**Trigger:** RTT is too short relative to PBS, or pegRNA stops short.
-**Mechanism:** Reverse transcriptase reads past the edit into scaffold sequence; product is detectable but undesired.
-**Symptom:** Scaffold incorporation >5%; intended edit efficiency lower than expected.
-**Fix:** Re-design pegRNA with longer RTT; verify with PRIDICT2 (see [[prime-editing-screens]]).
 
 ### MMEJ deletion misclassified as NHEJ
 
