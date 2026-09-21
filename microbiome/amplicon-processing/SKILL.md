@@ -101,7 +101,7 @@ cutadapt \
     sample_R1.fastq.gz sample_R2.fastq.gz
 ```
 
-The QIIME2 equivalent is `qiime cutadapt trim-paired --p-front-f FWD --p-front-r REV --p-discard-untrimmed`.
+For a directory of samples run `examples/remove_primers.sh` (edit `FWD`/`REV`/`raw_dir`). The QIIME2 equivalent is `qiime cutadapt trim-paired --p-front-f FWD --p-front-r REV --p-discard-untrimmed`.
 
 ## The Per-Run DADA2 Pipeline
 
@@ -148,7 +148,7 @@ seqtab_nochim <- removeBimeraDenovo(st_all, method='consensus', multithread=TRUE
 sum(seqtab_nochim) / sum(st_all)   # chimeras = many ASVs but few READS (~0.8-0.99 retained)
 ```
 
-Carry "run" forward as a batch covariate into differential abundance, and save the chimera-free table with `saveRDS` for downstream taxonomy/phyloseq work.
+The whole multi-run workflow (per-run inference, merge, one chimera removal, read tracking) is `examples/dada2_workflow.R`. Carry "run" forward as a batch covariate into differential abundance, and save the chimera-free table with `saveRDS` for downstream taxonomy/phyloseq work.
 
 `removeBimeraDenovo` is not exhaustive. On a planted-truth check (DADA2 1.34.0), a low-abundance chimera (115 reads, 0.6% of reads) survived `method='consensus'`, `'pooled'` and `'per-sample'` alike, so switching method does not recover it. Do not call the table chimera-free: inspect low-abundance ASVs whose sequence is a left/right splice of two abundant ASVs.
 
