@@ -77,29 +77,10 @@ Default when uncertain: label-free DDA -> `MSstats::dataProcess` with `summaryMe
 
 **Approach:** Read the MaxQuant tables with quoting off (protein names contain apostrophes), reformat to MSstats input, then `dataProcess` applies median equalization and Tukey median polish (robust to outlier peptides, 50% breakdown). With `MBimpute = FALSE` there is no censored-value model; `MBimpute = TRUE` is MSstats' AFT imputation of censored features (the only censoring route in MSstats; `groupComparison` has none). Otherwise model missingness downstream (proDA/msqrob2 in differential-abundance).
 
-```r
-library(MSstats)
-
-# quote = '' and comment.char = '': MaxQuant text fields contain apostrophes (5'-nucleotidase); default
-# quoting silently truncates the table with only an 'EOF within quoted string' warning
-evidence <- read.table('evidence.txt', sep = '\t', header = TRUE, quote = '', comment.char = '')
-protein_groups <- read.table('proteinGroups.txt', sep = '\t', header = TRUE, quote = '', comment.char = '')
-stopifnot(nrow(evidence) == length(readLines('evidence.txt')) - 1)  # every data line was read
-
-maxquant_input <- MaxQtoMSstatsFormat(
-    evidence = evidence,
-    proteinGroups = protein_groups,
-    annotation = read.csv('annotation.csv')
-)
-
-# TMP = Tukey median polish. MBimpute = FALSE: no censoring model (censoredInt has no effect), and on/off
-# proteins later come out of groupComparison as log2FC -Inf / issue 'oneConditionMissing'.
-# MBimpute = TRUE is the AFT censored-imputation route (censoredInt = 'NA' marks NA intensities as censored).
-processed <- dataProcess(maxquant_input, normalization = 'equalizeMedians',
-                         summaryMethod = 'TMP', censoredInt = 'NA', MBimpute = FALSE)
-
-protein_abundance <- processed$ProteinLevelData
+```bash
+Rscript scripts/msstats_summarize.R evidence.txt proteinGroups.txt annotation.csv protein_abundance.csv   # optional 5th arg: TRUE = MBimpute
 ```
+The script reads the tables with `quote = ''` and checks the row count, then runs `MaxQtoMSstatsFormat` and `dataProcess(normalization = 'equalizeMedians', summaryMethod = 'TMP', censoredInt = 'NA', MBimpute = FALSE)`; on/off proteins come out of `groupComparison` as log2FC `-Inf` / issue `oneConditionMissing` when `MBimpute = FALSE`. It writes `ProteinLevelData`.
 
 ### Run the real MaxLFQ (not median centering)
 
@@ -107,21 +88,15 @@ protein_abundance <- processed$ProteinLevelData
 
 **Approach:** Call `iq::maxLFQ()`, which implements the Cox 2014 maximal peptide-ratio least-squares step. It does NOT perform delayed normalization, so run-level loading offsets pass straight into the estimates: median-normalize each run's peptide log2 intensities first. `maxLFQ()` takes ONE protein's matrix, so a whole table goes through `preprocess` -> `create_protein_list` -> `create_protein_table`. Per-sample median centering of the protein matrix shares only the name and silently gives a different answer.
 
+```bash
+Rscript scripts/maxlfq_iq.R peptide_long.csv protein_maxlfq.csv   # columns protein, ion, run, intensity (RAW)
+```
+Runs `preprocess(median_normalization = TRUE)` -> `create_protein_list` -> `create_protein_table(method = 'maxLFQ')` and writes the proteins x samples `$estimate`. `maxLFQ()` solves per-protein least squares only within CONNECTED sample sets; a non-empty `$annotation` marks proteins whose samples are NOT on one common scale, and those are listed in `<out>.disconnected.txt`.
+
+One protein at a time, in R:
 ```r
 library(iq)
-
-# peptide_long: one row per peptide ion per run, RAW intensities (protein, ion, run, intensity)
-norm <- preprocess(peptide_long, primary_id = 'protein', secondary_id = 'ion', sample_id = 'run',
-                   intensity_col = 'intensity', median_normalization = TRUE, pdf_out = NULL)
-protein_list  <- create_protein_list(norm)    # one run-normalized log2 matrix per protein
-protein_table <- create_protein_table(protein_list, method = 'maxLFQ')
-protein_matrix <- protein_table$estimate      # proteins x samples
-
-# maxLFQ solves per-protein least squares only within CONNECTED sample sets; a non-empty annotation
-# marks proteins whose samples split into groups that are NOT on one common scale
-disconnected <- rownames(protein_matrix)[nzchar(protein_table$annotation)]
-
-# one protein at a time: rows = peptide ions, columns = samples, values = RUN-NORMALIZED log2 intensities
+# protein_list from create_protein_list(); rows = peptide ions, columns = samples, values = RUN-NORMALIZED log2 intensities
 result <- maxLFQ(protein_list[[1]])
 # $estimate is an UNNAMED vector in the input column order; name it or samples silently transpose
 protein_estimate <- setNames(result$estimate, colnames(protein_list[[1]]))

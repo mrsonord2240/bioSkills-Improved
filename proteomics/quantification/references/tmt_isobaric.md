@@ -37,27 +37,6 @@ quant <- purityCorrect(quant, imp)
 
 **Approach:** Absolute reporter intensities for the same protein differ 2-5x between plexes because each plex samples a random point on the elution profile. Sample-loading normalization fixes within-run loading; the Internal Reference Scaling bridge (Plubell 2017) then pins each plex's pooled reference channel to a common per-protein value. Order: SL, then IRS. A protein whose reference is 0 or missing in any plex cannot be bridged: mask and report it rather than letting it become Inf/NaN. Check the bridge on the NON-reference channels (IRS forces the reference channels equal by construction).
 
-```python
-import numpy as np
-import pandas as pd
-
-# protein_psm_sums: protein x channel, summed PSM reporter ions; one reference channel per plex
-def sample_loading_normalize(plex):
-    target = plex.sum(axis=0).mean()    # common target = mean column sum within the plex
-    return plex * (target / plex.sum(axis=0))
-
-def irs_scale(plexes, ref_cols):
-    refs = pd.concat([p[ref] for p, ref in zip(plexes, ref_cols)], axis=1)
-    refs = refs.where(refs > 0)    # a 0 or missing reference cannot anchor the bridge
-    unbridged = refs.index[refs.isna().any(axis=1)]
-    if len(unbridged):
-        print(f'IRS: {len(unbridged)} proteins lack a reference in >=1 plex; set to NaN: {list(unbridged[:10])}')
-    geomean = np.exp(np.log(refs).mean(axis=1, skipna=False))    # per-protein geometric mean of references
-    out = []
-    for i, p in enumerate(plexes):
-        factor = geomean / refs.iloc[:, i]    # per-protein per-plex scaling factor
-        out.append(p.mul(factor, axis=0))
-    return out
-```
+Code: `sample_loading_normalize` and `irs_scale` in `examples/lfq_normalization.py` (input: protein x channel table of summed PSM reporter ions, one pooled reference channel per plex given to `irs_scale` as a column name per plex; the example plants a plex offset and prints it before and after IRS). Use `plex_offset` there to check the bridge on the non-reference channels.
 
 Worked example with a planted plex offset: `examples/lfq_normalization.py`.
