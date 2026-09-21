@@ -1,6 +1,6 @@
 ---
 name: bio-experimental-design-batch-design
-description: Designs genomics experiments so technical nuisance variation (batch, lane, plate, flow cell, operator, reagent lot, processing day) is balanced against the biological variable of interest and therefore estimable rather than confounded, using constrained sample-to-batch assignment (designit, OSAT), the confounder/mediator/collider distinction, and the principle that no post-hoc correction recovers a fully confounded design. Covers detecting hidden batches with surrogate variable analysis, a decision table for downstream correction (ComBat-seq, RUVSeq, SVA) whose execution is deferred to differential-expression/batch-correction, and reproducibility metadata. Use when assigning samples to sequencing batches/lanes/plates, avoiding batch-condition confounding, deciding whether a design is salvageable by correction, choosing a correction method, or estimating the number of hidden batches. For the experimental unit, randomization, and blocking concepts see experimental-design/randomization-blocking.
+description: Designs genomics experiments so technical nuisance variation (batch, lane, plate, flow cell, operator, reagent lot, processing day) is balanced against the biological variable of interest and therefore estimable rather than confounded, using constrained sample-to-batch assignment (designit), the confounder/mediator/collider distinction, and the principle that no post-hoc correction recovers a fully confounded design. Covers detecting hidden batches with surrogate variable analysis, a decision table for downstream correction (ComBat-seq, RUVSeq, SVA) whose execution is deferred to differential-expression/batch-correction, and reproducibility metadata. Use when assigning samples to sequencing batches/lanes/plates, avoiding batch-condition confounding, deciding whether a design is salvageable by correction, choosing a correction method, or estimating the number of hidden batches. For the experimental unit, randomization, and blocking concepts see experimental-design/randomization-blocking.
 tool_type: r
 primary_tool: designit
 license: MIT
@@ -9,17 +9,19 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: designit 0.5+, OSAT 1.50+ (Bioconductor), sva 3.50+, RUVSeq 1.36+, limma 3.58+, edgeR 4.0+.
+Reference examples tested with: designit 0.5+ (CRAN), sva 3.50+, RUVSeq 1.36+, limma 3.58+, edgeR 4.0+.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - R: `packageVersion('<pkg>')` then `?function_name` to verify parameters
 
-If code throws an error, introspect the installed package and adapt to the actual API. Notes: OSAT uses `optimal.shuffle()` on a setup object (there is no bare `osat()` function); designit is R6 (`BatchContainer$new()`, `optimize_design()`, `*_score_generator()`) and its signatures drift between releases; `sva::ComBat_seq()` is for integer counts while `ComBat()` expects log-normalized values. Confirm each against the installed vignette before relying on it.
+If code throws an error, introspect the installed package and adapt to the actual API. Notes: designit is R6 (`BatchContainer$new()`, `optimize_design()`, `*_score_generator()`) and its signatures drift between releases; `sva::ComBat_seq()` is for integer counts while `ComBat()` expects log-normalized values. Confirm each against the installed vignette before relying on it.
+
+Install: `install.packages('designit')` (CRAN); `BiocManager::install(c('sva', 'RUVSeq', 'limma', 'edgeR'))`. Checked on designit 0.5.0, sva 3.54.0 (2026-09-21).
 
 # Batch Design
 
 **"Design my experiment so batch effects don't ruin it"** -> Assign samples to batches/lanes/plates so the biological variable is balanced against (orthogonal to) every technical nuisance factor, making batch estimable rather than confounded — because no post-hoc correction recovers a design where batch and condition are aliased.
-- R: `designit::optimize_design()`, `OSAT::optimal.shuffle()` — constrained assignment at design time
+- R: `designit::optimize_design()` — constrained assignment at design time
 - R: `sva::sva()`/`num.sv()` — detect hidden batches; `sva::ComBat_seq()`, `RUVSeq::RUVg()` — DOWNSTREAM correction (executed in differential-expression/batch-correction)
 
 ## The Single Most Important Modern Insight -- No Post-Hoc Method Recovers a Confounded Design
@@ -87,38 +89,36 @@ bc <- optimize_design(
   max_iter = 10000)                            # raise if the verification below still looks uneven
 assignment <- bc$get_samples()                # R6 method on the container (no standalone get_samples())
 
-# OSAT alternative (Bioconductor): build a setup object, then optimal.shuffle() -- NOT a bare osat().
 ```
 
 ### Verify the optimized layout before trusting it
 
 `optimize_design()` can converge to a local optimum that is still unbalanced (e.g. 9/6 instead of
 7/8 for a factor split across batches) -- always print and check the table, don't just inspect the
-achieved score:
+achieved score. Define this helper once; the bridge layout below reuses it:
 
 ```r
-tab <- table(assignment$condition, assignment$batch)
-print(tab)
-
-# Hard fail: a whole condition missing from a batch means condition and batch are confounded in
-# this layout, not merely unbalanced -- the design must not be used as-is.
-stopifnot(
-  "condition is confounded with batch in this layout (a batch has zero samples of some condition)" =
-    all(tab > 0)
-)
-
-# Soft check: flag an avoidable imbalance so the agent iterates instead of shipping a sub-optimal
-# split (see Input 2 above: 7/7/7/9 was accepted when 7/8/7/8 was achievable).
-imbalance <- max(tab) - min(tab)
-if (imbalance > 1) {
-  warning(sprintf(
-    'Largest cell minus smallest cell in condition x batch = %d; re-run optimize_design() with a
-higher max_iter or a different random seed before accepting this layout.', imbalance))
+check_balance <- function(assignment, batch_col, vars) {
+  for (v in vars) {
+    tab <- table(assignment[[v]], assignment[[batch_col]])
+    print(tab)
+    # Hard fail: a whole level missing from a batch means `v` and batch are confounded in this
+    # layout, not merely unbalanced -- the design must not be used as-is.
+    if (!all(tab > 0))
+      stop(sprintf('%s is confounded with %s in this layout (a batch has zero samples of some level)',
+                   v, batch_col))
+    # Soft check: flag an avoidable imbalance so the agent iterates instead of shipping a
+    # sub-optimal split (7/7/7/9 was accepted when 7/8/7/8 was achievable).
+    imbalance <- max(tab) - min(tab)
+    if (imbalance > 1)
+      warning(sprintf('%s x %s: largest cell minus smallest cell = %d; re-run optimize_design() with a higher max_iter or a different random seed before accepting this layout.',
+                      v, batch_col, imbalance))
+  }
+  invisible(TRUE)
 }
-```
 
-Repeat the same `table(feature, batch)` + `stopifnot(all(tab > 0))` check for every balanced
-covariate (e.g. `sex`), not only the primary condition.
+check_balance(assignment, 'batch', c('condition', 'sex'))   # every balanced covariate, not only condition
+```
 
 ## Reference / Bridge Channel Layout (TMT, multiplexed proteomics)
 
@@ -154,8 +154,7 @@ stopifnot(
   "a plex does not have exactly 15 biological positions" =
     all(table(assignment$plex) == 15)
 )
-tab <- table(assignment$condition, assignment$plex); print(tab)
-stopifnot(all(tab > 0))                          # same confounding check as above
+check_balance(assignment, 'plex', c('condition', 'site'))   # check_balance() from "Verify the optimized layout" above
 
 # LC-MS run order: randomize injection sequence independently of plex/channel to avoid a
 # position/time gradient confound (see Algorithmic Taxonomy, "Run-order randomization").
@@ -269,7 +268,6 @@ Record for every sample, because these become the batch/blocking variables: proc
 - Leek JT, Storey JD. 2007. Capturing heterogeneity in gene expression studies by surrogate variable analysis. *PLoS Genet* 3:e161.
 - Gagnon-Bartsch JA, Speed TP. 2012. Using control genes to correct for unwanted variation in microarray data. *Biostatistics* 13:539-552.
 - Kang HM, Subramaniam M, Targ S, et al. 2018. Multiplexed droplet single-cell RNA-sequencing using natural genetic variation. *Nat Biotechnol* 36:89-94.
-- Yan L, Ma C, Wang D, Hu Q, Qin M, Conroy JM, Sucheston LE, Ambrosone CB, Johnson CS, Wang J, Liu S. 2012. OSAT: a tool for sample-to-batch allocations in genomics experiments. *BMC Genomics* 13:689.
 
 ## Related Skills
 
