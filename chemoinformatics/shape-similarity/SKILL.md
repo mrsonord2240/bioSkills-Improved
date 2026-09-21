@@ -11,6 +11,8 @@ author: GPTomics
 
 Reference examples tested with: RDKit 2024.09+ (Open3DAlign and USRCAT); official ShaEP syntax checked against ShaEP 1.4.2; ESPSim example checked against espsim 0.0.1; ROCS/FastROCS/ROCS X are commercial OpenEye products.
 
+Install: `conda install -c conda-forge rdkit`. RDKit provides USRCAT through `rdMolDescriptors`, so no separate `usrcat` package is needed; ShaEP is a separate binary (verify the official current release), ESPSim is `pip install espsim`.
+
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
 
@@ -175,7 +177,7 @@ def shape_search_ensemble(query_mol, library_mols, n_conf=20):
     return sorted(hits, key=lambda x: x[1], reverse=True)
 ```
 
-**Critical:** Results depend on conformer coverage. Use an ensemble sized and validated for the library and query rather than assuming one conformer is representative. A molecule that loses some but not all of its conformers to non-convergence is still scored on the survivors; only a molecule with zero usable conformers is dropped, and every drop is printed with its SMILES and reason -- never assume "fewer hits than input molecules" means the missing ones failed cleanly.
+**Critical:** Results depend on conformer coverage. Use an ensemble sized and validated for the library and query (20 conformers is a repository starting budget, not a universal minimum) rather than assuming one conformer is representative. A molecule that loses some but not all of its conformers to non-convergence is still scored on the survivors; only a molecule with zero usable conformers is dropped, and every drop is printed with its SMILES and reason -- never assume "fewer hits than input molecules" means the missing ones failed cleanly.
 
 ## ESP Similarity (Electrostatic)
 
