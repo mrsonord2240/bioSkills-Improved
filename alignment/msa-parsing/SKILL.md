@@ -21,7 +21,7 @@ package and adapt the example to match the actual API rather than retrying.
 
 # MSA Parsing and Analysis
 
-Parse multiple sequence alignments to extract information, analyze content, and prepare for downstream analysis. Runnable versions of the helpers below are in `examples/` (`python examples/<name>.py [alignment_file]`; without an argument they run on the tiny alignment in `examples/data/`, and `msa_utils.py` holds the shared normalisation code).
+Parse multiple sequence alignments to extract information, analyze content, and prepare for downstream analysis. Runnable versions of the helpers below are in `examples/` (`python examples/<name>.py [alignment_file]`; without an argument they run on the tiny alignment in `examples/data/`, and `msa_utils.py` holds the shared normalisation code). Row filtering is `scripts/filter_sequences.py` (see `references/sequence-filtering.md`).
 
 Conventions used throughout: column and residue positions are 0-based. **Conservation** is the fraction of sequences (gap rows included in the denominator) carrying the most common residue, so 80% in a 5-sequence alignment means less than 80% in a 500-sequence one; choose thresholds for the alignment's diversity.
 
@@ -63,34 +63,11 @@ print(f'{len(alignment)} sequences, {alignment.get_alignment_length()} columns')
 
 HMMER, Stockholm and A2M files write gaps as `.` and soft-masked DNA is lowercase. Comparing against a literal `-` or counting letters case-sensitively then gives silently wrong answers (measured: gap counts all zero, `.` counted as residues, consensus `ACGTNNNN` on a soft-masked DNA alignment with unanimous columns). Every helper below normalises its input internally; call `normalize_alignment()` yourself before any raw `alignment[:, i]` comparison. For A2M/A3M pass `upper=False`, because case marks insert states there (`references/a2m-a3m-streaming.md`).
 
-```python
-def select_columns(alignment, keep, upper=None):
-    '''New alignment with only the columns in `keep`; keeps record annotations,
-    letter_annotations and column_annotations (so Stockholm GC/GR lines survive).
-    upper=True/False also maps "." -> "-" (and upper-cases when True); None leaves sequences as is.'''
-    keep = list(keep)
-    full = keep == list(range(alignment.get_alignment_length()))
-    records = []
-    for record in alignment:
-        text = str(record.seq)  # once per record: str(record.seq) inside the join would be quadratic
-        seq = text if full else ''.join(text[i] for i in keep)
-        if upper is not None:
-            seq = (seq.upper() if upper else seq).replace('.', '-')
-        new = SeqRecord(Seq(seq), id=record.id, name=record.name, description=record.description,
-                        dbxrefs=list(record.dbxrefs), annotations=dict(record.annotations))
-        for key, values in record.letter_annotations.items():
-            picked = [values[i] for i in keep]
-            new.letter_annotations[key] = ''.join(picked) if isinstance(values, str) else picked
-        records.append(new)
-    column_annotations = {}
-    for key, values in getattr(alignment, 'column_annotations', {}).items():
-        picked = [values[i] for i in keep]
-        column_annotations[key] = ''.join(picked) if isinstance(values, str) else picked
-    return MultipleSeqAlignment(records, annotations=dict(getattr(alignment, 'annotations', {})),
-                                column_annotations=column_annotations)
+`select_columns(alignment, keep, upper=None)` returns a new alignment holding only the column indices in `keep`, with record annotations, `letter_annotations` and `column_annotations` sliced to match (so Stockholm GC/GR lines survive); `upper=True/False` also maps `.` to `-` (and upper-cases when True), `None` leaves the sequences as they are. `normalize_alignment(alignment, upper=True)` is `select_columns` over every column. Both live in `examples/msa_utils.py`; the snippets below assume:
 
-def normalize_alignment(alignment, upper=True):
-    return select_columns(alignment, range(alignment.get_alignment_length()), upper=upper)
+```python
+import sys; sys.path.insert(0, 'examples')  # run from this Skill's directory
+from msa_utils import normalize_alignment, select_columns
 ```
 
 ## Extracting Sequence Information
@@ -150,26 +127,7 @@ for col_idx in range(alignment.get_alignment_length()):
 Optional `weights` (one per sequence, e.g. from `henikoff_weights`, see `references/weighting-neff.md`) makes conservation phylogeny-aware; the denominator is then the sum of the weights.
 
 ```python
-def find_conserved_positions(alignment, threshold=0.8, weights=None):
-    alignment = normalize_alignment(alignment)
-    weights = np.ones(len(alignment)) if weights is None else np.asarray(weights, dtype=float)
-    if len(weights) != len(alignment):
-        raise ValueError('weights must have one value per sequence')
-    if not weights.sum() > 0:
-        raise ValueError('weights must sum to a positive value')
-    conserved = []
-    for col_idx in range(alignment.get_alignment_length()):
-        counts = Counter()
-        for char, weight in zip(alignment[:, col_idx], weights):
-            counts[char] += weight
-        counts.pop('-', None)
-        if not counts:
-            continue
-        most_common_char, most_common_count = counts.most_common(1)[0]
-        conservation = most_common_count / weights.sum()
-        if conservation >= threshold - 1e-12:
-            conserved.append((col_idx, most_common_char, conservation))
-    return conserved
+from find_conserved import find_conserved_positions  # (column, residue, conservation) tuples; ValueError on wrong-length or all-zero weights
 
 fully_conserved = find_conserved_positions(alignment, threshold=1.0)
 mostly_conserved = find_conserved_positions(alignment, threshold=0.8)
