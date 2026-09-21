@@ -258,6 +258,19 @@ PoPS is biology-agnostic; the feature matrix encodes biology. Bias in the featur
 
 **PoPS needs genome-wide, multi-chromosome MAGMA input to be meaningful.** With only one chromosome (or a single locus) of genes, PoPS's held-out-chromosome ridge CV has no held-out fold to validate against, `SELECTED_CV_ALPHA` saturates at its maximum, and every `PoPS_Score` collapses toward 0 -- the code path still runs to completion (exit 0, real output files), but the scores carry no signal at that scale (verified on a real 3-gene single-locus run). Do not present a locus-scale PoPS run's scores as a real result; use it only to confirm the pipeline is wired correctly, and require genome-wide MAGMA output for an actual PoPS-based effector-gene call.
 
+## cS2G Lookup
+
+**Goal:** Read heritability-calibrated SNP-to-gene scores for a locus's credible-set variants from the pre-computed cS2G table; no install.
+
+**Approach:** Download `cS2G_1000GEUR.zip` (95 MB, hg19, rsID-keyed; per-chromosome `cS2G.<chr>.SGscore.gz` with columns SNP, GENE, cS2G, INFO) from zenodo.org/records/7754032, then run `examples/cs2g_lookup.py` on the credible-set rsIDs. It prints per-SNP gene scores plus a per-gene sum across the queried SNPs (checked 2026-09-21). Lift over first if the credible set is hg38.
+
+```bash
+curl -L -o cS2G_1000GEUR.zip https://zenodo.org/api/records/7754032/files/cS2G_1000GEUR.zip/content
+python examples/cs2g_lookup.py cS2G_1000GEUR.zip 1 rs11206509 rs10788994   # chr, then rsIDs
+```
+
+cS2G scores for one SNP sum to at most 1 across its genes; `INFO` names the constituent strategies that fired (Promoter, ABC, EpiMap, Roadmap, GTeX_Finemapped, eQTLGen_Finemapped). Use it as one evidence stream alongside L2G, not as a substitute (see Reconciliation).
+
 ## Multi-Evidence Integration: Concordance Scoring
 
 **Goal:** Combine fine-mapping, coloc, ABC, L2G, PoPS, and distance into a per-locus per-gene concordance score; flag high-confidence candidates.

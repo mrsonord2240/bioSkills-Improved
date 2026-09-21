@@ -67,9 +67,10 @@ fi
 #   ${OUT_PREFIX}_gene.genes.out: per-gene Z, p, n_SNPs
 #   ${OUT_PREFIX}_geneset.gsa.out: per-set p, beta, beta_se
 
-# Bonferroni threshold for ~20k autosomal protein-coding genes
-N_GENES=$(wc -l < "$GENES_OUT")
-echo "Bonferroni threshold at alpha=0.05 across ${N_GENES} genes: $(echo "0.05 / ${N_GENES}" | bc -l)"
+# Bonferroni threshold across the genes MAGMA tested. .genes.out has a header row, so skip
+# it when counting. awk does the division (portable: `bc` is absent from Git-for-Windows bash).
+N_GENES=$(tail -n +2 "$GENES_OUT" | wc -l | tr -d ' ')
+echo "Bonferroni threshold at alpha=0.05 across ${N_GENES} genes: $(awk -v n="$N_GENES" 'BEGIN{printf "%.6g", 0.05/n}')"
 
 # Top 50 genes by p
 # MAGMA .genes.out columns: GENE CHR START STOP NSNPS NPARAM N ZSTAT P
@@ -79,4 +80,4 @@ echo "Bonferroni threshold at alpha=0.05 across ${N_GENES} genes: $(echo "0.05 /
 } | head -51 > "${OUT_PREFIX}_top50.tsv"
 
 echo "MAGMA gene-based and gene-set complete."
-echo "Pair with PoPS (FinucaneLab/pops) using ${OUT_PREFIX}_gene.genes.raw as --magma_prefix input."
+echo "Pair with PoPS (FinucaneLab/pops): pass --magma_prefix ${OUT_PREFIX}_gene (the prefix, not a file name)."
