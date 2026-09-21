@@ -1,6 +1,6 @@
 ---
 name: bio-workflows-proteomics-pipeline
-description: Orchestrates bottom-up proteomics from a search engine's output (MaxQuant/FragPipe/DIA-NN) to differential protein abundance with limma/DEqMS/MSstats. Use when committing the search database + acquisition mode (DDA vs DIA) up front, re-controlling FDR at PSM AND peptide AND protein-group level (not just PSM), removing contaminant/reverse rows and inspecting RAW distributions before normalizing, bridging cross-plex TMT with an IRS reference channel, modeling MNAR missingness rather than downshift-imputing on/off proteins, batching as a covariate (not pre-subtracted), and testing with treat()/DEqMS. Hands mechanism to the proteomics component skills; not a re-teach of any single step.
+description: Orchestrates bottom-up proteomics from a search engine's output (MaxQuant/DIA-NN) to differential protein abundance with limma/DEqMS/MSstats. Use when committing the search database + acquisition mode (DDA vs DIA) up front, re-controlling FDR at PSM AND peptide AND protein-group level (not just PSM), removing contaminant/reverse rows and inspecting RAW distributions before normalizing, bridging cross-plex TMT with an IRS reference channel, modeling MNAR missingness rather than downshift-imputing on/off proteins, batching as a covariate (not pre-subtracted), and testing with treat()/DEqMS. Hands mechanism to the proteomics component skills; not a re-teach of any single step.
 tool_type: mixed
 primary_tool: limma
 workflow: true
@@ -72,6 +72,21 @@ Raw MS Data (mzML) --> MaxQuant/DIA-NN --> proteinGroups.txt
                                                  v
                   Differential Proteins + Volcano Plots
 ```
+
+## Inputs and Install
+
+- MaxQuant: `proteinGroups.txt` for the limma route; `evidence.txt` + `proteinGroups.txt` + `annotation.csv` (MSstats route). DIA-NN: `report.parquet`.
+- `sample_annotation.csv` (limma route), one row per sample: `sample` (must equal the intensity column name), `condition`, `replicate`, `batch`. `batch` is required whenever samples were acquired in more than one run/day/plex -- the design branch keys on that column and puts batch in the model as a covariate; without it the batch effect stays in the residual. `condition` may have more than two levels (dose series, time course); every non-reference level is contrasted against the first level.
+
+```csv
+sample,condition,replicate,batch
+Sample1,Control,1,B1
+Sample2,Control,2,B2
+Sample3,Treatment,1,B1
+Sample4,Treatment,2,B2
+```
+
+- Install: `BiocManager::install(c('limma', 'DEqMS', 'proDA', 'MSstats', 'MSstatsTMT', 'MSnbase'))`; `install.packages(c('pheatmap', 'ggplot2', 'arrow', 'dplyr', 'tidyr'))`.
 
 ## Complete R Workflow
 
@@ -239,6 +254,14 @@ fit2 <- contrasts.fit(fit, contrast)
 # Select on FDR ALONE. A post-hoc fold-change + significance double filter inflates FDR
 # (a collider/selection effect; realized FDR can exceed 50%). To require a minimum effect,
 # use the moderated minimum-fold-change test treat()/topTreat() instead of filtering after.
+# lfc = log2(1.5) is a per-contrast MINIMUM effect. On a dose series or time course the intermediate
+# levels carry a SMALLER true effect than the extreme one, so the same floor can return zero calls
+# there while the top level is significant. Measured (4 replicates per level, 120 proteins with a
+# real 0.7 log2 low-dose effect): High_vs_Ctl / Low_vs_Ctl calls were 20 / 0 at lfc = log2(1.5),
+# 52 / 0 at lfc = 0.3 and 78 / 8 at lfc = 0 -- the floor is not the only loss (low dose is also
+# underpowered), so a zero on an intermediate level is "not detected at this n", never "no effect".
+# For such designs lower lfc, and screen with the eBayes/topTable F-test below (75 hits on the same
+# data) reporting the pairwise contrasts for direction only.
 fit2_treat <- treat(fit2, lfc = log2(1.5), trend = TRUE, robust = TRUE)   # moderated min-FC test; trend+robust ~mandatory for label-free LFQ
 # topTreat adjusts WITHIN one contrast. With more than one contrast the family of tests is the
 # whole set, so adjust ACROSS them: decideTests(method = 'global') applies one BH over every
@@ -263,6 +286,10 @@ results$significant <- !is.na(results$adj.P.Val) &
 # Use it to screen, then report the pairwise contrasts for direction. treat() has no F-test.
 
 # === 7. OUTPUT ===
+# `results` has one row per protein x contrast, columns: protein, contrast, logFC, AveExpr, t, P.Value,
+# adj.P.Val, significant. `significant` (logical) is the call to use: it comes from the GLOBAL
+# decideTests over the whole contrast family, not from adj.P.Val < 0.05 alone (adj.P.Val is
+# per-contrast); NA logFC = not estimable, i.e. undetected in one group.
 cat('\nResults:\n')
 cat('  Contrast not estimable (report as undetected-in-group):', sum(is.na(results$logFC)), '\n')
 cat('  Significant proteins:', sum(results$significant), '\n')
@@ -328,6 +355,7 @@ results <- groupComparison(contrast.matrix = comparison, data = processed)
 | Filter | <30% removed | Check sample prep |
 | Missing | <40% per sample | Check MS performance |
 | PCA | Replicates cluster | Check for batch effects |
+| Design | >= 3 biological replicates per condition | Do not run a per-protein test; report as exploratory or add replicates |
 | Stats | FC/FDR pre-specified | Verify thresholds were pre-specified; inspect the volcano for downshift-imputation 'anchor arms' |
 
 ## Workflow Variants
@@ -372,11 +400,44 @@ impurities <- coa / 100                                  # CoA percentages -> fr
 tmt_data <- purityCorrect(tmt_data, impurities)
 stopifnot(sum(exprs(tmt_data) < 0, na.rm = TRUE) == 0)   # negatives = a grossly wrong matrix (NOT a transposition test; see above)
 
-# Multi-batch TMT: do NOT concatenate plexes directly. Use MSstatsTMT, which applies the
-# reference-channel (IRS) bridge during summarization:
-#   library(MSstatsTMT)
-#   summ <- proteinSummarization(msstatstmt_input)   # includes the cross-plex bridge
-#   groupComparisonTMT(summ, contrast.matrix = comparison)
+```
+
+Multi-plex TMT (the common case: two or more plexes) -- do NOT concatenate plexes directly. MSstatsTMT applies the reference-channel (IRS-style) bridge during summarization. MaxQuant route, checked on MSstatsTMT 2.14.2 against its bundled 5-plex `evidence` / `proteinGroups` / `annotation.mq`.
+```r
+library(MSstatsTMT)
+
+# Multi-plex TMT from MaxQuant. Each plex (Mixture) carries a pooled reference channel, annotated
+# Condition = 'Norm' (MSstatsTMT requires that exact label); that channel is the bridge. annotation.csv has one row per (Run, Channel) with
+# columns Run, Fraction, TechRepMixture, Channel, Condition, Mixture, BioReplicate.
+# quote = '' / comment.char = '' as in the MSstats block above.
+evidence <- read.table('evidence.txt', sep = '\t', header = TRUE, quote = '', comment.char = '')
+proteinGroups <- read.table('proteinGroups.txt', sep = '\t', header = TRUE, quote = '', comment.char = '')
+stopifnot(nrow(evidence) == length(readLines('evidence.txt')) - 1,
+          nrow(proteinGroups) == length(readLines('proteinGroups.txt')) - 1)
+annotation <- read.csv('annotation.csv')
+stopifnot('Norm' %in% annotation$Condition)   # no reference channel = nothing to bridge plexes with
+
+tmt_input <- MaxQtoMSstatsTMTFormat(evidence, proteinGroups, annotation, use_log_file = FALSE,
+                                     verbose = FALSE)
+
+# Summarize to protein level. Within-plex global median normalization is followed by reference-channel
+# normalization: every plex is rescaled to its own 'Norm' channel, which is the cross-plex (IRS-style)
+# bridge, and the Norm channel is then dropped. Do not concatenate plexes before this step.
+summ <- proteinSummarization(tmt_input, method = 'msstats', global_norm = TRUE, reference_norm = TRUE,
+                             remove_norm_channel = TRUE, use_log_file = FALSE, verbose = FALSE)
+
+# Contrasts: one row per comparison, columns = the Condition levels that survive (Norm is removed),
+# in sorted order -- built from the levels, against the first one, as in the limma block.
+lv <- sort(setdiff(unique(as.character(annotation$Condition)), 'Norm'))
+comparison <- t(sapply(lv[-1], function(l) as.numeric(lv == l) - as.numeric(lv == lv[1])))
+colnames(comparison) <- lv
+rownames(comparison) <- paste0(lv[-1], '_vs_', lv[1])
+# moderated = TRUE borrows variance across proteins (limma-style); groupComparisonTMT adjusts within
+# each contrast, so adjust ACROSS the rows yourself when you report several (as for MSstats above).
+tmt_res <- groupComparisonTMT(summ, contrast.matrix = comparison, moderated = TRUE,
+                              adj.method = 'BH', use_log_file = FALSE, verbose = FALSE)$ComparisonResult
+tmt_res$adj.pvalue.global <- p.adjust(tmt_res$pvalue, method = 'BH')
+print(table(tmt_res$Label, tmt_res$adj.pvalue < 0.05))
 ```
 
 ### SILAC Workflow
