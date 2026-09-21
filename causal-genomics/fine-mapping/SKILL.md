@@ -33,6 +33,42 @@ If a call throws an error about an argument that no longer exists, introspect th
 
 Fine-mapping is a Bayesian model selection problem; LD is not noise but structured prior information. Most failure modes trace back to one of three issues: (a) LD reference mismatched to the GWAS sample; (b) the sparse-effects prior being wrong for the locus (polygenic background); or (c) too small an L cap. The `estimate_s_rss()` lambda and `kriging_rss()` per-SNP diagnostic catch (a) before downstream credible sets are reported.
 
+## Tool Install Notes
+
+```r
+install.packages('susieR')                # CRAN; pin >= 0.12.27 for stable susie_rss API
+install.packages('coloc')                 # CRAN; >= 5.2.3 for coloc.susie
+install.packages(c('ggplot2', 'patchwork', 'dplyr', 'readr'))
+```
+
+```bash
+# FINEMAP (CLI binary; not an R package)
+# Download from http://www.christianbenner.com/
+
+# PolyFun (Python)
+git clone https://github.com/omerwe/polyfun
+pip install -r polyfun/requirements.txt
+# Pre-baked baseline-LF priors:
+#   https://data.broadinstitute.org/alkesgroup/UKBB_LD/baselineLF2.2.UKB.tar.gz
+
+# PAINTOR (C++ CLI)
+git clone https://github.com/bogdanlab/PAINTOR_V3.0
+make
+
+# SuSiEx (C++ CLI)
+git clone https://github.com/getian107/SuSiEx
+make -C src
+
+# DAP-G (CLI)
+git clone https://github.com/xqwen/dap
+
+# FOCUS (Python; for TWAS fine-mapping)
+pip install pyfocus
+
+# PLINK 1.9 / 2.0 for LD matrix generation
+conda install -c bioconda plink plink2
+```
+
 ## Algorithmic Taxonomy
 
 | Tool | Model | Input | Strength | Fails when |
@@ -81,7 +117,7 @@ s_hat <- estimate_s_rss(z = z_scores, R = ld_matrix, n = N)
 # Rule of thumb: s_hat < 0.05 acceptable; 0.05-0.10 marginal; > 0.10 refit or change LD reference.
 
 cond_z <- kriging_rss(z = z_scores, R = ld_matrix, n = N)
-# cond_z$conditional_dist returns per-SNP expected vs observed z; flag |z_obs - z_exp| > 3
+# cond_z$conditional_dist is a data.frame (z, condmean, condvar, z_std_diff, logLR); flag abs(z_std_diff) > 3
 # Common cause: strand flip, allele coding mismatch, or single-SNP imputation error.
 
 # If diagnostic fails: refit with explicit scale parameter to absorb LD mismatch
@@ -100,7 +136,7 @@ Skipping this block is the dominant cause of irreproducible fine-mapping. Always
 
 **Symptom:** `estimate_s_rss()` lambda > 0.05; `kriging_rss()` flags many SNPs with `|z_obs - z_exp| > 3`; credible sets contain physically distant SNPs (anti-correlated in LD with the lead) or include all SNPs at the locus.
 
-**Fix:** Use in-sample LD whenever the cohort genotypes are accessible (compute with `plink --r2 square` on the GWAS samples themselves). When only summary statistics are available, ancestry-stratify the LD reference exactly (e.g., 1000G EUR FIN+CEU+GBR+IBS+TSI for a Northern European GWAS, not full EUR). For mixed-ancestry GWAS, fine-map per ancestry then meta-analyze, or move to SuSiEx.
+**Fix:** Use in-sample LD whenever the cohort genotypes are accessible (compute with `plink --r square` on the GWAS samples themselves; signed r, NOT `--r2`, which writes squared correlations that `susie_rss` cannot use as R). When only summary statistics are available, ancestry-stratify the LD reference exactly (e.g., 1000G EUR FIN+CEU+GBR+IBS+TSI for a Northern European GWAS, not full EUR). For mixed-ancestry GWAS, fine-map per ancestry then meta-analyze, or move to SuSiEx.
 
 ### Non-sparse architecture (biobank scale)
 
@@ -211,7 +247,7 @@ Drop palindromic SNPs at MAF > 0.42 (ambiguous strand); or resolve via external 
 | L (HLA / complex loci) | 20-30 | Empirical; HLA hosts > 10 independent signals for many traits |
 | `n` for case-control susie_rss | Neff = 4/(1/Ncase + 1/Ncontrol), NOT Ntotal | Privé F et al 2022 HGG Adv 3:100136; matches the SE scale of logistic-regression sumstats |
 | `estimate_s_rss` lambda acceptable | < 0.05 | susieR vignette; > 0.10 indicates serious LD mismatch |
-| `kriging_rss` per-SNP flag | |z_obs - z_exp| > 3 | susieR vignette; flag for manual review |
+| `kriging_rss` per-SNP flag | abs(`z_std_diff`) > 3 (`|z_obs - z_exp|` elsewhere in this file) | susieR vignette; flag for manual review |
 | Locus window (default) | +/- 500 kb from sentinel | Conventional; covers most LD blocks |
 | Locus window (conditional-p floor) | Extend until conditional -log10(p) < 4 | Avoids truncating a secondary signal whose conditional evidence leaks into the window edge |
 | Locus window (long-range LD) | 5+ Mb or stratify | HLA chr6:25-35Mb, chr8 inversion chr8:8.1-11.9Mb hg38, chr17 H1/H2 inversion |
@@ -337,6 +373,8 @@ names(z1) <- names(z2) <- colnames(ld_matrix) <- rownames(ld_matrix) <- snp_ids
 fit_trait1 <- susie_rss(z = z1, R = ld_matrix, n = N1, L = 10)
 fit_trait2 <- susie_rss(z = z2, R = ld_matrix, n = N2, L = 10)
 
+stopifnot("no shared SNP names between the two fits: name z and dimnames(R) first (see Precondition)" =
+          length(intersect(colnames(fit_trait1$lbf_variable), colnames(fit_trait2$lbf_variable))) > 0)
 coloc_res <- coloc.susie(fit_trait1, fit_trait2)
 # coloc_res$summary: per-credible-set PP.H4 (shared causal probability)
 print(coloc_res$summary)
@@ -370,7 +408,7 @@ Every locus reported should carry these columns; missing fields are the most com
 |--------|-------------|
 | locus_id | Locus identifier (chr:start-end or sentinel rsID) |
 | method | susie_rss / FINEMAP / PAINTOR / SuSiEx / SuSiE-inf |
-| L_used | `sum(!fit$sets$pruned)` (effective L; not just the cap passed in) |
+| L_used | `sum(fit$V > 0)` (effective L; not just the cap passed in; susieR sets pruned effects' prior variance to 0) |
 | n_credible_sets | Number of returned credible sets at the chosen coverage |
 | cs_size | Variants per credible set |
 | cs_purity_min / cs_purity_mean | min and mean `fit$sets$purity[,'min.abs.corr']` per set |
