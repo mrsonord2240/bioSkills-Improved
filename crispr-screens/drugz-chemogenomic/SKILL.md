@@ -149,25 +149,12 @@ done
 Then aggregate. **Dose consistency rule:** a dose-consistent hit keeps the same `normZ` sign at every
 tested dose and reaches FDR < 0.05 at the highest dose; report the others as dose-inconsistent rather
 than dropping them silently. `|normZ|` growing with dose is supporting evidence, not a requirement
-(saturation at the top dose is common):
+(saturation at the top dose is common); `scripts/dose_consistent_hits.py` applies the rule:
 
-```python
-import pandas as pd
-
-def dose_consistent_hits(dose_files, top_dose, fdr=0.05, direction='synth'):
-    """dose_files: {'low': 'drugz_low.txt', 'mid': ..., 'high': ...}; top_dose: key of the highest dose.
-
-    A hit is dose-consistent if normZ has the same sign at every dose and passes FDR at the top dose.
-    """
-    frames = {d: pd.read_csv(f, sep='\t').set_index('GENE') for d, f in dose_files.items()}
-    normz = pd.DataFrame({d: f['normZ'] for d, f in frames.items()}).dropna()
-    sign_ok = (normz.gt(0).all(axis=1)) | (normz.lt(0).all(axis=1))
-    top = frames[top_dose]
-    passes = top['fdr_%s' % direction] < fdr
-    hits = normz[sign_ok & passes.reindex(normz.index).fillna(False)].copy()
-    hits['normZ_top_dose'] = top['normZ'].reindex(hits.index)
-    hits['monotonic'] = (normz.abs().diff(axis=1).iloc[:, 1:] >= 0).all(axis=1)  # |normZ| grows with dose
-    return hits.sort_values('normZ_top_dose')
+```bash
+# DOSE=FILE pairs, low to high; --top-dose names the highest dose. Also importable: from dose_consistent_hits import dose_consistent_hits
+python scripts/dose_consistent_hits.py --top-dose high low=drugz_low.txt mid=drugz_mid.txt high=drugz_high.txt
+# add --direction supp for suppressors, --fdr 0.05 (default), --out hits.tsv
 ```
 
 **For multi-condition drug-screens** (time × drug × cell-line), use MAGeCK MLE with explicit design matrix instead -- MLE handles multi-factorial; drugZ does not.
