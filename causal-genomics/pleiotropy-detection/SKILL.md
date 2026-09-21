@@ -129,35 +129,7 @@ LCV gcp interpretation thresholds (0, 0.5, 0.6, 1) are tabulated in references/l
 
 **Approach:** Compute IVW + Egger + median + mode side-by-side; test Egger intercept and heterogeneity; run MR-PRESSO with `>=5000` distributions for publication or `>=10000` for stringent reporting; apply Steiger filter; leave-one-out; report all estimates.
 
-```r
-library(TwoSampleMR)
-library(MRPRESSO)
-
-set.seed(42)  # seed once, before the whole battery: mr()'s weighted-median/mode bootstrap SEs and mr_presso()'s global/outlier tests are all Monte-Carlo
-methods <- c('mr_ivw', 'mr_egger_regression', 'mr_weighted_median', 'mr_weighted_mode')
-res_mr <- mr(dat, method_list = methods)
-
-het <- mr_heterogeneity(dat)
-pleio <- mr_pleiotropy_test(dat)
-loo <- mr_leaveoneout(dat)
-steiger <- directionality_test(dat)
-
-isq <- Isq(dat$beta.exposure, dat$se.exposure)
-nome_pass <- isq >= 0.9
-
-presso <- mr_presso(
-    BetaOutcome='beta.outcome', BetaExposure='beta.exposure',
-    SdOutcome='se.outcome', SdExposure='se.exposure',
-    OUTLIERtest=TRUE, DISTORTIONtest=TRUE,
-    data=dat, NbDistribution=10000, SignifThreshold=0.05)
-
-global_p <- presso$`MR-PRESSO results`$`Global Test`$Pvalue
-outlier_p <- presso$`MR-PRESSO results`$`Outlier Test`$Pvalue
-distortion_p <- presso$`MR-PRESSO results`$`Distortion Test`$Pvalue
-n_outliers <- sum(outlier_p < 0.05, na.rm=TRUE)
-```
-
-Full working pipeline incl SIMEX, MR-RAPS, contamination mixture, and STROBE-MR table: examples/sensitivity_battery.R.
+Run it from `examples/sensitivity_battery.R` (IVW / Egger / weighted median / weighted mode via `mr(dat, method_list = ...)`, `mr_heterogeneity`, `mr_pleiotropy_test`, `Isq`, `directionality_test`, `mr_presso`, `mr_leaveoneout`, contamination mixture, MR-RAPS, STROBE-MR table); it simulates its own `dat`, so replace that block with your harmonized data.frame. Keep `set.seed(42)` ahead of the whole battery: `mr()`'s weighted-median and weighted-mode bootstrap SEs and `mr_presso()`'s global/outlier tests are all Monte-Carlo, so an unseeded rerun changes those SEs and p-values. The example uses `NbDistribution = 5000`; raise it to 10000 for stringent reporting. SIMEX correction is separate: examples/simex_egger_correction.R.
 
 ## Bidirectional MR Procedure
 
