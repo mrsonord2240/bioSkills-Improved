@@ -69,17 +69,18 @@ USRCAT (Schreyer & Blundell 2012) extends Ultrafast Shape Recognition (USR) with
 **Approach:** Parse the SMILES, add hydrogens, generate one 3D conformer with ETKDGv3, compute RDKit USRCAT descriptors, and compare descriptor vectors with RDKit's USR score.
 
 ```python
-from rdkit.Chem import rdMolDescriptors
+from rdkit import Chem
+from rdkit.Chem import AllChem, rdMolDescriptors
 
-mol = Chem.MolFromSmiles('CCO')
-mol = Chem.AddHs(mol)
-AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
+def usrcat(smiles):
+    mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+    AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
+    # 60 floats: 12 USR moments x 5 atom types
+    # (all atoms, hydrophobic, aromatic, acceptor, donor)
+    return rdMolDescriptors.GetUSRCAT(mol)
 
-descriptors = rdMolDescriptors.GetUSRCAT(mol)
-# Returns numpy array of 60 floats: 12 USR moments x 5 atom types
-# (all atoms, hydrophobic, aromatic, acceptor, donor)
-
-similarity = rdMolDescriptors.GetUSRScore(desc1, desc2)
+desc1, desc2 = usrcat('CCO'), usrcat('CCCO')
+similarity = rdMolDescriptors.GetUSRScore(desc1, desc2)  # 1.0 for identical vectors
 ```
 
 **Speed:** Descriptor calculation is linear in atoms and comparison is fixed-length, without pairwise alignment. Benchmark end-to-end throughput on the prepared conformer library before choosing a scale cutoff.
@@ -95,7 +96,8 @@ Open3DAlign uses MMFF atom types and partial charges to find an atom-based 3D al
 **Approach:** Build 3D structures for query and target, run `GetO3A`, and call `Align()` to transform the probe in place. `Score()` is the unnormalized O3A objective, not a shape Tanimoto or ROCS TanimotoCombo. If a normalized shape similarity is required, compute `1 - rdShapeHelpers.ShapeTanimotoDist(...)` after alignment.
 
 ```python
-from rdkit.Chem import rdMolAlign, rdShapeHelpers
+from rdkit import Chem
+from rdkit.Chem import AllChem, rdMolAlign, rdShapeHelpers
 
 query = Chem.MolFromSmiles('CCC(=O)Nc1ccccc1')
 query = Chem.AddHs(query)
@@ -111,7 +113,7 @@ o3a_score = O3A.Score()
 shape_tanimoto = 1.0 - rdShapeHelpers.ShapeTanimotoDist(target, query)
 ```
 
-`GetO3A` finds an alignment between conformers; `Align()` applies it and returns RMSD. Keep `o3a_score` and normalized `shape_tanimoto` distinct in outputs.
+`GetO3A` finds an alignment between conformers; `Align()` applies it and returns RMSD. Keep `o3a_score` and normalized `shape_tanimoto` distinct in outputs. `Align()` mutates the probe's coordinates: copy the probe (`Chem.Mol(target)`) or store the best-aligned conformer if the coordinates are part of the output.
 
 **Open3DAlign vs ROCS:** Open3DAlign is open-source and competitive on small benchmarks; slower than ROCS at scale.
 
@@ -189,7 +191,13 @@ obabel -:"CC(=O)Nc1ccc(C(=O)c2ccc(F)cc2)cc1" -O target.mol2 --gen3D
 shaep -q query.mol2 target.mol2 -s aligned_hits.sdf similarity.txt
 ```
 
-`similarity.txt` reports `shape_similarity`, `ESP_similarity`, and their average per target -- checked on ShaEP 1.4.2.
+`similarity.txt` reports `shape_similarity`, `ESP_similarity`, and their average per target -- checked on ShaEP 1.4.2 (`-q` query, `-s` superimposed structures; with no `--output-file`, the last filename in the input list is the similarity output; ShaEP is a separate binary, not part of RDKit).
+
+`obabel --gen3D` can print `NaN in calculated coordinates` on fused-ring scaffolds (seen on a naphthalene) and still write a usable mol2. Before trusting the ShaEP score, count zero and repeated coordinate rows in the mol2 `@<TRIPOS>ATOM` block; a good file gives `zero=0 dup=0`, a failed build gives `zero` equal to the atom count:
+
+```bash
+awk '/^@<TRIPOS>ATOM/{f=1;next} /^@<TRIPOS>/{f=0} f&&NF>=6{n++; k=$3" "$4" "$5; if(k in s)d++; s[k]=1; if($3+0==0&&$4+0==0&&$5+0==0)z++} END{print "atoms="n+0,"zero="z+0,"dup="d+0}' target.mol2
+```
 
 ### ESPSim (RDKit-native, Python)
 
@@ -228,6 +236,14 @@ The shape >> ECFP4 quadrant is the scaffold-hopping gold:
 **Approach:** Run the conformer-ensemble shape search, keep hits above a shape Tanimoto cutoff, then retain only those whose ECFP4 Tanimoto to the query is below an ECFP4 dissimilarity cutoff.
 
 ```python
+from rdkit import DataStructs
+from rdkit.Chem import rdFingerprintGenerator
+
+def ecfp_tanimoto(mol1, mol2):
+    # Radius 2 / 2048 bits: compare only fingerprints built with identical settings
+    gen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+    return DataStructs.TanimotoSimilarity(gen.GetFingerprint(mol1), gen.GetFingerprint(mol2))
+
 # These thresholds are repository starting defaults only; calibrate both on a
 # task-relevant active/decoy or retrieval benchmark before making decisions.
 def scaffold_hop_candidates(query_mol, library, shape_threshold=0.7,
