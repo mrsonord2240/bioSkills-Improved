@@ -15,6 +15,8 @@ Reference examples tested with: CRISPOR 5.01+, BioPython 1.83+, pandas 2.2+, num
 1. **Default:** this Skill's own composition-based heuristic (`score = 1 - |gc_frac - 0.5| * 2`, used by `find_sgrna_candidates`/`annotate_exon_position` below) -- always runs, no install, and every worked example in this Skill labels it explicitly as a substitute rather than a real Rule Set 2 score.
 2. **For real Rule Set 2 predictions:** Broad Institute CRISPick (https://portals.broadinstitute.org/gppx/crispick/public, web submission, no install) or Bioconductor `crisprScore::getAzimuthScores()` (R) -- neither was installed or smoke-tested in this Skill's own audit environment, so verify the call signature against the package's own help before trusting output.
 
+Install: `git clone https://github.com/maximilianh/crisporWebsite` (CRISPOR is not on PyPI); `pip install biopython pandas numpy`; FlashFry ships as a JAR from GitHub Releases (`java -jar FlashFry-assembly-1.15.jar`); for Cas12a / multiplex annotation data in R, `devtools::install_github('crisprVerse/crisprDesignData')`.
+
 Before using code patterns, verify installed versions match. If versions differ:
 - CLI: `crispor.py --help` from the crisporWebsite clone
 - R: `?crisprScore::getAzimuthScores` for the current argument names
@@ -24,6 +26,10 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 ## sgRNA Library Design
 
 **"Design a CRISPR library for my screen"** -> Pick a chemistry (Cas9 KO, CRISPRi, CRISPRa, Cas12a, base or prime editor), score candidate guides for on-target activity and off-target liability, position them relative to gene/TSS, add appropriate controls, lay out the oligo for synthesis, and validate the cloned pool.
+
+**Before designing anything, stop and confirm the required inputs:** gene list (HGNC symbols or Ensembl IDs), target genome assembly (GRCh38 / GRCm39 / project-specific), screen chemistry (Cas9 / CRISPRi / CRISPRa / Cas12a / BE / PE), and either FANTOM5 CAGE peaks (CRISPRi/a) or coding-exon coordinates (Cas9 KO). If any is missing, ask for it rather than defaulting to Cas9 KO or inventing a gene list from context.
+
+**Deliverable:** library table + oligo synthesis order + expected coverage / cell number / sequencing depth.
 
 - Python: `crispor.py` (web + CLI) for batch genome-wide guide scoring with CFD+MIT off-target
 - Python: this Skill's own GC-content heuristic (default, always available) or Broad CRISPick / R `crisprScore::getAzimuthScores()` for real Rule Set 2 on-target predictions -- **not** the `azimuth` PyPI package, which is unrunnable Python 2 (see Version Compatibility above)
@@ -40,6 +46,8 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 | Paralog buffering, GI screens | enAsCas12a multiplex | Inzolia, in4mer | 4-guide arrays | Constitutive exons |
 | Variant function, SNV scanning | CBE / ABE | Custom tiling library | Tile editing windows | Editing window pos 4-8 from PAM-distal end |
 | Precise edit, indel-free | Prime editor | Custom PRIDICT-designed | Tile pegRNAs | Anywhere with NGG PAM within 30 nt of edit |
+
+**Off-the-shelf first:** for a new screen in a well-characterized cancer line, use the published Brunello / Dolcetto / Calabrese / Inzolia pool (Addgene) rather than re-designing it; you inherit the community validation and the calibration of MAGeCK / BAGEL2 / Chronos against that library. Cas9 and Cas12a libraries are not interchangeable (different enzyme and PAM); do not mix them in one screen.
 
 **Fails when:**
 - CRISPRi/a targeting wrong TSS: any TSS without FANTOM5 CAGE evidence is suspect; guides positioned against the wrong TSS lose most of their knockdown.
@@ -155,7 +163,7 @@ def crispra_window(tss_coord, strand='+'):
     return (tss_coord + 75, tss_coord + 150)
 ```
 
-**Critical nuance:** Cell-type-specific TSSs differ from the FANTOM5 consensus in ~15% of genes. For tissue-specific screens (e.g., neuron, hepatocyte), re-derive TSSs from a matched CAGE / GRO-seq / PRO-seq dataset before locking guide positions, or knockdown efficiency drops several-fold. The single most common cause of "weak" CRISPRi hits is mis-positioned guides against an alternative TSS.
+**Critical nuance:** Cell-type-specific TSSs differ from the FANTOM5 consensus in ~15% of genes. For tissue-specific screens (e.g., neuron, hepatocyte), re-derive TSSs from a matched CAGE / GRO-seq / PRO-seq dataset before locking guide positions, or knockdown efficiency drops several-fold. The single most common cause of "weak" CRISPRi hits is mis-positioned guides against an alternative TSS: dCas9-KRAB knockdown is maximal within +/-100 bp of the actual Pol II loading site, and canonical Ensembl/RefSeq annotation can be off by 1-10 kb for genes with broad or non-canonical promoters. Symptom: "easy" essentials (RPS, RPL, EIF) show normal dropout but newer genes do not, and the library validates poorly against CEGv2.
 
 ## Genome-Wide Library Selection
 
@@ -203,7 +211,7 @@ A genome-wide library should include:
 | Reference essentials (CEGv2 subset: e.g. RPS3, RPL11, EIF3A, POLR2A) | 50-100 | Internal positive control; QC dropout signal |
 | Reference non-essentials (NEGv1 subset) | 50-100 | Internal negative control; BAGEL2 calibration |
 
-**Critical pitfall:** Using only AAVS1 as the negative control in a Cas9 screen creates a normalization baseline biased toward "any cut is bad." Always add NTCs or non-essentials so that downstream median normalization and PR-AUC against CEGv2 work without baseline-shift artifacts.
+**Critical pitfall:** Using only AAVS1 as the negative control in a Cas9 screen creates a normalization baseline biased toward "any cut is bad." Always add NTCs or non-essentials so that downstream median normalization and PR-AUC against CEGv2 work without baseline-shift artifacts. Too few NTCs (<100 in a 70k library) leave the null variance unstable: normalization and FDR rest on it, so gene-level p-values turn erratic and MAGeCK FDR fluctuates between runs.
 
 ## Library Composition for Specialized Screens
 
@@ -256,13 +264,6 @@ def build_oligo(spacer, vector='lentiGuide-Puro', subpool_idx=None):
 
 ## Failure Modes
 
-### Wrong TSS in CRISPRi/a library
-
-**Trigger:** Using Ensembl/RefSeq TSS instead of empirical CAGE peak for genes with broad or non-canonical promoters.
-**Mechanism:** dCas9-KRAB knockdown is maximal within ±100 bp of the actual Pol II loading site; canonical annotation can be off by 1-10 kb.
-**Symptom:** "Easy" essentials (RPS, RPL, EIF) show normal dropout but newer genes don't; library validates poorly against CEGv2.
-**Fix:** Re-derive TSS from FANTOM5 CAGE highest-rank peak; for tissue-specific lines, use matched CAGE or GRO-seq.
-
 ### Library skew from PCR bias during amplification
 
 **Trigger:** Amplifying the cloned plasmid pool with too many PCR cycles (>20) or with high-GC-bias polymerase.
@@ -284,12 +285,6 @@ def build_oligo(spacer, vector='lentiGuide-Puro', subpool_idx=None):
 **Symptom:** Hits include neutral genes that co-infect with true essentials.
 **Fix:** MOI 0.3 strict; titer Cas9-positive cells specifically; re-check by qPCR of integration.
 
-### Wrong control proportion
-
-**Trigger:** <100 non-targeting controls in a 70k library.
-**Mechanism:** Null distribution for normalization and FDR rests on the NTC variance; too few NTCs yields unstable median and inflated FDR.
-**Symptom:** Erratic gene-level p-values; MAGeCK FDR fluctuates wildly between runs.
-**Fix:** ~1% of library (500-1,000) NTCs; supplement with non-essential-gene controls.
 
 ## Quantitative Thresholds
 
@@ -299,24 +294,21 @@ def build_oligo(spacer, vector='lentiGuide-Puro', subpool_idx=None):
 | Poly-T avoidance | ≤3 consecutive T | U6 Pol III terminator; ≥4 Ts terminates sgRNA transcription |
 | Guides per gene (Cas9) | 4 (Brunello/TKOv3 standard); up to 6 (Avana, older) | Doench 2016 reports diminishing gene recovery below 4 sgRNAs/gene; returns flatten above 6 |
 | Guide-to-guide minimum spacing | >=5 nt between any two selected guides for the same gene | Composition filters (GC/poly-T) alone don't reject near-duplicate protospacers; `select_independent_guides` enforces this so 4 "guides" are 4 independent cut sites, not fewer |
-| CRISPRi window | -50 to +300 search; +25 to +75 optimum | Sanson 2018 (Dolcetto); Horlbeck v2 uses -25 to +500 |
-| CRISPRa window | -150 to -75 from TSS | Sanson 2018 (Calabrese); narrower than Horlbeck v2 (-550 to -25) |
-| NTCs in library | ~1% (500-1,000 in a 70k library) | DepMap library design notes; rule-of-thumb for stable null |
 | MOI | 0.3 | Poisson: P(>=2 sgRNAs/cell) = 4% at MOI 0.3 |
 | Coverage at infection | 500 cells/sgRNA | DepMap convention; 200x minimum, 1000x for noisy / in-vivo |
-| CRISPOR MIT specificity score | >=50 (higher = more specific) | CRISPOR convention (Haeussler 2016) |
-| Library skew (top 10% / bottom 10%) | <2 ideal, <5 acceptable | Joung 2017 Nat Protoc |
+
+Windows: Library Chemistry Decision Tree. NTC counts: Control Guides. MIT/CFD cutoffs: Off-Target Scoring. Skew: Library QC After Cloning.
 
 ## Common Errors
 
 | Error / symptom | Cause | Solution |
 |-----------------|-------|----------|
 | sgRNA fails to express | Poly-T in spacer terminates U6 | Filter `TTTT` in design; this is the #1 silent failure |
-| CRISPRi guide gives no knockdown | Wrong TSS used | Re-derive TSS from FANTOM5 / matched CAGE |
-| Library Gini >0.3 in plasmid pool | PCR over-amplification or synthesis defect | Cap at 15 cycles; re-sequence plasmid; consider re-synthesis |
 | Hits include amplified loci (e.g. ERBB2 in HER2+) | Copy-number amplicon false-essentiality | See [[copy-number-correction]] |
 | Paralog gene absent from hit list despite expression | Cas9 single-KO buffering | Switch to Cas12a multiplex; see [[combinatorial-screens]] |
 | Cas12a oligo doesn't cut | Forgot Cas12a's TTTV PAM is 5' of spacer, not 3' | Re-orient: PAM-then-spacer for Cas12a, opposite of Cas9 |
+
+No knockdown from a CRISPRi guide (wrong TSS): see CRISPRi / CRISPRa TSS Targeting. Plasmid-pool skew, synthesis dropouts, polyclonality: see Failure Modes.
 
 ## References
 
