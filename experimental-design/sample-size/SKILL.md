@@ -132,10 +132,18 @@ sim.opts <- RNAseq.SimOptions.2grp(ngenes = nrow(counts_mat), seqDepth = params$
                                     lBaselineExpr = params$lmean, lOD = params$lOD,
                                     p.DE = 0.05, lfc = log2(1.5), sim.seed = 20260918)
 simres <- runSims(Nreps = c(3, 6, 10, 20), nsims = 20, sim.opts = sim.opts, DEmethod = "DESeq2")
+# comparePower counts a DE gene as a target only if abs(lfc) > delta (STRICT). runSims planted every DE gene at
+# exactly lfc = log2(1.5), so delta = log2(1.5) leaves ZERO target genes and power.marginal is all NaN.
+# Put delta just below the planted fold change:
 powres <- comparePower(simres, alpha.type = "fdr", alpha.nominal = 0.05,
-                       stratify.by = "expr", target.by = "lfc", delta = log2(1.5))
-powres$powerAveraged                    # average power per Nreps, at the target fold change
+                       stratify.by = "expr", target.by = "lfc", delta = log2(1.5) - 0.01)
+names(powres)                           # 16-field list; there is no `powerAveraged` (`$` on a missing name returns NULL silently)
+powres$Nreps1                           # replicate numbers, same order as the rows below
+rowMeans(powres$power.marginal, na.rm = TRUE)   # power.marginal is Nreps x nsims; this is marginal power per Nreps
+summaryPower(powres)                    # PROPER's own table: nominal vs actual FDR, marginal power, avg TD/FD per Nreps
 ```
+
+Read the row where marginal power first reaches 0.80 as the sample size per group; if none does, raise the top `Nreps`. Verified on PROPER 1.38.0 (6v6 synthetic pilot, 2,500 genes, `nsims = 8`): with `delta = log2(1.5) - 0.01` marginal power was 0.006 / 0.060 / 0.22 / 0.61 at n = 3 / 6 / 10 / 20 (actual FDR 0.74 / 0.48 / 0.20 / 0.11), while `delta = log2(1.5)` returned `NaN` for every cell. `power.marginal` can also be `NaN` when `nsims` is very low or a simulation has no true discoveries; raise `nsims` before trusting a cell. Interpret the FDR-aware result as in "When No n Is Reachable".
 
 ## scRNA-seq Cohort Sizing -- Pseudobulk on Donors
 
@@ -257,23 +265,13 @@ The "minimum" columns are floors that assume low dispersion and large effects; t
 
 **Ethics/protocol note for human-donor cohorts:** when sizing tumor-vs-normal, disease-vs-control or other human-donor studies, the replicate count -- including the 10-20% failure margin above -- must match what the approved IRB/ethics protocol specifies for that cohort. Recruiting additional donors purely to cover the failure margin has its own consent and recruitment implications; a power calculation justifies the number but does not by itself authorize recruiting it.
 
-## Common Errors
-
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| Over-stated power | technical reps counted as n | collapse to biological units |
-| Underpowered at n=3 | convention not calculation | size to >=6 (or pilot-driven) |
-| scRNA-seq DE does not replicate | sized on cells | size on donors (pseudobulk) |
-| Planned n off by a large factor | guessed CV | estimate dispersion from pilot |
-| Study fails after sample loss | no failure margin | add 10-20% extra units |
-
 ## Anticipated Reviewer Pushback
 
 | Pushback | Response |
 |----------|----------|
 | "Why this n?" | smallest n reaching marginal power >= 0.8 at FDR 0.05 for the minimum meaningful FC; power curve provided |
 | "Where did dispersion come from?" | estimated from pilot (DESeq2); literature value used only as a cross-check |
-| "Is n=3 enough?" | no; >=6 is Schurch 2016's floor for recovery over a realistic FC spectrum, but the fixed-FC calculation for this specific target fold change can require far more (n in the mid-40s to 74, depending on the assumed mean count, at 1.5-fold in this Skill's own example) — quote the fixed-FC number, not just the floor |
+| "Is n=3 enough?" | no; quote both the Schurch floor and the fixed-FC calculation for this target fold change (see the note under Quantitative Thresholds) — the fixed-FC number is the on-target power claim |
 | "Why so many donors for scRNA-seq?" | population DE power scales with donors, not cells (Squair 2021) |
 | "Technical replicates?" | collapsed to biological units; they add no biological degrees of freedom |
 
