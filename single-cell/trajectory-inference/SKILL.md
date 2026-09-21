@@ -217,8 +217,8 @@ Quantifier disagreement is first-order, not a detail (Soneson 2021): velocyto vs
 | high `velocity_confidence` but biologically wrong arrows | metric rewards kNN smoothing, not truth (Zheng 2023) | sweep `n_neighbors`; require orthogonal validation, not the confidence score alone |
 | CellRank invents discrete macrostates from a smooth flow | metastability assumption violated; GPCCA forced to partition a continuum | show the Schur/eigenvalue spectrum; justify n_states by a real gap or treat states as coarse-graining artifacts |
 | Pseudotime intervals reported as durations | pseudotime is monotone in progression, not time | only RealTimeKernel/WOT exploit actual time; do not read intervals as elapsed hours |
-| `recover_dynamics`/`mode='dynamical'` or `mode='stochastic'` raise `TypeError`/`ValueError` inside scvelo's own internals | pandas>=3 / numpy>=2 incompatibility in scvelo 0.3.4, not fixable from the call site | fall back to `mode='deterministic'` + `velocity_pseudotime`; confirm your numpy/pandas/scvelo versions before assuming dynamical/stochastic work |
-| `cellrank`/`scvelo` code raises `RuntimeError` about "bootstrapping phase" when run as a `.py` script on Windows | a kernel or tool spawned a `multiprocessing.Manager()` progress-bar queue without a guarded entry point | wrap the script body in `if __name__ == '__main__':` (confirmed fix; verified for CellRank's `compute_transition_matrix`/`compute_fate_probabilities`) |
+| `recover_dynamics`/`mode='dynamical'` or `mode='stochastic'` raise `TypeError`/`ValueError` inside scvelo's own internals | pandas>=3 / numpy>=2 incompatibility in scvelo 0.3.4 | see the scVelo compatibility note under RNA Velocity: `mode='deterministic'` + `velocity_pseudotime` |
+| `cellrank`/`scvelo` code raises `RuntimeError` about "bootstrapping phase" when run as a `.py` script on Windows | a `multiprocessing.Manager()` progress-bar queue started without a guarded entry point | guard the entry point (see the CellRank Windows note); for scvelo pass `show_progress_bar=False, n_jobs=1` |
 
 ## Related Skills
 
