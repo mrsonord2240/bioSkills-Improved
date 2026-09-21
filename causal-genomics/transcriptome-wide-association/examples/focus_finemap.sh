@@ -4,8 +4,9 @@
 # Resolves co-significant gene clusters at gene-dense loci into a credible causal-gene set
 # with per-gene posterior inclusion probabilities (PIPs).
 #
-# Install (checked 2026-09-19; a bare `pip install pyfocus` is non-functional -- see
-# SKILL.md Tool Install Notes for why and for the required post-install patch):
+# Install (checked 2026-09-21; a bare `pip install pyfocus` is non-functional -- see
+# SKILL.md Tool Install Notes for the required post-install patches, including the two
+# finemap.py fixes without which the run crashes at "Calculating PIPs"):
 #   pip install pyfocus "pandas<2.2" "setuptools<81"
 #
 # Windows: use paths relative to the working directory below, never an absolute `F:/...`
@@ -29,7 +30,8 @@ P_THRESHOLD='5e-8'
 OUT_PREFIX='gwas_focus_whole_blood'
 
 # ---- Step 1: build FOCUS database from FUSION weights if not pre-built ----
-# Skip this if using a pre-built FOCUS DB. Custom panels need this step.
+# Skip this if using a pre-built FOCUS DB. Custom panels need this step; `focus import` needs
+# mygene + rpy2 (see SKILL.md, FOCUS section, for the direct-build alternative).
 # focus import gtex_whole_blood.pos fusion --tissue Whole_Blood --output focus_gtex_v8_whole_blood
 
 # ---- Step 2: run FOCUS fine-mapping ----

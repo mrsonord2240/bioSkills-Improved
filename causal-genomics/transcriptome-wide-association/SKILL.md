@@ -131,9 +131,9 @@ Bulk-tissue TWAS averages over cell composition; sc-eQTL TWAS recovers cell-type
 
 **Mechanism:** TWAS Z-scores are linear combinations of SNP Z-scores weighted by per-gene SNP effects. When two genes share many high-weight SNPs (e.g. nearby genes regulated by the same enhancer or LD-tagged independent eQTLs), their TWAS Z-scores are positively correlated. A single causal GWAS variant therefore produces significant Z at multiple co-regulated genes (Wainberg 2019 Nat Genet 51:592; Mancuso 2019 Nat Genet 51:675).
 
-**Symptom:** A GWAS lead locus shows 3-10 genes all passing genome-wide TWAS significance (p < 2.3e-6 ~ 0.05/22k); per-gene LocusZoom-style plots look near-identical; conditional analysis (FUSION.post_process.R runs conditional/joint analysis by default; FUSION.assoc_test.R's `--coloc_P` adds single-SNP coloc) reveals only 1-2 independent gene signals; the genes lie within 1 Mb of each other.
+**Symptom:** A GWAS lead locus shows 3-10 genes all passing genome-wide TWAS significance (p < 2.3e-6 ~ 0.05/22k); per-gene LocusZoom-style plots look near-identical; conditional analysis (`FUSION.post_process.R`, see FUSION Pipeline) reveals only 1-2 independent gene signals; the genes lie within 1 Mb of each other.
 
-**Fix:** Always run FOCUS after TWAS to obtain per-gene PIPs. Report only genes with PIP >= 0.8 as candidate causal; report co-significant genes with PIP < 0.5 as LD-tagged. Cross-check with cis-eQTL coloc (PP.H4 >= 0.7) for the candidate causal gene. FUSION's `FUSION.post_process.R` performs conditional/joint analysis by default (no `--joint` flag) as a lighter-weight alternative.
+**Fix:** Always run FOCUS after TWAS to obtain per-gene PIPs. Report only genes with PIP >= 0.8 as candidate causal; report co-significant genes with PIP < 0.5 as LD-tagged. Cross-check with cis-eQTL coloc (PP.H4 >= 0.7) for the candidate causal gene.
 
 ### Tissue mis-specification
 
@@ -155,6 +155,18 @@ Bulk-tissue TWAS averages over cell composition; sc-eQTL TWAS recovers cell-type
 
 **Fix:** Use ancestry-matched prediction panels where available: MESA multi-ethnic eQTL (Mogil 2018 PLoS Genet), eQTLGen-Asian, AFGR (Africa) when published, or MAGE (Taliun-style multi-ancestry eQTL). Move to MA-FOCUS for cross-ancestry joint fine-mapping. Document the ancestry assumption explicitly in methods.
 
+| Panel | N donors | Tissues / cells | Ancestry | Use case |
+|-------|----------|-----------------|----------|----------|
+| GTEx v8 (full) | 838 | 49 tissues | EUR (~85%) | Default standard for general TWAS |
+| GTEx v8 MASHR-EUR | -- | 49 tissues | EUR | Primary; sparser SNP set per gene |
+| eQTLGen | 31,684 | Whole blood | EUR (>95%) | Highest blood power; cis + trans available |
+| MESA Monocytes (Mogil 2018) | 1,163 | Monocytes | Multi-ancestry | AFR / HIS-relevant analyses |
+| MESA Monocytes-AFA | 233 | Monocytes | AFR | AFR-specific immune traits |
+| AFGR | ~2,000 | Whole blood | AFR | AFR (emerging; release-dependent) |
+| OneK1K (Yazar 2022) | 982 | PBMC, 14 cell types | EUR | sc-TWAS in immune cell types |
+| PsychENCODE (Wang 2018) | ~1,300 | Prefrontal cortex | EUR | Neuropsychiatric traits |
+| BrainSeq Phase 2 | ~350 | DLPFC, hippocampus | EUR + AFR | Neuropsychiatric replication |
+
 ### Low-N tissue weights are unstable
 
 **Trigger:** Using a GTEx tissue with N < 100 donors (e.g. several brain sub-regions, kidney cortex in v7).
@@ -164,6 +176,18 @@ Bulk-tissue TWAS averages over cell composition; sc-eQTL TWAS recovers cell-type
 **Symptom:** Tissue produces unusually high TWAS hit count or unusually high genomic inflation; per-gene CV R^2 distribution is bimodal with a long heavy tail.
 
 **Fix:** Skip GTEx tissues with N < 100 unless biologically essential. Substitute eQTLGen for whole blood (N ~ 31k, Vosa 2021 Nat Genet 53:1300) where blood is acceptable. For brain, use PsychENCODE (N ~ 1300, Wang 2018 Science 362:eaat8464) or BrainSeq (N ~ 350+) when available; verify the matching prediction-weight panel exists.
+
+GTEx v8 small-N tissues (skip those below 100 unless biologically required; the two brain rows are marginal):
+
+| Tissue | GTEx v8 N |
+|--------|-----------|
+| Kidney Medulla | 4 |
+| Cervix - Endocervix | 10 |
+| Cervix - Ectocervix | 9 |
+| Fallopian Tube | 9 |
+| Bladder | 21 |
+| Brain - Substantia nigra | 139 |
+| Brain - Spinal cord (cervical c-1) | 159 |
 
 ### HLA region
 
@@ -257,7 +281,7 @@ Rscript FUSION.post_process.R \
 # twas_joint.dat reports per-gene conditional Z; genes with joint Z > 4 are independent
 ```
 
-The `--locus_win 100000` parameter defines the conditioning window; 100 kb is conservative for non-HLA loci. FUSION's `--coloc_P` flag runs single-SNP coloc internally but is less robust than running coloc separately on the per-gene top eQTL.
+`FUSION.post_process.R` returns conditionally independent gene signals, not PIPs; use FOCUS for probabilistic fine-mapping. The `--locus_win 100000` parameter defines the conditioning window; 100 kb is conservative for non-HLA loci. FUSION's `--coloc_P` flag runs single-SNP coloc internally but is less robust than running coloc separately on the per-gene top eQTL.
 
 **Known upstream crash on single-SNP ("top1") genes** -- see Common Errors below for the exact error, cause, and a verified two-line patch.
 
@@ -298,9 +322,9 @@ python SMulTiXcan.py \
     --output joint_multitissue.csv
 ```
 
-`--cutoff_condition_number 30` is required by installed SMulTiXcan.py versions, not optional: omitting both it and `--cutoff_ratio`/`--cutoff_threshold` raises `InvalidArguments: Specify either cutoff_ratio or cutoff_threshold` (confirmed 2026-09-19 against a real run). This is the same setting named in prose below as "the canonical MetaXcan setting" -- it must actually be passed.
+`--cutoff_condition_number 30` (the canonical MetaXcan setting) is required, not optional; omitting it raises the `InvalidArguments` error in Common Errors (confirmed 2026-09-19 against a real run).
 
-S-MultiXcan applies PCA regularisation on the inter-tissue correlation matrix; `--regularization 0.1` (not a default -- it must be passed explicitly; the argument otherwise defaults to off) applies a ridge, while `--cutoff_condition_number 30` (the canonical MetaXcan setting) conditions by dropping near-collinear components. Tissues that are nearly collinear with another (e.g. multiple brain sub-regions) are absorbed into shared components and do not contribute independent power.
+S-MultiXcan applies PCA regularisation on the inter-tissue correlation matrix: `--cutoff_condition_number 30` drops near-collinear components, and `--regularization 0.1` (off unless passed explicitly) adds a ridge. Tissues that are nearly collinear with another (e.g. multiple brain sub-regions) are absorbed into shared components and do not contribute independent power.
 
 ## FOCUS Probabilistic Fine-Mapping
 
@@ -309,8 +333,7 @@ S-MultiXcan applies PCA regularisation on the inter-tissue correlation matrix; `
 **Approach:** Build (or download) a FOCUS gene-prediction database matching the TWAS weight panel; run `focus finemap` with the TWAS sumstats and ancestry-matched LD reference; report PIPs and credible sets.
 
 ```bash
-# Install: pip install pyfocus "pandas<2.2" "setuptools<81" -- see Tool Install Notes below,
-# this exact pin (plus a two-line post-install patch) is required to run at all.
+# Install: see Tool Install Notes below -- the pip pins plus a post-install patch are required to run at all.
 # Pre-built FOCUS DBs for FUSION/PrediXcan weights live at github.com/bogdanlab/focus
 
 # Convert FUSION TWAS output to FOCUS sumstat format if needed
@@ -335,6 +358,27 @@ For a custom prediction-weight panel without a pre-built FOCUS DB, construct one
 
 ```bash
 focus import custom_panel.pos fusion --tissue Whole_Blood --output custom_focus
+```
+
+`focus import` needs `mygene` and `rpy2` installed (`pip install mygene rpy2`), and rpy2 needs R built as a shared library. Without them it logs only an ERROR-level message and leaves an empty DB (0 genes imported) instead of raising -- check the log and the DB's gene count. Where rpy2 is unavailable (e.g. the Windows R here), build the DB directly with pyfocus's own schema from a table `panel.tsv` (columns `gene chrom txstart txstop snp pos a1 a0 weight`, one row per gene-SNP weight); `focus finemap` reads the result as a normal DB (checked 2026-09-21, pyfocus 0.802, SQLAlchemy 2.0.54):
+
+```python
+import pandas as pd
+from pyfocus.models.db import load_db, RefPanel, build_model
+
+panel = pd.read_csv("panel.tsv", sep="\t")
+ssn = load_db("custom_focus.db")
+ref = RefPanel(ref_name="custom_panel", tissue="Whole_Blood", assay="rnaseq")
+for gene, g in panel.groupby("gene"):
+    snps = g.reset_index(drop=True)
+    snps["chrom"] = snps["chrom"].astype(str)
+    ssn.add(build_model(
+        gene_info=dict(geneid=gene, txid=gene, name=gene, type="protein_coding",
+                       chrom=str(g.chrom.iloc[0]), txstart=int(g.txstart.iloc[0]), txstop=int(g.txstop.iloc[0])),
+        snp_info=snps, db_ref_panel=ref, weights=g.weight.tolist(), ses=None,
+        attrs={"cv.R2": 0.1, "cv.R2.pval": 1e-4}, method="top1"))  # use each gene's real CV R2 and p
+ssn.add(ref)
+ssn.commit()
 ```
 
 FOCUS PIPs depend on the per-locus prior probability that any gene is causal. Report a sensitivity scan over `--prior-prob`:
@@ -395,14 +439,16 @@ The FUSION / S-PrediXcan / S-MultiXcan + FOCUS pipeline is the default. Escalate
 | Genomic inflation lambda >> 1.05 | Wrong LD reference OR population structure not controlled in upstream GWAS | Fix at the GWAS stage; do not adjust TWAS lambda post-hoc |
 | FOCUS reports PIP = 1 for one gene at every locus | Only one gene in panel at locus; degenerate posterior | Expand panel coverage or report locus as panel-limited |
 | S-MultiXcan condition number warning | Tissues near-collinear (multiple brain regions) | Increase regularisation (`--regularization 0.5`) or restrict to tissue subset |
-| FOCUS DB not matching FUSION weights | Custom weight panel without FOCUS DB | Build FOCUS DB from weights using `focus import <panel>.pos fusion` |
+| FOCUS DB not matching FUSION weights | Custom weight panel without FOCUS DB | Build one (`focus import`, or the direct-build script in the FOCUS section) |
+| `DataFrame.pivot() takes 1 positional argument but 4 were given` or `'DataFrame' object has no attribute 'append'` (`focus finemap`, at "Calculating PIPs") | pyfocus 0.802 `finemap.py:1012` / `:188` use APIs removed in pandas 2.0 | Apply the two `finemap.py` patches in Tool Install Notes |
+| `focus import` finishes with an empty DB / 0 genes imported | `mygene` or `rpy2` missing (only an ERROR log line); rpy2 also needs R built as a shared library | Install both, or build the DB directly (FOCUS section) |
 | MA-FOCUS H0 probability dominates | Cross-ancestry heterogeneity at the locus | Run per-ancestry FOCUS separately; do not force joint |
 | S-PrediXcan output has effect sizes much larger than expected | `sdY` proxy mis-specified; standardised vs unstandardised mismatch | Confirm GWAS Z and beta scale; rerun with `--additional_output` |
 | `InvalidArguments: Specify either cutoff_ratio or cutoff_threshold` (S-MultiXcan) | `--cutoff_condition_number` (or `--cutoff_ratio`/`--cutoff_threshold`) omitted; not optional in installed versions | Always pass `--cutoff_condition_number 30` |
-| `TypeError: read_csv() got an unexpected keyword argument 'delim_whitespace'` (`focus`/`focus finemap`) | A fresh `pip install pyfocus` pulls pandas>=2.2, which removed `delim_whitespace`; pyfocus 0.802's own `gwas.py`/`exprref.py`/`ldref.py`/`convert.py` all call it | `pip install pyfocus "pandas<2.2" "setuptools<81"` -- see Tool Install Notes for the full working recipe |
-| `AttributeError: module 'numpy' has no attribute 'warnings'` (`focus`/`focus finemap`) | pyfocus 0.802's `ldref.py`/`exprref.py` call the long-removed `np.warnings` alias; every numpy version with Python 3.11/3.12 wheels has already dropped it, so pinning pandas alone is not sufficient | Patch the two files after install -- see Tool Install Notes |
-| `Please specify independent regions location or default regions with '37:EUR', etc.` (`focus finemap`) | `--locations` omitted; required even for single-ancestry runs in installed pyfocus 0.802 | Always pass `--locations 38:EUR` (GRCh38 panels) or `37:EUR` (GRCh37 panels) |
-| `focus finemap` reports an implausible population count (e.g. "Detecting 2 populations" from one file) on Windows | Absolute Windows paths (`F:/...`) get colon-split by pyfocus's multi-ancestry parser | Use relative paths for every `focus finemap` positional argument on Windows, or run under WSL/Linux |
+| `TypeError: read_csv() got an unexpected keyword argument 'delim_whitespace'` (`focus`/`focus finemap`) | Unpinned pandas>=2.2 | Install pins and patch in Tool Install Notes |
+| `AttributeError: module 'numpy' has no attribute 'warnings'` (`focus`/`focus finemap`) | Removed `np.warnings` alias; pinning pandas does not help | Patch after install (Tool Install Notes) |
+| `Please specify independent regions location or default regions with '37:EUR', etc.` (`focus finemap`) | `--locations` omitted | Always pass it (see FOCUS section) |
+| `focus finemap` reports an implausible population count (e.g. "Detecting 2 populations" from one file) on Windows | Absolute Windows paths get colon-split by pyfocus's multi-ancestry parser | Use relative paths (see FOCUS section) |
 | A PIP filter against a `pip` column silently returns nothing (or the whole row) | Installed pyfocus 0.802 never writes a plain `pip` column -- output is `pips_pop1` (population-indexed even for a single population) or `pips_me` for the cross-ancestry marginal PIP | Filter on `pips_pop1` (single-ancestry) or `pips_me` (MA-FOCUS); see `examples/focus_finemap.sh` |
 | `Error in wgt.matrix[qc$flip, ] : incorrect number of dimensions` or `non-conformable arguments` (`FUSION.post_process.R`) | Single-SNP ("top1") weight models: `wgt.matrix[m.keep,]` and `genos$bed[,m[m.keep]]` (lines ~168/170 and ~251/254) drop a 1-row/1-column matrix to a bare vector without `drop=FALSE` | Patch your local `fusion_twas` clone: add `,drop=FALSE` to both subsetting lines at both locations, or filter single-SNP genes out of `--input` before running `post_process.R` |
 
@@ -435,20 +481,26 @@ A defensible TWAS report includes every item below in methods or supplement:
 
 ## Tool Install Notes
 
-- **FUSION**: gusevlab.org/projects/fusion or `git clone https://github.com/gusevlab/fusion_twas`. R scripts; needs plink (PLINK 1.9), Rscript, and the GBJ R package for omnibus. Pre-computed weights for GTEx v7/v8, CMC, YFS, METSIM, NTR, MESA at the same site.
+- **FUSION**: gusevlab.org/projects/fusion or `git clone https://github.com/gusevlab/fusion_twas`. R scripts; needs plink (PLINK 1.9) and Rscript; `install.packages(c('plink2R', 'optparse', 'glmnet', 'methods', 'RColorBrewer', 'GBJ'))` (GBJ is for the omnibus test). Pre-computed weights for GTEx v7/v8, CMC, YFS, METSIM, NTR, MESA at the same site.
 - **MetaXcan / S-PrediXcan / S-MultiXcan**: `git clone https://github.com/hakyimlab/MetaXcan` (not on PyPI). Python scripts in `software/`. Compatible with Python 3.9-3.11.
 - **PredictDB models**: predictdb.org. GTEx v8 elastic-net (single-tissue) and MASHR (cross-tissue posterior) databases for EUR; multi-ethnic panels emerging.
 - **UTMOST**: `git clone https://github.com/Joker-Jerome/UTMOST`. Python. Needs precomputed cross-tissue weights or training pipeline.
-- **FOCUS**: `pip install pyfocus "pandas<2.2" "setuptools<81"` -- checked against pyfocus 0.802, 2026-09-19. A bare `pip install pyfocus` (no pins) is non-functional: it pulls pandas>=2.2, which removed `delim_whitespace` (crashes every `focus finemap`/`focus import` call in `gwas.py`/`exprref.py`/`ldref.py`/`convert.py`), and, independent of pandas, resolves a numpy version whose Python 3.11/3.12 wheels have already dropped the `np.warnings` alias that `ldref.py`/`exprref.py` still call (`setuptools<81` is needed separately because pyfocus imports `pkg_resources`, which recent setuptools no longer ships, and pyfocus does not declare setuptools as a dependency). After installing, patch the two `np.warnings` call sites (upstream has not fixed either as of 2026-09-19):
+- **FOCUS**: `pip install pyfocus "pandas<2.2" "setuptools<81"` -- checked against pyfocus 0.802 (pandas 2.1.4, numpy 1.26.4, setuptools 80.10.2), 2026-09-21. A bare `pip install pyfocus` is non-functional and the pins alone are not enough; four upstream problems, the first two fixed by the pins and the last two by the patch below (unfixed upstream as of 2026-09-21):
+  - `delim_whitespace`: pandas>=2.2 removed it (used in `gwas.py`/`exprref.py`/`ldref.py`/`convert.py`), hence `pandas<2.2`.
+  - `pkg_resources`: imported by pyfocus but not declared as a dependency, and gone from setuptools>=81, hence `setuptools<81`.
+  - `np.warnings`: removed from every numpy that has Python 3.11/3.12 wheels (`ldref.py`, `exprref.py`).
+  - `DataFrame.pivot(...)` with positional args (`finemap.py:1012`) and `DataFrame.append` (`finemap.py:188`): both removed in pandas 2.0, and both crash at "Calculating PIPs", after every earlier stage has passed.
 
   ```bash
   PYFOCUS_DIR=$(python -c "import pyfocus, os; print(os.path.dirname(pyfocus.__file__))")
   sed -i "1i import warnings" "$PYFOCUS_DIR/data/exprref.py"
   sed -i "s/np\.warnings\.catch_warnings/warnings.catch_warnings/;s/np\.warnings\.filterwarnings/warnings.filterwarnings/" \
       "$PYFOCUS_DIR/data/ldref.py" "$PYFOCUS_DIR/data/exprref.py"
+  sed -i 's/\.pivot("model_id", "attr_name", "value")/.pivot(index="model_id", columns="attr_name", values="value")/' "$PYFOCUS_DIR/finemap.py"
+  sed -i 's/^\( *\)df = df\.append(null_dict, ignore_index=True)/\1df = pd.concat([df, pd.DataFrame([null_dict])], ignore_index=True)/' "$PYFOCUS_DIR/finemap.py"
   ```
 
-  Verified 2026-09-19: with this pin + patch, `focus finemap` runs end-to-end through real GWAS parsing, LD-reference parsing, weight-DB parsing, and the full genome-wide independent-region scan (see `--locations` requirement above) with no crash, on a from-scratch install. CLI `focus`. Pre-built DBs for GTEx v7/v8 panels at github.com/bogdanlab/focus.
+  Verified 2026-09-21 from a fresh venv with this pin + patch: `focus finemap` against a real pyfocus-schema DB (built as under "FOCUS Probabilistic Fine-Mapping") runs to completion and returns `pips_pop1 = 1` for the planted true gene and 3.4e-08 for `NULL.MODEL`. CLI `focus`. Pre-built DBs for GTEx v7/v8 panels at github.com/bogdanlab/focus. `focus import` additionally needs `mygene` + `rpy2` -- see the FOCUS section.
 - **MA-FOCUS**: `git clone https://github.com/mancusolab/ma-focus && cd ma-focus && pip install .` (no PyPI release; install from source). Same CLI as single-ancestry FOCUS -- `focus finemap` -- with colon-separated per-ancestry sumstats / LD / weight DBs and paired ancestry codes in `--locations`.
 - **TIGAR-V2**: `git clone https://github.com/yanglab-emory/TIGAR`. Python + R hybrid; ships with example data.
 - **MOSTWAS**: `git clone https://github.com/bhattacharya-a-bt/MOSTWAS`. R package; install via `devtools::install_github`.
