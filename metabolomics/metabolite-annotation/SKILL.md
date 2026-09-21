@@ -15,12 +15,11 @@ Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
 - CLI: `<tool> --version` then `<tool> --help` to confirm flags
 
-Spectral matching needs precursor m/z on every MS/MS spectrum. Apply the `add_precursor_mz`
-filter first; in matchms 0.33+ a spectrum that still has no precursor_mz afterward raises a
-hard `AssertionError: Precursor_mz missing` (checked on matchms 0.33.1) rather than silently
-scoring zero -- `add_precursor_mz` cannot invent a value that isn't derivable from existing
-metadata. Level 1 needs an authentic standard run in the same lab under the same method; no
-software output can substitute for it.
+Install: `pip install matchms`; SIRIUS 6 from https://v6.docs.sirius-ms.io/ (free academic
+account/license); MetFrag as `MetFragCommandLine-<version>.jar` (needs Java).
+
+Spectral matching needs precursor m/z on every MS/MS spectrum: apply the `add_precursor_mz`
+filter first (see Common Errors for what happens when it cannot derive one).
 
 If code throws ImportError, AttributeError, TypeError, or AssertionError, introspect the
 installed package and adapt the example to match the actual API rather than retrying.
@@ -39,7 +38,7 @@ A metabolite name without a stated MSI/Schymanski level is scientifically incomp
 
 | Schymanski | MSI | Name | Evidence required |
 |---|---|---|---|
-| Level 1 | 1 | Confirmed structure | In-house authentic standard, same method: MS + MS/MS + RT all match. The only "identification". |
+| Level 1 | 1 | Confirmed structure | In-house authentic standard, same method: MS + MS/MS + RT all match. The only "identification"; no software output, literature RT or external library RT substitutes. |
 | Level 2a | 2 | Probable structure (library) | MS/MS matches a reference library spectrum; no in-house standard. |
 | Level 2b | 2 | Probable structure (diagnostic) | Diagnostic fragments / RT / ionization consistent with exactly one structure; no reference spectrum. |
 | Level 3 | 3 | Tentative candidate(s) | Evidence narrows to a structure class or candidate set but isomers remain unresolved. |
@@ -88,9 +87,9 @@ except ImportError:
 
 def prepare(spectrum):
     spectrum = default_filters(spectrum)
-    spectrum = add_precursor_mz(spectrum)  # required for ModifiedCosine; a spectrum with no
-                                            # derivable precursor_mz still raises AssertionError
-                                            # here, it does not silently score zero
+    spectrum = add_precursor_mz(spectrum)  # required for ModifiedCosine; it only logs a warning
+                                            # if precursor_mz is not derivable -- the
+                                            # AssertionError fires later, in calculate_scores()
     return normalize_intensities(spectrum)
 
 queries = [prepare(s) for s in queries_raw]
@@ -156,6 +155,10 @@ spectrum, using bond-disconnection fragment support rather than a black-box scor
 (a local CSV or PubChem), run the jar, and read the score as fragment support -- not
 identification; isomers sharing fragmentation frequently tie (the isomer wall).
 
+Worked data ships in `examples/metfrag/` (`peaklist.txt`: citrate MS/MS peaks; `candidates.csv`:
+citrate, isocitrate and glucose) so the run below needs no external chemistry lookup; run it from
+that directory.
+
 ```bash
 # params.txt -- MetFrag reads "key = value" pairs, one per line
 cat > params.txt <<PARAMS
@@ -181,9 +184,9 @@ java -jar MetFragCommandLine-2.6.1.jar params.txt
 # writes <SampleName>.csv, one row per candidate, ranked by fragment-support Score (0-1)
 ```
 
-Checked on MetFragCommandLine 2.6.1: a citrate/isocitrate candidate pair (true constitutional
-isomers, same formula and fragment masses) tied at Score 1.0 while an unrelated sugar scored
-0.12 -- the isomer wall, reproduced exactly as this Skill's Per-Method Failure Modes section
+Checked on MetFragCommandLine 2.6.1 with the shipped `examples/metfrag/` data: the citrate/isocitrate
+pair (true constitutional isomers, same formula and fragment masses) tied at Score 1.0 while the
+unrelated sugar scored 0.12 -- the isomer wall, reproduced exactly as this Skill's Per-Method Failure Modes section
 describes below. Treat a tie as Level 3, never as a single winner.
 
 ## Assemble an Evidence-to-Level Call
