@@ -6,7 +6,7 @@
 
 **Approach:** Three-stage filter. The 1% and top-1000 selections below are repository starting heuristics; choose production cutoffs from target-relevant enrichment, diversity, and throughput measurements.
 
-Pseudo-code skeleton (orchestrator). Each helper function delegates to a dedicated skill: drug-likeness filter to `chemoinformatics/admet-prediction`, single-ligand Vina/GNINA to `dock_single` defined earlier in this skill, PoseBusters QC to `chemoinformatics/pose-validation`.
+Pseudo-code skeleton (orchestrator). Each helper function delegates to a dedicated skill: drug-likeness filter to `chemoinformatics/admet-prediction`, single-ligand Vina/GNINA to `dock_single` in `scripts/dock_single.py`, PoseBusters QC to `chemoinformatics/pose-validation`.
 
 ```python
 import pandas as pd
@@ -17,7 +17,7 @@ from functools import partial
 def drug_like_filter(df):
     raise NotImplementedError('Implement via chemoinformatics/admet-prediction (Lipinski+Veber+PAINS)')
 def vina_dock(smi, receptor_pdbqt, center, box):
-    raise NotImplementedError('Wrap dock_single() above; return best affinity')
+    raise NotImplementedError('Wrap dock_single() from scripts/dock_single.py; return best affinity')
 def gnina_rescore(smi, receptor_pdbqt, center, box):
     raise NotImplementedError('Wrap gnina --cnn_scoring rescore subprocess call')
 def pose_validate(df):
