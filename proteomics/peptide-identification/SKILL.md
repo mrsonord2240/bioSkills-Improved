@@ -1,6 +1,6 @@
 ---
 name: bio-proteomics-peptide-identification
-description: Peptide-spectrum matching from MS/MS with target-decoy FDR control, framing identification confidence as a property of a ranked list (q-value/PEP) rather than a raw engine score (XCorr, hyperscore, Andromeda, SpecEValue). Covers sequence-database search engines (Comet, MS-GF+, MSFragger, Sage, MaxQuant, MetaMorpheus), concatenated vs separate target-decoy competition, PEP vs q-value, the multi-level FDR cascade, open/mass-tolerant search, rescoring (Percolator, mokapot, MS2Rescore), and pyOpenMS SimpleSearchEngineAlgorithm + FalseDiscoveryRate. Use when identifying peptides from tandem mass spectra and deciding what FDR threshold to act on. Protein grouping and protein-level FDR are protein-inference; PTM site localization is ptm-analysis; DIA peptide-centric scoring is dia-analysis; intensity quant is quantification.
+description: Peptide-spectrum matching from MS/MS with target-decoy FDR control, framing identification confidence as a property of a ranked list (q-value/PEP) rather than a raw engine score (XCorr, hyperscore, Andromeda, SpecEValue). Covers sequence-database search engines (Comet, MS-GF+, MSFragger, Sage, MaxQuant, MetaMorpheus), concatenated vs separate target-decoy competition, PEP vs q-value, the multi-level FDR cascade, open/mass-tolerant search, rescoring (Percolator, mokapot), and pyOpenMS SimpleSearchEngineAlgorithm + FalseDiscoveryRate. Use when identifying peptides from tandem mass spectra and deciding what FDR threshold to act on. Protein grouping and protein-level FDR are protein-inference; PTM site localization is ptm-analysis; DIA peptide-centric scoring is dia-analysis; intensity quant is quantification.
 tool_type: mixed
 primary_tool: pyOpenMS
 license: MIT
@@ -33,7 +33,7 @@ Scope: this skill owns spectrum-to-peptide matching and PSM/peptide-level FDR. P
 
 2. **A q-value is valid only if (a) the decoy DB is a faithful null, (b) targets and decoys competed in ONE concatenated search, and (c) there are enough PSMs for the decoy count to be stable.** Generate decoys at the PROTEIN level then digest (so decoy peptides obey the same enzyme rules), matching the target in size and composition. Concatenated competition (one best hit per spectrum) gives FDR = (#decoys above threshold + 1) / (#targets above threshold) -- one decoy above threshold estimates one false target, and the +1 keeps small lists honest. Elias & Gygi's 2 * #decoy / (#target + #decoy) is the older, conservative form of the same concatenated-search estimate, counted over the whole target+decoy list. Separate target/decoy searches (no per-spectrum competition) instead need pi0 * #decoy / #target (Kall, Storey, MacCoss & Noble 2008) or the refined mix-max estimator (Keich, Kertesz-Farkas & Noble 2015). Applying 2d/(t+d) to separate searches over-estimates FDR and throws away identifications (synthetic test: 2.06% estimated vs 0.62% true).
 
-3. **PEP and q-value answer different questions; filtering at "PEP <= 0.01" is far stricter than "q <= 0.01."** PEP (posterior error probability, local FDR) is the probability that THIS PSM is wrong; q-value is the FDR of the list cut at this PSM. FDR is the average of PEP over the accepted set (Kall 2008). The worst PSM in a 1%-FDR list typically has a PEP of 10-50%. Use q-value for list cutoffs; use PEP only for per-ID decisions (e.g. picking one PTM site). And PSM-FDR at 1% does NOT give 1% peptide-FDR or 1% protein-FDR -- each level needs its own estimation; hand protein-level control to protein-inference.
+3. **PEP and q-value answer different questions; filtering at "PEP <= 0.01" is far stricter than "q <= 0.01."** PEP (posterior error probability, local FDR) is the probability that THIS PSM is wrong; q-value is the FDR of the list cut at this PSM. FDR is the average of PEP over the accepted set (Kall 2008). The worst PSM in a 1%-FDR list typically has a PEP of 10-50% (`examples/fdr_filtering.py` prints the q-value and PEP cuts side by side on a demo table). Use q-value for list cutoffs; use PEP only for per-ID decisions (e.g. picking one PTM site). And PSM-FDR at 1% does NOT give 1% peptide-FDR or 1% protein-FDR -- each level needs its own estimation; hand protein-level control to protein-inference.
 
 ## The FDR Vocabulary, Precisely
 
@@ -56,7 +56,7 @@ Scope: this skill owns spectrum-to-peptide matching and PSM/peptide-level FDR. P
 | pFind 3 | Chi 2018 | open-search engine | Maximal unrestricted-PTM/mutation discovery |
 | Percolator | Kall 2007 | semi-supervised SVM re-rank on decoy negatives | Boost IDs at fixed FDR; non-tryptic/PTM/large search spaces |
 | mokapot | Fondrie & Noble 2021 | Percolator in Python; swappable XGBoost classifier | Python pipelines, Sage output, custom features |
-| MS2Rescore + DeepLC + MS2PIP | Declercq 2022; Bouwmeester 2021; Gabriels 2019 | predicted-RT + predicted-intensity rescoring features | Sharpen target/decoy separation; immunopeptidomics |
+| DeepLC + MS2PIP | Bouwmeester 2021; Gabriels 2019 | predicted-RT + predicted-intensity features for a rescorer | Sharpen target/decoy separation; immunopeptidomics -> spectral-libraries |
 | Spectral-library search | -- | match empirical reference spectra (intensity + RT) | Faster/more specific for known peptides -> spectral-libraries |
 | Protein grouping / protein FDR | Savitski 2015; The 2022 | picked / picked-group FDR | route OUT -> protein-inference |
 | PTM site localization | -- | per-site PEP, localization scoring | route OUT -> ptm-analysis |
@@ -70,7 +70,7 @@ Scope: this skill owns spectrum-to-peptide matching and PSM/peptide-level FDR. P
 | Discover unknown PTMs / mass shifts | MSFragger open search (-150..+500 Da) | fragment indexing makes wide-window search feasible; then closed search on discovered mods -> ptm-analysis |
 | Huge dataset, reproducible, cloud-scale | Sage (rescoring-native) | Rust speed; emits Percolator features directly |
 | All-in-one with quant in the same tool | MaxQuant/Andromeda | integrated LFQ/TMT/SILAC and MBR |
-| Non-tryptic (immunopeptidomics, degradomics) | any engine + Percolator/MS2Rescore | rescoring gains are largest where search space explodes |
+| Non-tryptic (immunopeptidomics, degradomics) | any engine + Percolator/mokapot | rescoring gains are largest where search space explodes |
 | Few PSMs (single-protein pulldown) | do NOT trust decoy FDR; inspect spectra manually | decoy counts too noisy below ~hundreds of PSMs |
 | Need per-site / per-ID confidence | act on PEP, not q-value | q-value is list-level; PEP is local |
 
@@ -109,7 +109,7 @@ Checked on OpenMS 3.5.0: 31,437 UniProt entries (human + yeast + E. coli + conta
 
 **Goal:** Search a centroided mzML against the database and emit PSMs plus Percolator features.
 
-**Approach:** All three engines below run one concatenated search and write a Percolator `.pin`, so the rescoring step is the same for each. Convert vendor raw first (`msconvert --mzML --zlib --filter "peakPicking vendor msLevel=1-"` -> data-import). Set tolerances to the instrument, not to the default: 10 ppm precursor and high-res fragment settings for an Orbitrap, 0.6 Da / ion-trap binning for CID. `examples/dda_search.sh` runs the whole route (database -> search -> Percolator -> 1% list) for `ENGINE=sage` or `ENGINE=comet`.
+**Approach:** All three engines below run one concatenated search and write a Percolator `.pin`, so the rescoring step is the same for each. Convert vendor raw first (`msconvert --mzML --zlib --filter "peakPicking vendor msLevel=1-"` -> data-import). Set tolerances to the instrument, not to the default: 10 ppm precursor and high-res fragment settings for an Orbitrap, 0.6 Da / ion-trap binning for CID. `examples/dda_search.sh` runs the whole route (database -> search -> Percolator -> 1% list) for `ENGINE=sage` or `ENGINE=comet`; `MZML` may list several runs, which are searched and rescored together, and it stops before Percolator if the pin's `Label` column holds no decoys (the decoy-tag mismatch below).
 
 ```bash
 # Sage 0.14.6 -- generates its own 'rev_' decoys, so it takes the TARGET-ONLY FASTA.
@@ -158,7 +158,15 @@ awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "q-value") q = i; next
             q && $q <= 0.01' psms.target.tsv > psms_1pct.tsv
 ```
 
-Rescoring pays where the engine's own score is weakest. On one Orbitrap Astral 5-min DDA run (250 pg HYE load, 6,135 MS2 spectra, 31,437-protein database, PXD070049), Comet's raw `-log10(e-value)` gave **916** PSMs at 1% FDR and Percolator lifted the same search to **1,144** (+25%); Sage's `sage_discriminant_score` is already a learned score, so Percolator moved it from **1,406** to **1,398** (-0.6%) -- no gain to be had. Sage 0.14.6 wins this input outright; Comet 2026.02 with Percolator lands 19% behind it, and MS-GF+ v2024.03.26 read straight off `-log10(SpecEValue)` with no rescoring gives **656**, because a calibrated E-value buys cross-instrument comparability, not raw yield. **Do not generalise these counts**: one run, one low-load short-gradient method, each engine at its own idiomatic high-res settings. Rescoring also needs training data -- pooling the three DDA runs (6,864 PSMs) gave Percolator 5,006 PSMs against Sage's own 4,961, while on a single run of 1,939 PSMs it had too few positives to improve anything.
+mokapot takes the identical pin and is the Python alternative (0.10.0; see the pandas/numpy row in Common Errors). It reads the `Label` column and writes target PSMs only, with the q-value in `mokapot q-value` -- again read it by name:
+
+```bash
+mokapot --dest_dir mokapot_out --file_root sage results.sage.pin     # -> sage.mokapot.psms.txt, sage.mokapot.peptides.txt
+awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "mokapot q-value") q = i; next }
+            q && $q <= 0.01' mokapot_out/sage.mokapot.psms.txt > psms_1pct.tsv
+```
+
+Rescoring pays where the engine's own score is weakest. On one Orbitrap Astral 5-min DDA run (250 pg HYE load, 6,135 MS2 spectra, 31,437-protein database, PXD070049), Comet's raw `-log10(e-value)` gave **916** PSMs at 1% FDR and Percolator lifted the same search to **1,144** (+25%); Sage's `sage_discriminant_score` is already a learned score, so Percolator moved it from **1,406** to **1,398** (-0.6%) -- no gain to be had. Sage 0.14.6 wins this input outright; Comet 2026.02 with Percolator lands 19% behind it, and MS-GF+ v2024.03.26 read straight off `-log10(SpecEValue)` with no rescoring gives **656**, because a calibrated E-value buys cross-instrument comparability, not raw yield. **Do not generalise these counts**: one run, one low-load short-gradient method, each engine at its own idiomatic high-res settings. Rescoring also needs training data -- pooling the three DDA runs (6,864 PSMs) gave Percolator 5,006 PSMs against Sage's own 4,961, while on a single run of 1,939 PSMs it had too few positives to improve anything. mokapot on the same Sage pins gave 1,406 on the single run and 4,970 on the pooled three (Percolator 5,006). To pool, give the engine every run (Sage takes several mzML in one call; for Comet concatenate the runs' pins with the header kept once) and rescore once.
 
 ### Database Search with pyOpenMS
 
@@ -227,7 +235,8 @@ psms = pd.read_csv('search_results.tsv', sep='\t')   # map engine columns to 'sc
 # E-values (Comet e-value, MS-GF+ SpecEValue) as -log10(E-value)
 psms['is_decoy'] = psms['protein'].str.lower().str.startswith(DECOY_PREFIXES)
 if not psms['is_decoy'].any():
-    raise ValueError('no decoy PSMs recognised: check the decoy prefix, or the table was already decoy-filtered')
+    raise ValueError(f'no decoy PSMs recognised in {len(psms)} rows: check the decoy prefix, or the table was already decoy-filtered '
+                     f'(with no decoys the smallest reachable q is 1/{len(psms)} = {1/len(psms):.3f})')
 # one best hit per spectrum (Comet .txt writes 5 rows per scan by default)
 psms = psms.sort_values('score', ascending=False).drop_duplicates('scan').reset_index(drop=True)
 
@@ -332,6 +341,7 @@ On the synthetic separate-search pair with ground truth (12,000 spectra each): p
 | Percolator's 1% list is far too big or too small when cut by column index | Percolator writes a `filename` column only when the pin has one (Sage yes, Comet no), shifting `q-value` between columns 3 and 4 | locate `q-value` by header name, never by a fixed index |
 | Decoy count is twice the target count after a search | `-tda 1` (MS-GF+) or `generate_decoys: true` (Sage) run against a database that already contains decoys | use `-tda 0` / `generate_decoys: false` with a concatenated DB, or feed the target-only FASTA and let the engine make them |
 | `philosopher peptideprophet` exits 0 but the output has no `peptideprophet_result` and the log says `read in 0 1+, 0 2+ ... spectra` / `read in no data` | its embedded PeptideProphet does not model this pepXML (seen with Comet 2026.02 rev.2 pepXML under Philosopher v5.1.0 on Windows, with and without `--nonparam --decoy`) | rescore with Percolator on the engine's `.pin` instead; check the interact file for `peptideprophet_result` before trusting a PeptideProphet run |
+| `mokapot` dies with `ValueError: invalid error value specified` (pandas `to_numeric`) or `AttributeError: np.float_ was removed in the NumPy 2.0 release` | mokapot 0.10.0 predates pandas 3 and numpy 2 (it passes `errors="ignore"` and uses `np.float_`) | run it in a venv with pandas < 3 and numpy < 2, or rescore with Percolator |
 | 1% PSM FDR assumed to give 1% protein FDR | each level needs its own estimation | estimate protein-level (picked) FDR -> protein-inference |
 | "PEP <= 0.01" returns far fewer IDs than expected | PEP is per-PSM and far stricter than q-value | filter list cutoffs on q-value; reserve PEP for per-ID decisions |
 
@@ -352,7 +362,6 @@ On the synthetic separate-search pair with ground truth (12,000 spectra each): p
 - Fondrie, W.E. & Noble, W.S. 2021. mokapot: fast and flexible semisupervised learning for peptide detection. *Journal of Proteome Research* 20(4):1966-1971.
 - Bouwmeester, R., Gabriels, R., Hulstaert, N., Martens, L. & Degroeve, S. 2021. DeepLC can predict retention times for peptides that carry as-yet unseen modifications. *Nature Methods* 18:1363-1369.
 - Gabriels, R., Martens, L. & Degroeve, S. 2019. Updated MS2PIP web server delivers fast and accurate MS2 peak intensity prediction for multiple fragmentation methods, instruments and labeling techniques. *Nucleic Acids Research* 47(W1):W295-W299.
-- Declercq, A., Bouwmeester, R., Hirschler, A., Carapito, C., Degroeve, S., Martens, L. & Gabriels, R. 2022. MS2Rescore: data-driven rescoring dramatically boosts immunopeptide identification rates. *Molecular & Cellular Proteomics* 21(8):100266.
 - Savitski, M.M., Wilhelm, M., Hahne, H., Kuster, B. & Bantscheff, M. 2015. A scalable approach for protein false discovery rate estimation in large proteomic data sets. *Molecular & Cellular Proteomics* 14(9):2394-2404.
 - The, M., Samaras, P., Kuster, B. & Wilhelm, M. 2022. Reanalysis of ProteomicsDB using an accurate, sensitive, and scalable false discovery rate estimation approach for protein groups. *Molecular & Cellular Proteomics* 21(12):100437.
 - Wen, B., Freestone, J., Riffle, M., MacCoss, M.J., Noble, W.S. & Keich, U. 2025. Assessment of false discovery rate control in tandem mass spectrometry analysis using entrapment. *Nature Methods* 22:1454-1463.

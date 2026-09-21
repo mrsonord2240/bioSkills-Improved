@@ -5,11 +5,16 @@
 # Engines: ENGINE=sage (default) or ENGINE=comet. Both write a Percolator .pin,
 # so the rescoring and FDR steps below are identical for either.
 #
+# MZML may hold several space-separated paths (no spaces inside a path): they are
+# searched together and rescored in one Percolator run, which is how Percolator
+# gets enough PSMs to train (see "Rescore" in SKILL.md).
+#
 # Checked on Sage 0.14.6, Comet 2026.02 rev.2, Percolator 3.09.0,
-# OpenMS 3.5.0 DecoyDatabase, on one Orbitrap Astral 5-min DDA run.
+# OpenMS 3.5.0 DecoyDatabase, on Orbitrap Astral 5-min DDA runs.
 set -euo pipefail
 
-MZML="${MZML:?set MZML to the centroided mzML (msconvert --mzML --zlib --filter 'peakPicking vendor msLevel=1-')}"
+MZML="${MZML:?set MZML to one or more centroided mzML paths, space-separated (msconvert --mzML --zlib --filter 'peakPicking vendor msLevel=1-')}"
+read -r -a MZMLS <<< "$MZML"
 FASTA="${FASTA:?set FASTA to the TARGET-ONLY protein FASTA}"
 OUT="${OUT:-./dda_out}"
 ENGINE="${ENGINE:-sage}"
@@ -58,7 +63,7 @@ sage)
   "output_directory": "$OUT/sage"
 }
 JSON
-  "$SAGE" "$OUT/sage.json" "$MZML" --write-pin
+  "$SAGE" "$OUT/sage.json" "${MZMLS[@]}" --write-pin      # all runs -> one pin
   PIN="$OUT/sage/results.sage.pin"
   ;;
 comet)
@@ -85,8 +90,18 @@ comet)
       -e 's|^output_percolatorfile = .*|output_percolatorfile = 1|' \
       -e 's|^output_txtfile = .*|output_txtfile = 1|' \
       comet.params.new > "$OUT/comet.params"
-  "$COMET" -P"$OUT/comet.params" -N"$OUT/comet" "$MZML"
+  # One Comet call per run (-N names its output); the pins are then merged with
+  # the header kept once, so Percolator trains on all runs together.
+  RUN_PINS=()
+  n=0
+  for f in "${MZMLS[@]}"; do
+    n=$((n + 1))
+    "$COMET" -P"$OUT/comet.params" -N"$OUT/comet_run$n" "$f"
+    RUN_PINS+=("$OUT/comet_run$n.pin")
+  done
   PIN="$OUT/comet.pin"
+  head -n 1 "${RUN_PINS[0]}" > "$PIN"
+  for p in "${RUN_PINS[@]}"; do tail -n +2 "$p" >> "$PIN"; done
   ;;
 *)
   echo "ENGINE must be sage or comet" >&2
@@ -97,10 +112,22 @@ esac
 # 3. Rescore. Both engines ran ONE concatenated search with one hit per
 #    spectrum, so target-decoy competition is the right post-processing, not the
 #    mix-max default (-y) that applies to separate target and decoy searches.
-"$PERCOLATOR" --post-processing-tdc \
+#    Pre-flight: a decoy-tag mismatch leaves the pin's Label column with no -1
+#    rows, and Percolator would only fail into its log. Stop here, loudly.
+awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "Label") l = i; next }
+            l { n[$l]++ }
+            END { printf "pin Label column: %d targets (1), %d decoys (-1)\n", n[1], n[-1]
+                  exit !(l && n[1] > 0 && n[-1] > 0) }' "$PIN" \
+  || { echo "ERROR: $PIN has no target or no decoy rows -- decoy tag mismatch between the database and the engine's decoy setting (see the decoy-tag table in SKILL.md)" >&2; exit 1; }
+
+if ! "$PERCOLATOR" --post-processing-tdc \
   --results-psms "$OUT/psms.target.tsv" --decoy-results-psms "$OUT/psms.decoy.tsv" \
   --results-peptides "$OUT/peptides.target.tsv" --decoy-results-peptides "$OUT/peptides.decoy.tsv" \
-  "$PIN" 2> "$OUT/percolator.log"
+  "$PIN" 2> "$OUT/percolator.log"; then
+  echo "ERROR: Percolator failed; last lines of $OUT/percolator.log:" >&2
+  tail -n 5 "$OUT/percolator.log" >&2
+  exit 1
+fi
 
 # 4. The 1% list. Percolator's q-value column is already the list-level FDR;
 #    psms.target.tsv holds targets only, so no decoy filtering is needed here.
