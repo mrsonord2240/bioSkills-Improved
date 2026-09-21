@@ -11,18 +11,25 @@ pvalues <- c(rbeta(n_de, 0.3, 5), runif(n_genes - n_de))   # 5% true DE (small p
 is_de  <- c(rep(TRUE, n_de), rep(FALSE, n_genes - n_de))
 
 # ---------------------------------------------------------------------------
-# 1. FWER (Bonferroni/Holm) vs FDR (BH) vs FDR-under-dependence (BY)
+# 1. FWER (Bonferroni/Holm) vs FDR (BH) vs FDR-under-dependence (BY), averaged over draws
 # ---------------------------------------------------------------------------
+# The realized FDP of ONE draw is noisy (BH's FDP varies a lot run to run), so a single seed can show
+# BH above nominal by chance. FDR is an expectation: average the table over replicate draws.
 methods <- c(none = NA, bonferroni = 'bonferroni', holm = 'holm', BH = 'BH', BY = 'BY')
-tab <- data.frame(method = names(methods), significant = NA_integer_, true_pos = NA_integer_,
-                  false_pos = NA_integer_)
-for (i in seq_along(methods)) {
-  padj <- if (is.na(methods[i])) pvalues else p.adjust(pvalues, method = methods[i])
-  sig <- padj < 0.05
-  tab[i, c('significant', 'true_pos', 'false_pos')] <- c(sum(sig), sum(sig & is_de), sum(sig & !is_de))
+n_rep <- 50
+acc <- array(0, dim = c(length(methods), 3), dimnames = list(names(methods), c('significant', 'true_pos', 'false_pos')))
+fdp <- matrix(NA_real_, n_rep, length(methods), dimnames = list(NULL, names(methods)))
+for (r in seq_len(n_rep)) {
+  p_r <- c(rbeta(n_de, 0.3, 5), runif(n_genes - n_de))
+  for (i in seq_along(methods)) {
+    padj <- if (is.na(methods[i])) p_r else p.adjust(p_r, method = methods[i])
+    sig <- padj < 0.05
+    acc[i, ] <- acc[i, ] + c(sum(sig), sum(sig & is_de), sum(sig & !is_de))
+    fdp[r, i] <- sum(sig & !is_de) / max(sum(sig), 1)
+  }
 }
-tab$realized_fdr <- round(tab$false_pos / pmax(tab$significant, 1), 3)
-print(tab, row.names = FALSE)
+tab <- data.frame(method = names(methods), acc / n_rep, mean_fdp = round(colMeans(fdp), 3), row.names = NULL)
+print(tab, row.names = FALSE, digits = 4)   # per-replicate means over n_rep draws; mean_fdp is the realized FDR
 # BH is the discovery default (valid under independence/PRDS); BY is conservative but valid
 # under arbitrary/negative dependence.
 
