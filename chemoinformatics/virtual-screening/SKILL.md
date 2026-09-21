@@ -72,9 +72,9 @@ Then `bust poses.sdf --outfmt short`. This needs the ligand PDBQT to come from m
 
 | Scenario | Recommended workflow |
 |----------|---------------------|
-| Self-dock against known ligand pocket | GNINA `gnina --cnn_scoring rescore` |
-| Cross-dock to apo or related-target structure | DiffDock-L pose + GNINA rescore + PoseBusters |
-| Ultralarge library (10M+) | Calibrated hierarchical screen: property/alert triage -> Vina -> measured top fraction to GNINA -> higher-cost follow-up |
+| Self-dock against known ligand pocket | GNINA `gnina --cnn_scoring rescore` (see `references/gnina.md`) |
+| Cross-dock to apo or related-target structure | DiffDock-L pose + GNINA rescore + PoseBusters (failure modes: `references/failure-modes.md`) |
+| Ultralarge library (10M+) | Calibrated hierarchical screen: property/alert triage -> Vina -> measured top fraction to GNINA -> higher-cost follow-up (see `references/ultralarge-screening.md`) |
 | Cryptic pocket / induced fit | Receptor-ensemble docking and, where appropriate, a separately validated complex-prediction model |
 | Allosteric / undefined site | P2Rank for pocket detection -> ensemble dock all pockets |
 | Metal-coordinated ligand | GOLD (commercial) or manually parameterize Vina metal scoring |
@@ -203,164 +203,13 @@ def dock_single(receptor_pdbqt, ligand_pdbqt, center, box_size,
 
 Vina's `rmsd_lb` and `rmsd_ub` are lower and upper heavy-atom RMSD bounds between a reported mode and the best-scoring mode; the bounds differ in how symmetry-equivalent atoms are handled. They are not pose-versus-experimental-reference RMSDs. Use an external symmetry-aware RMSD to a reference pose for accuracy QC.
 
-## GNINA with CNN Scoring (modern default)
+## Reference Files
 
-```bash
-gnina -r receptor.pdb -l ligand.sdf \
-      --autobox_ligand reference_ligand.sdf \
-      --cnn_scoring rescore \
-      -o poses.sdf.gz \
-      --num_modes 9 --exhaustiveness 8
-```
-
-`--cnn_scoring`:
-- `none`: no CNN; use the selected empirical scoring function throughout
-- `rescore` (default): use empirical scoring during the search, then CNN-rerank the final poses; least computationally expensive CNN option
-- `refinement`: use the CNN to refine poses after Monte Carlo chains and to rank the final poses; approximately 10 times slower than `rescore` on a GPU in the official documentation
-- `metrorescore`: use CNN scoring in the Metropolis search and rescore the resulting poses
-- `metrorefine`: use CNN scoring in the Metropolis search and refine the resulting poses
-- `all`: use the CNN scoring function throughout; the official documentation describes this as extremely computationally intensive and not recommended
-
-The six choices above are from GNINA 1.3. Earlier releases expose a smaller set; check `gnina --help` for the installed executable rather than assuming every mode is available.
-
-`--autobox_ligand`: define box from reference ligand SDF/PDB. Otherwise specify `--center_x/y/z` + `--size_x/y/z`.
-
-**Critical:** GNINA distributions include multiple named CNN models/ensembles rather than one universally described "PDBbind 2019" model. Record the selected model or ensemble and validate it with known co-crystal redocking and, when relevant, cross-docking controls.
-
-## Virtual Screening Pipeline (Hierarchical)
-
-**Goal:** Screen 10M-compound library down to top-1k candidates for follow-up.
-
-**Approach:** Three-stage filter. The 1% and top-1000 selections below are repository starting heuristics; choose production cutoffs from target-relevant enrichment, diversity, and throughput measurements.
-
-Pseudo-code skeleton (orchestrator). Each helper function delegates to a dedicated skill: drug-likeness filter to `chemoinformatics/admet-prediction`, single-ligand Vina/GNINA to `dock_single` defined earlier in this skill, PoseBusters QC to `chemoinformatics/pose-validation`.
-
-```python
-import pandas as pd
-from concurrent.futures import ProcessPoolExecutor
-from functools import partial
-
-# Stub helpers to be implemented per project; see the cross-referenced skills.
-def drug_like_filter(df):
-    raise NotImplementedError('Implement via chemoinformatics/admet-prediction (Lipinski+Veber+PAINS)')
-def vina_dock(smi, receptor_pdbqt, center, box):
-    raise NotImplementedError('Wrap dock_single() above; return best affinity')
-def gnina_rescore(smi, receptor_pdbqt, center, box):
-    raise NotImplementedError('Wrap gnina --cnn_scoring rescore subprocess call')
-def pose_validate(df):
-    raise NotImplementedError('Implement via chemoinformatics/pose-validation (PoseBusters)')
-
-def vs_pipeline(library_smi, receptor_pdbqt, center, box, output_dir, n_workers=16):
-    df = pd.read_csv(library_smi)
-    df_stage1 = drug_like_filter(df)
-
-    worker = partial(vina_dock, receptor_pdbqt=receptor_pdbqt,
-                     center=center, box=box)
-    with ProcessPoolExecutor(max_workers=n_workers) as ex:
-        affinities = list(ex.map(worker, df_stage1['smiles']))
-    df_stage1['vina_affinity'] = affinities
-    df_stage2 = df_stage1.nsmallest(int(len(df_stage1) * 0.01), 'vina_affinity')
-
-    df_stage2['gnina_affinity'] = df_stage2['smiles'].apply(
-        lambda smi: gnina_rescore(smi, receptor_pdbqt, center, box))
-    df_stage3 = df_stage2.nsmallest(1000, 'gnina_affinity')
-
-    return pose_validate(df_stage3)
-```
-
-For very large libraries, use a restartable scheduler-backed workflow and measure throughput on a representative tranche. Record hardware, software version, box dimensions, ligand flexibility, and failure rate with every throughput estimate.
-
-## Ultralarge Library Screening (ZINC22, Enamine REAL)
-
-| Library | Scope | Typical access | Verification requirement |
-|---------|-------|----------------|--------------------------|
-| ZINC22 | Purchasable and make-on-demand compounds | Tranche/download interfaces | Record the tranche query and retrieval date |
-| Enamine REAL | Make-on-demand compounds | Provider files or search interface | Record product-space release and retrieval date |
-| Enamine HTS | Screening collection | Provider files | Confirm current stock/version with the provider |
-| Mcule | Aggregated purchasable compounds | Provider search/export | Record filters and retrieval date |
-| ChEMBL | Curated compounds and bioactivities | Versioned database release | Record ChEMBL release and extraction query |
-
-Library sizes and availability change frequently. Obtain counts from the provider or versioned database at execution time rather than copying a static total into a workflow.
-
-For ultralarge VS, the following percentages and thresholds are repository starting heuristics that must be calibrated for the target and library:
-1. Apply a documented property/alert policy while retaining flagged and rejected counts
-2. If known actives exist, test a permissive 2D-similarity prefilter such as ECFP4 Tanimoto >=0.4 and measure active/chemotype retention
-3. Vina dock the filtered subset
-4. Rescore top 1% with GNINA
-5. Rescore top 0.1% with MM/GBSA or FEP
-
-Lyu et al. (2019) screened 170 million make-on-demand compounds against AmpC and the D4 dopamine receptor. Of 549 D4 candidates synthesized and tested, 81 were new active chemotypes and 30 had submicromolar activity.
-
-## Per-Tool Failure Modes
-
-### Vina -- cross-dock failure
-
-**Trigger:** Receptor structure not the holo (co-crystal with ligand from another binder).
-
-**Mechanism:** Cross-docking introduces receptor-conformation mismatch, so pose recovery can be substantially worse than self-docking; the size of the decrease is benchmark- and target-dependent.
-
-**Symptom:** Top-ranked pose makes no geometric sense; key contacts missing.
-
-**Fix:** GNINA CNN scoring or ensemble docking. For genuine apo, predict holo with AlphaFold3 / Boltz-1 then dock.
-
-### GNINA CNN -- novel chemotype out-of-distribution
-
-**Trigger:** Ligand chemotype not in PDBbind training.
-
-**Mechanism:** CNN scoring overfits to PDBbind chemotypes; novel macrocycle / peptide / PROTAC scores poorly.
-
-**Symptom:** Affinity prediction far worse than Vina alone.
-
-**Fix:** Use `--cnn_scoring rescore` (sampling still by Vina) rather than CNN sampling. Validate against co-crystal of close analog.
-
-### Box too small
-
-**Trigger:** Binding box defined tightly around small ligand reference.
-
-**Mechanism:** Vina explores only within the box; large analogs cannot fit.
-
-**Symptom:** Many ligands report "no valid pose"; chemotype-biased hits.
-
-**Fix:** Derive the box from the reference ligand or known pocket and add enough explicit padding for the largest intended ligands to translate and rotate. Then verify containment and redocking/search convergence on controls. There is no universal padding value or 25 A cube that fits every ligand series.
-
-### Multi-pocket protein -- wrong site
-
-**Trigger:** Protein has multiple binding sites (orthosteric + allosteric).
-
-**Mechanism:** P2Rank or AutoBox picks the most "drugable" pocket; not always the desired one.
-
-**Symptom:** Hits dock in wrong pocket; SAR confusing.
-
-**Fix:** Verify pocket from co-crystal data; explicitly set `center_x/y/z` from known ligand centroid.
-
-### DiffDock-L -- PoseBusters invalid
-
-**Trigger:** Default DiffDock-L output for any receptor.
-
-**Mechanism:** Diffusion-generated poses are not guaranteed to satisfy every bond-geometry, stereochemistry, and intermolecular-clash check; failure rates vary by method and benchmark.
-
-**Symptom:** Poses look reasonable but fail PoseBusters checks.
-
-**Fix:** Filter to PB-valid (PoseBusters); rescore with GNINA. See `chemoinformatics/pose-validation`.
-
-### Wrong ionization state
-
-**Trigger:** Ligand or receptor residues protonated incorrectly at pH 7.4.
-
-**Mechanism:** Aspartate/glutamate/histidine protonation depends on local environment; default protonation may be wrong.
-
-**Symptom:** Salt bridges missing; poses misranked.
-
-**Fix:** Run PROPKA on the receptor to estimate residue pKas; for catalytic histidines, manually inspect protonation and tautomer state in the local environment.
-
-## Reconciliation: Vina vs GNINA Disagreement
-
-| Vina top pose | GNINA top pose | Action |
-|---------------|----------------|--------|
-| Same pose, similar score | Same pose, similar score | Treat agreement as supporting evidence; still run physical-validity checks |
-| Vina top pose ≠ GNINA top pose | Same pocket, different orientation | Retain both and compare against target-relevant controls or interaction evidence |
-| Vina excellent, GNINA mediocre | Different pose, very different score | Inspect both poses; do not infer which method is correct from score disagreement alone |
-| Both poor scores | Many ligands score similarly poor | Wrong pocket / protein conformation; reconsider receptor |
+| File | Read when |
+|------|-----------|
+| `references/gnina.md` | Running GNINA: CLI, `--cnn_scoring` modes, choosing a CNN model or ensemble |
+| `references/ultralarge-screening.md` | Screening more than ~100k compounds: hierarchical Vina -> GNINA pipeline skeleton, ZINC22/Enamine REAL access, stage-by-stage heuristics |
+| `references/failure-modes.md` | A docking result looks wrong (cross-dock, box too small, wrong pocket, wrong ionization, DiffDock-L invalid poses, GNINA out-of-distribution), or Vina and GNINA disagree |
 
 ## Common Errors
 
