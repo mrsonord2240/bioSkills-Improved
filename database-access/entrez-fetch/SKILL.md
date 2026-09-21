@@ -33,10 +33,19 @@ This Skill assumes you already have UIDs or accessions to fetch. If you need to 
 ## Required Setup
 
 ```python
+import time
 from Bio import Entrez, SeqIO
 Entrez.email = 'researcher@institution.edu'
-Entrez.api_key = 'optional_api_key'  # raises rate to 10 req/sec
+# Entrez.api_key = '<your NCBI key>'  # optional: raises rate to 10 req/sec. A placeholder string here gives HTTP 400, so leave unset without a real key
+
+def expect_start(text, prefix):
+    '''EFetch can return an HTML/XML error body with HTTP 200 -- check the first line before parsing.'''
+    if not text.lstrip().startswith(prefix):
+        raise RuntimeError(f'Unexpected EFetch response, starts {text[:80]!r}')
+    return text
 ```
+
+`expect_start` is used by the plain-text patterns below (`fetch_genbank`, `sra_runinfo`); see Failure modes -> "EFetch returns HTML error page".
 
 ## Decision matrix: rettype + retmode per database
 
@@ -158,10 +167,12 @@ Defensive patterns:
 
 **Reference (BioPython 1.83+):**
 ```python
+from io import StringIO
+
 def fetch_genbank(accession):
     h = Entrez.efetch(db='nucleotide', id=accession, rettype='gb', retmode='text')
-    record = SeqIO.read(h, 'genbank'); h.close()
-    return record
+    text = h.read(); h.close()
+    return SeqIO.read(StringIO(expect_start(text, 'LOCUS')), 'genbank')
 
 gb = fetch_genbank('NM_007294.4')
 for feat in gb.features:
@@ -366,8 +377,8 @@ def snp_record(uid):
 ### EFetch returns HTML error page
 - **Trigger:** Invalid UID, mid-maintenance window, or expired WebEnv.
 - **Mechanism:** Failure surfaces in HTML body, HTTP status is 200.
-- **Symptom:** SeqIO chokes parsing HTML as GenBank.
-- **Fix:** Sniff the first line of the response — `LOCUS` for GB, `>` for FASTA — and raise on mismatch.
+- **Symptom:** SeqIO chokes parsing HTML as GenBank; a naive CSV split (`sra_runinfo`) silently returns junk rows.
+- **Fix:** Sniff the first line of the response with `expect_start()` (Required Setup) — `LOCUS` for GB, `>` for FASTA, `Run,` for SRA runinfo — and raise on mismatch. `Entrez.read()` routes already raise `RuntimeError` on a backend `<ERROR>` element.
 
 ## Common errors
 
