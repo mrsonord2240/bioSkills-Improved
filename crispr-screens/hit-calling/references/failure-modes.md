@@ -46,7 +46,7 @@ table produced a 0-gene Tier-1 consensus even though the underlying essentiality
 **Symptom:** Tier 1 consensus list is empty.
 **Fix:** Check each input file's own QC first (screen-qc PR-AUC, precision/recall against
 CEGv2/NEGv1) -- a high-precision screen with an empty 3-method consensus points to a mismatched
-file, not a bad screen. `consensus_hits()`'s `_check_comparable()` warning (in SKILL.md's consensus code) also fires
+file, not a bad screen. `consensus_hits()`'s `_check_comparable()` warning (in `scripts/consensus_hits.py`) also fires
 when a pair's hit-set overlap is no better than chance, the statistical signature of a
 mismatched comparison. Only re-audit QC once a same-comparison mismatch has been ruled out.
 
