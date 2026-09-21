@@ -25,6 +25,7 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 - Python: `ePRIDICT` for chromatin-context prediction; pair with PRIDICT2 rather than replacing it
 - CLI: `CRISPResso --prime_editing_pegRNA_*` for amplicon-level analysis
 - Workflow: pegRNA library design -> PRIDICT2 filtering -> screen execution -> CRISPResso2 quantification -> per-variant scoring
+- Details: PRIDICT2 CLI and library filtering in `references/pridict2-batch-cli.md`; PRIME, MOSAIC and BE cross-validation in `references/pooled-screen-methods.md` (see Reference Files)
 
 ## Prime Editor Chemistry Comparison
 
@@ -80,166 +81,6 @@ reverse complement = `GCTTACAGATCGCCATGA`. PBS genomic window (13 nt, upstream o
 - **RTT length:** 10-20 nt typical; longer for distant edits (10+ bp away from cut)
 - **RTT-edit position:** intended edit at position 4-30 from cut site
 - **Scaffold:** standard sgRNA scaffold OR the Chen 2021 recoded scaffold, which removes homology with the genomic target and cuts scaffold-derived byproducts. The recoding does not itself raise editing efficiency; that comes from MLH1dn and the PEmax architecture.
-
-## PRIDICT and PRIDICT2 pegRNA Efficiency Prediction
-
-**Mathis N et al 2023 *Nat Biotechnol* 41:1151 (PRIDICT v1) / 2025 *Nat Biotechnol* 43(5):712 (PRIDICT2; published online June 2024)** developed deep-learning predictors of per-pegRNA editing efficiency. PRIDICT2 is the current state of the art.
-
-```bash
-# PRIDICT2 is invoked via CLI: pridict2_pegRNA_design.py
-# Single sequence input:
-python pridict2_pegRNA_design.py single \
-    --sequence-name BRCA1_c5135 \
-    --sequence "AGCAGCCT(C/T)CTGAATGCCC...60nt_context" \    # parens = intended edit
-    --output-dir predictions/ \
-    --use_5folds                                              # 5-fold ensemble averaging
-
-# Batch input from CSV:
-# PRIDICT2's --input-dir defaults to ./input, NOT the current directory -- the CSV must live there
-# (or pass --input-dir explicitly). --output-dir must also already exist before running with
-# --summarize (it lists existing .csv files there first; a missing directory raises FileNotFoundError).
-mkdir -p input predictions
-mv variants_to_design.csv input/
-python pridict2_pegRNA_design.py batch \
-    --input-fname variants_to_design.csv \                    # CSV: sequence_name, editseq (NOT "sequence" -- see below)
-    --output-dir predictions/ \
-    --cores 4 \
-    --summarize K562                                          # takes a cell-line value ('K562' or 'HEK'); a bare flag crashes argparse
-
-# Output: per-pegRNA predictions in predictions/<sequence_name>_pegRNA_Pridict_full.csv
-# Real columns (verified against actual output, not the names above earlier drafts guessed):
-#   PRIDICT2_0_editing_Score_deep_K562, PRIDICT2_0_editing_Score_deep_HEK (0-100 scale, not 0-1),
-#   PBSlength, RTlength, PBSrevcomp, RTrevcomp, Spacer-Sequence, pegRNA (full assembled sequence),
-#   Target-Strand, Editing_Position, Correction_Type, Correction_Length, among ~50 total columns.
-```
-
-**Loading PRIDICT2 results in Python:**
-
-```python
-import pandas as pd
-from pathlib import Path
-
-def load_pridict2_predictions(prediction_dir):
-    '''Load PRIDICT2 batch outputs from prediction_dir/'''
-    summary = pd.read_csv(Path(prediction_dir) / '<timestamp>_summary_K562_batch_summary.csv')
-    # Real columns (verified against real PRIDICT2 2026-09 output): sequence_name,
-    # PRIDICT2_0_editing_Score_deep_K562, PRIDICT2_0_editing_Score_deep_HEK, PBSrevcomp,
-    # RTrevcomp, pegRNA, Target-Strand, Editing_Position, among others -- NOT the
-    # "PBS"/"RTT"/"predicted_efficiency" names some earlier drafts assumed.
-    return summary
-```
-
-**Key determinants of PE efficiency (Mathis 2025 PRIDICT2):**
-
-| Feature | Effect on efficiency |
-|---------|----------------------|
-| PBS GC content | 40-55% optimal; high GC slows annealing |
-| PBS length | 11-13 nt optimal; longer for high-GC PBS |
-| RTT length | 10-20 nt typical; trade-off between coverage and processivity |
-| Edit position in RTT | Closest to PBS = highest efficiency |
-| Chromatin context | Dominant locus effect; H3K9me3 heterochromatin ~0.8% vs ~2.2% elsewhere |
-| Cell line / Cas9 expression | Variable; piloting required |
-| Cell cycle phase | S/G2 = higher efficiency |
-
-**Critical insight from Mathis 2025:** Chromatin context is a major locus-level determinant that sequence-only predictors miss, which is why ePRIDICT is designed to be combined with PRIDICT2.0 rather than replace it -- the pairing helps most in regions of lower chromatin accessibility. For genome-scale screens, validate predictions empirically at representative loci.
-
-**PRIDICT2's reported `Spacer-Sequence` forces a synthetic 5'-G** for U6-promoter transcription (source: `pridict2_pegRNA_design.py`, `protospacerseq = 'G' + original_seq[...]`) -- confirmed against real output, where the reported spacer matched true genomic sequence at 19/20 positions, the sole mismatch being the 5'-most base. If your spacer's true genomic first base isn't G, the ordered oligo will still differ from genomic sequence there; this is expected, not a bug.
-
-## PRIME Pooled Screen Methodology
-
-**Ren X et al 2023 *Mol Cell* 83:4633** established the PRIME pooled prime-editing screen methodology (earlier 2023 bioRxiv preprint):
-
-- pegRNA library covering thousands of intended variants, screened for specificity at design time (Ren 2023 used GuideScan2; add PRIDICT2 efficiency prediction for new designs)
-- Lentiviral delivery in a PE-expressing cell line (Ren 2023: MOI 0.3 for the MYC-enhancer screen, MOI 0.5 for the variant screens)
-- Selection on integration marker
-- Time-course screen for variant function (e.g., drug sensitivity)
-- Endpoint amplicon sequencing of each pegRNA target locus
-- CRISPResso2 quantification of intended-edit %
-- MAGeCK / drugZ-style hit calling on edit-efficient pegRNAs
-
-**Quantified scale:** ~3,699 ClinVar variants installed in a single PRIME screen, alongside 1,304 breast-cancer GWAS variants.
-
-## MOSAIC In Situ Saturation Mutagenesis
-
-**MOSAIC (Hsu 2024, bioRxiv)** is a high-throughput in-situ saturation-mutagenesis prime-editing method with multiplexed read-out:
-
-- Tile pegRNAs across protein domains for systematic mutagenesis
-- Saturation: every possible amino acid change in a region
-- Identify drug-resistance variants in real-time
-- Smaller per-variant cell numbers (more variants total)
-
-**Use case:** Cancer-drug-resistance variant scanning; protein-domain function mapping.
-
-## Run PRIDICT2 on a Custom pegRNA Library
-
-**Goal:** Predict editing efficiency for thousands of pegRNAs before library synthesis.
-
-**Approach:** Build a CSV with one row per intended edit (sequence + edit notation), run PRIDICT2 in batch mode, parse the per-pegRNA efficiency summary, and filter to candidates above the chosen efficiency threshold.
-
-```bash
-# Step 1: prepare batch input CSV -- required header is "editseq", NOT "sequence"
-# (see Failure Modes: a wrong header exits 0 with an empty summary file)
-# PRIDICT2's --input-dir defaults to ./input, NOT the current directory -- write the CSV there
-# (or pass --input-dir explicitly), and pre-create --output-dir (see Step 2).
-mkdir -p input predictions
-cat > input/variants.csv <<EOF
-sequence_name,editseq
-BRCA1_R71X,AGCAGCCT(C/T)CTGAATGCCC...
-MLH1_c677,GAGCTGAGC(A/G)GAGGCTCTTGAAGC...
-EOF
-
-# Step 2: run PRIDICT2 batch (--summarize takes a cell-line value, not a bare flag;
-# --output-dir must already exist -- --summarize lists .csv files there before the run starts,
-# and a missing directory raises FileNotFoundError there rather than a "nothing found" no-op)
-python pridict2_pegRNA_design.py batch \
-    --input-fname variants.csv \
-    --output-dir predictions/ \
-    --cores 8 \
-    --summarize K562
-```
-
-**If the summary file is empty (just `""`) the run still exited 0** -- see Failure Modes, "Batch run exits 0 with an empty summary file", for the three causes.
-
-```python
-# Step 3: parse and filter
-import pandas as pd
-predictions = pd.read_csv('predictions/<timestamp>_summary_K562_batch_summary.csv')
-
-# Filter to pegRNAs with predicted efficiency > 50% (library-inclusion convention).
-# Real column is PRIDICT2_0_editing_Score_deep_K562 (0-100 scale), not "predicted_editing_efficiency".
-filtered = predictions[predictions['PRIDICT2_0_editing_Score_deep_K562'] > 50]
-print(f'pegRNAs passing PRIDICT2 >50%: {len(filtered)} / {len(predictions)}')
-
-# Pick top 3 per intended edit
-top3 = (filtered.sort_values(['sequence_name', 'PRIDICT2_0_editing_Score_deep_K562'],
-                              ascending=[True, False])
-                 .groupby('sequence_name').head(3))
-top3.to_csv('peg_library_filtered.csv', index=False)
-```
-
-## Cross-Validate PE with Base Editor Screens
-
-**Goal:** Confirm variant-function calls from PE with orthogonal BE screens.
-
-**Approach:** Design parallel BE library for the same variants; run both screens; intersect hits.
-
-```python
-import numpy as np
-import pandas as pd
-
-# BE screen output (target conversion + bystander)
-be_hits = pd.read_csv('be_screen_hits.tsv', sep='\t')
-# PE screen output (intended edit + scaffold-incorp + indel)
-pe_hits = pd.read_csv('pe_screen_hits.tsv', sep='\t')
-
-# Intersect on intended variant
-concordant = be_hits.merge(pe_hits, on='variant_id', suffixes=('_be', '_pe'))
-# Filter to high-confidence: both methods call variant + same direction
-concordant['high_confidence'] = (concordant['be_fdr'] < 0.05) & (concordant['pe_fdr'] < 0.05) & \
-                                 (np.sign(concordant['be_lfc']) == np.sign(concordant['pe_lfc']))
-```
-
-**Critical:** PE-only hits in BE-coverable variants are suspect (BE should detect them). PE-only hits in non-BE-coverable variants (e.g., transversions) are genuinely PE-unique.
 
 ## CRISPResso2 for PE Quantification
 
@@ -337,7 +178,7 @@ no designable PAM cannot be PE-installed (see "Library missing intended variant"
 - LoF without specifying variant: Cas9
 - Random insertions: HDR (lower throughput than PE)
 - iPSC / primary-cell variant: PE (no bystander confounding)
-- Cancer-line variant scanning or drug-resistance variant: PE or BE; cross-validate both (chemistry-dependent)
+- Cancer-line variant scanning or drug-resistance variant: PE or BE; cross-validate both (chemistry-dependent) (see `references/pooled-screen-methods.md`)
 
 ## Quantitative Thresholds
 
@@ -368,6 +209,13 @@ no designable PAM cannot be PE-installed (see "Library missing intended variant"
 | PRIDICT2 batch: `FileNotFoundError` referencing `input/<file>` | CSV not placed in the CLI's default `./input` directory | `mkdir input` and move the CSV there, or pass `--input-dir` explicitly |
 | PRIDICT2 batch `--summarize`: `FileNotFoundError` on the output directory itself | `--output-dir` does not exist yet -- `--summarize` lists existing `.csv` files there before the run starts | `mkdir -p <output-dir>` before running with `--summarize` |
 | PE concordant with BE on transitions, disagrees on transversions | PE handles transversions BE doesn't | Expected; trust PE |
+
+## Reference Files
+
+| File | Read when |
+|------|-----------|
+| `references/pridict2-batch-cli.md` | Running PRIDICT2 single or batch mode, loading its output columns, filtering and picking top pegRNAs per variant |
+| `references/pooled-screen-methods.md` | Planning a PRIME-style pooled screen or MOSAIC saturation library, or intersecting PE hits with a parallel BE screen |
 
 ## References
 
