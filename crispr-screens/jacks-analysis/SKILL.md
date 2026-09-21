@@ -50,7 +50,7 @@ Initialisation is fixed (efficacy = 1, gene effect = median LFC) and nothing in 
 
 | Scenario | Advantage | Expected gain (Allen 2019) |
 |----------|-----------|------------------------------|
-| Multi-screen joint analysis (>=3 screens with same library) | Efficacy shared; noise averaged | ~21% lower error vs MAGeCK; 9% vs original BAGEL; 91-99% of cell lines improved (method-dependent) |
+| Multi-screen joint analysis (>=3 screens with same library) | Efficacy shared; noise averaged | ~21% lower error vs MAGeCK; 9% vs original BAGEL (Allen 2019 did not benchmark BAGEL2); 91-99% of cell lines improved (method-dependent) |
 | Reusing public reference screens (DepMap, Project Score) as efficacy prior | Transfer learning | New screens can be smaller; efficacy priors transfer across same-library screens |
 | Libraries with broad efficacy variance (e.g. older GeCKOv2) | Down-weights known weak guides | Larger gain than on Brunello (already efficacy-filtered) |
 | Heterogeneous quality (mixed plasmid quality across screens) | Per-screen noise estimation | Cleaner per-condition gene effects |
@@ -61,7 +61,7 @@ Initialisation is fixed (efficacy = 1, gene effect = median LFC) and nothing in 
 - **Single timepoint / two-condition essentiality:** RRA or BAGEL2 simpler and equivalent.
 - **Heavy-selection drug screens:** drugZ explicit for chemogenomic; JACKS less sensitive.
 - **Cancer-cell-line copy-number screens:** Chronos preferred; jointly models CN bias + screen quality; JACKS does neither.
-- **Cross-chemistry sharing (e.g. CRISPRi + Cas9):** Efficacy is chemistry-specific; do not share.
+- **Heavy selection (>40% of guides change):** RRA fails (use MAGeCK MLE); BAGEL2 stays robust.
 
 ## Run JACKS Joint Analysis
 
@@ -76,7 +76,7 @@ from jacks.jacks_io import runJACKS
 # Input file paths
 counts_path = 'counts.txt'                    # rows=sgRNA; first cols 'sgRNA' (or custom), then sample counts
 replicate_map_path = 'replicatemap.txt'       # tab-separated with header: Replicate, Sample, Control
-guide_map_path = 'guidemap.txt'               # tab-separated with header: sgRNA, Gene
+guide_map_path = 'guidemap.txt'               # tab-separated with header: sgRNA, Gene (the count matrix itself works if it has both columns; point sgrna_hdr/gene_hdr at them)
 
 # Replicate map format (tab-separated WITH header; column names match flags below)
 # Replicate                Sample          Control
@@ -151,7 +151,8 @@ def extract_efficacy_prior(reference_jacks_results):
     return prior
 
 # Use in new JACKS run via --reffile <path>
-# Reference: Allen 2019 Genome Research 29:464; efficacy-aware testing enables ~2.5x smaller screens (fewer replicates/guides)
+# Reference: Allen 2019 Genome Research 29:464; efficacy-aware testing enables ~2.5x smaller screens (fewer replicates/guides),
+# but only when the reference is the same library and a similar cell context. Reference panels are ~50 cell lines, ~10k screen days.
 ```
 
 ## Per-sgRNA Efficacy Diagnostics
@@ -186,7 +187,7 @@ def efficacy_summary(grna_results_path, guidemap_path, low_threshold=0.3,
     return summary, by_gene
 ```
 
-**Critical:** Genes where every guide is low-efficacy will show no signal regardless of biology. Filter from interpretation; flag for re-design with updated rules (Brunello / TKOv3).
+**Critical:** Genes where every guide is low-efficacy will show no signal regardless of biology. Filter from interpretation; flag for re-design with updated rules (Brunello / TKOv3). For a v2 library, drop the bottom 25% of guides by efficacy; every gene should end with all guides at efficacy >0.4 (Brunello v2 / Avana v2 convention).
 
 ## Comparing JACKS, MAGeCK, BAGEL2
 
@@ -198,7 +199,6 @@ def efficacy_summary(grna_results_path, guidemap_path, low_threshold=0.3,
 | Speed | Slow (variational inference) | Fast | Fast |
 | Output | gene effect + sgRNA efficacy | beta or RRA score | Bayes Factor |
 | Best for | Multi-screen joint analyses, library calibration | General-purpose, single screen | Essentiality classification |
-| Quantified accuracy gain (Allen 2019) | ~21% lower error vs MAGeCK; 9% vs BAGEL v1 | Reference | Not benchmarked (Allen 2019 compared BAGEL v1) |
 
 **Reconciliation:** Hits identified by JACKS AND MAGeCK are high confidence. JACKS-only hits typically reflect strong gene signals where one or two guides were dragging down MAGeCK; verify the up-weighted high-efficacy guides have the expected sign. MAGeCK-only hits at FDR <0.05 may be single-guide outliers; check sgrna_summary for guide-level dispersion.
 
@@ -233,7 +233,7 @@ This relies on JACKS 0.2 internals, not a public API; re-check `help(jacks.infer
 **Trigger:** Pooling screens across cell lines with very different Cas9 expression / chromatin / fitness baselines.
 **Mechanism:** Efficacy depends on Cas9 expression and chromatin accessibility; sharing across lines averages real per-line differences.
 **Symptom:** Per-line gene effects look noisier than per-line MAGeCK results.
-**Fix:** Use Chronos for multi-cell-line screens with screen-quality modeling; reserve JACKS for screens with matched chemistry + cell type / culture conditions.
+**Fix:** Use Chronos for multi-cell-line screens with screen-quality modeling; reserve JACKS for screens with matched chemistry + cell type / culture conditions. On a multi-cell-line panel, fit per-cell-line gene effects with shared efficacy and pool effects across lines downstream (meta-analysis), not inside JACKS.
 
 ### MCMC / variational convergence failure
 
@@ -269,14 +269,11 @@ This relies on JACKS 0.2 internals, not a public API; re-check `help(jacks.infer
 
 | Threshold | Value | Source / Rationale |
 |-----------|-------|--------------------|
-| Hit call | gene effect negative with abs(effect/std) > 2 | Bayesian z-equivalent; p-values need --ctrl_genes |
-| Effective gene signal | effect < 0 AND abs(effect/std) > 2, from the gene and gene std files | Bayesian z-equivalent |
+| Hit call | gene effect < 0 AND abs(effect/std) > 2, from the gene and gene std files | Bayesian z-equivalent (~95% credible); p-values need --ctrl_genes |
 | Low-efficacy guide flag | X1 (sgRNA) <0.3 | Operational convention; below this, guide likely non-functional |
-| Reference for prior reuse | DepMap or Project Score panel | Established efficacy distribution |
+| Reference for prior reuse | DepMap or Project Score panel (same library and chemistry only) | Established efficacy distribution |
 | Minimum screens for joint efficacy benefit | 3+ | Below this, single-screen tools (MAGeCK/BAGEL2) equivalent |
 | Iterations for variational inference | at most 50 per gene, early stop at lower-bound change < 0.1 (JACKS 0.2) | Not exposed on the CLI; see convergence failure mode |
-| Cross-library efficacy transfer | Not supported | Different libraries -> different sequences -> different efficacies |
-| Cross-chemistry efficacy transfer | Not supported | Cas9 efficacy != CRISPRi efficacy |
 
 ## Common Errors
 
@@ -287,7 +284,6 @@ This relies on JACKS 0.2 internals, not a public API; re-check `help(jacks.infer
 | Lower bound still changing at `Iter 50/50` in the DEBUG log | Iteration cap reached | Refit with a higher `n_iter` (see Failure Modes) and compare effects |
 | p-values differ between runs | Pseudo-genes are sampled with Python `random` | `random.seed(<int>)` before `runJACKS`; gene effects themselves are deterministic |
 | `<sgRNA> has no sgrna reference in <reffile>` | `--reffile` from a different library | Match library exactly |
-| Library-reuse prior doesn't help | Reference IDs match but sequences or context differ | Match library by sequence |
 
 ## References
 

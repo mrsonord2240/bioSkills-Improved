@@ -6,18 +6,7 @@ Run JACKS (Allen et al 2019 Genome Research) for joint Bayesian decomposition of
 
 ## Prerequisites
 
-```bash
-git clone https://github.com/felicityallen/JACKS && cd JACKS/jacks && pip install .   # the PyPI 'jacks' is an unrelated package
-# run_JACKS.py and setup.py are both in JACKS/jacks/, not the repo root
-# Optional: pre-computed reference efficacy priors
-# Download DepMap Brunello / Project Score efficacy posteriors for transfer learning
-```
-
-Required inputs:
-- Count matrix (tab-separated, rows=sgRNA, columns=samples; sgRNA label in the first column, e.g. `sgRNA`, `Gene`, then samples)
-- Replicate map (`Replicate`, `Sample`, optionally `Control`) -- tab-separated, WITH header; JACKS locates columns by header name
-- Guide-to-gene map (`sgRNA`, `Gene`) -- tab-separated, WITH header (the count matrix itself can serve if it has both columns)
-- Optional: reference efficacy prior file from a matched library
+Install, required input files and their formats are in SKILL.md ("Version Compatibility" and "Run JACKS Joint Analysis"). Optional: a matched-library reference efficacy prior (SKILL.md, "Build Library-Wide Efficacy Prior from Reference Screens").
 
 ## Quick Start
 
@@ -67,40 +56,7 @@ Tell the AI agent what to do:
 9. Flag low-efficacy guides (X1 <0.3) and genes where all guides are weak (re-design candidates)
 10. Cross-validate with MAGeCK / BAGEL2: identify high-confidence hits in agreement, single-tool hits flagged for orthogonal validation
 11. Decide if Chronos is preferred (cancer-line multi-cell-line screens with CN bias)
-12. Output gene_results.txt, sgrna_efficacy.txt, library_redesign_candidates.txt, comparison_with_mageck.txt
-
-## Tips
-
-- JACKS' core advantage is multi-screen joint analysis with shared efficacy. For a single screen with no public reference, JACKS does not outperform MAGeCK or BAGEL2.
-- Always match chemistry: do not share Cas9-KO efficacy with CRISPRi/a guides; efficacy is chemistry-specific. Build separate priors for each.
-- The 2.5x sample-size reduction is real but conditional on the reference being from the same library and similar cell context. Reduction is not free.
-- For multi-cell-line cancer-line panels, prefer Chronos -- it models CN bias and per-screen quality jointly, which JACKS does not.
-- Gene effect divided by its posterior std (gene file / gene std file, same cell-line column) is a Bayesian z-equivalent. Use this for ranking rather than the effect alone -- a strong but uncertain effect should rank lower than a moderate but confident one.
-- If running on a multi-cell-line panel, fit per-cell-line gene effects but shared efficacy. Pooling effects across cell lines is meta-analysis and should be done downstream after per-cell-line JACKS estimates are obtained.
-- Library re-design: drop the bottom 25% efficacy guides; in the v2 library, every gene should have all guides at efficacy >0.4 (Brunello v2 / Avana v2 convention).
-- Gene effects are deterministic, so a rerun cannot reveal non-convergence; genes that end at the 50-iteration cap can. Seed Python's `random` only for reproducible pseudo-gene p-values.
-
-## Key Thresholds
-
-| Threshold | Value | Rationale |
-|-----------|-------|-----------|
-| Hit call | gene effect negative, abs(effect/std) >2 | Bayesian z-equivalent |
-| Effective gene signal | effect <0 AND abs(effect/std) >2 | Bayesian z-equivalent ≈ 95% credible |
-| Low-efficacy guide flag | X1 <0.3 | Operational convention; below this, guide likely non-functional |
-| Joint analysis screen count | ≥3 | Below this, equivalent to MAGeCK/BAGEL2 |
-| Iterations per gene | ≤50, early stop at lower-bound change <0.1 (JACKS 0.2) | Not a CLI option; refit with higher `n_iter` if genes hit the cap |
-| Reference for prior reuse | DepMap or Project Score panel | ~50 cell lines, ~10k screen days |
-
-## Decision Comparison
-
-| Scenario | JACKS | MAGeCK | BAGEL2 | Chronos |
-|----------|-------|--------|--------|---------|
-| Single 2-condition screen | OK | Best | OK | N/A |
-| Multi-screen joint (same library) | Best | Limited | Per-screen only | N/A |
-| Multi-cell-line cancer panel | OK | OK | OK | Best (CN+quality) |
-| Library re-design (efficacy info) | Best | No | No | Limited |
-| Chemogenomic / drug screen | Suboptimal | OK | Suboptimal | N/A; use drugZ |
-| Heavy selection (>40% guides change) | OK | RRA fails; use MLE | Robust | OK |
+12. Report the JACKS output files (`<outprefix>_gene_JACKS_results.txt`, `_gene_std_JACKS_results.txt`, `_grna_JACKS_results.txt`, `_gene_pval_JACKS_results.txt` only with `--ctrl_genes`, and the `.pickle`), plus, as agent-written summaries rather than JACKS outputs, the low-efficacy guide list for re-design and the JACKS-vs-MAGeCK comparison table
 
 ## Related Skills
 
