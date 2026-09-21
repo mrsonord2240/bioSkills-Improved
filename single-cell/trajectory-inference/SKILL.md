@@ -118,25 +118,32 @@ Entropy of the fate-probability vector is the differentiation-potential proxy: h
 **Approach:** Build a directed transition matrix from one or more kernels, combine with a connectivity kernel for smoothing, then coarse-grain into macrostates with GPCCA.
 
 ```python
-# As a standalone .py script (not a notebook), this needs a Windows multiprocessing
-# guard -- see the note below. Run this block inside `if __name__ == '__main__':`.
+# Standalone .py on Windows: keep everything under the guard (see the Windows note below)
 import cellrank as cr
-pk = cr.kernels.PseudotimeKernel(adata, time_key='dpt_pseudotime').compute_transition_matrix(n_jobs=1)
-ck = cr.kernels.ConnectivityKernel(adata).compute_transition_matrix()
-combined = 0.8 * pk + 0.2 * ck                      # weights are a researcher choice; sweep them
 
-g = cr.estimators.GPCCA(combined)
-g.compute_macrostates(n_states=10, cluster_key='leiden')   # n_states from the Schur/eigenvalue spectral gap
-g.predict_terminal_states(method='stability')
-g.predict_initial_states(n_states=1, allow_overlap=True)   # without allow_overlap, real branching data can raise
-                                                             # ValueError: N cells overlapped between initial/terminal states
-g.compute_fate_probabilities(n_jobs=1)
-g.compute_lineage_drivers()
+def main(adata):
+    pk = cr.kernels.PseudotimeKernel(adata, time_key='dpt_pseudotime').compute_transition_matrix(n_jobs=1)
+    ck = cr.kernels.ConnectivityKernel(adata).compute_transition_matrix()
+    combined = 0.8 * pk + 0.2 * ck                      # weights are a researcher choice; sweep them
+
+    g = cr.estimators.GPCCA(combined)
+    g.compute_macrostates(n_states=10, cluster_key='leiden')   # n_states from the Schur/eigenvalue spectral gap
+    g.predict_terminal_states(method='stability')
+    g.predict_initial_states(n_states=1, allow_overlap=True)   # without allow_overlap, real branching data can raise
+                                                                 # ValueError: N cells overlapped between initial/terminal states
+    g.compute_fate_probabilities(n_jobs=1)
+    g.compute_lineage_drivers()
+    return g
+
+if __name__ == '__main__':
+    g = main(adata)                                     # adata: loaded with dpt_pseudotime + leiden
 ```
 
 Kernels decouple WHERE direction comes from (RealTime when timepoints exist, Pseudotime/CytoTRACE otherwise, Velocity only when trustworthy, Connectivity for smoothing) from WHAT is computed (GPCCA macrostates + fate probabilities). Prefer the RealTimeKernel for time courses. Fate probabilities are a deterministic function of the transition matrix, so a wrong kernel yields confidently wrong, well-formed probabilities with no internal warning; check that conclusions survive dropping the velocity kernel.
 
-**Windows note:** `compute_transition_matrix()` and `compute_fate_probabilities()` spawn a `multiprocessing.Manager()` progress-bar queue that raises `RuntimeError: An attempt has been made to start a new process before the current process has finished its bootstrapping phase` when this code runs as a plain `.py` script on Windows (not from a notebook) -- confirmed with a full traceback. Guard the script's entry point with `if __name__ == '__main__':` (verified fix, used above with `n_jobs=1`) before running this block as a standalone script.
+**VelocityKernel with `mode='deterministic'` velocity:** deterministic velocity is the weakest of the three modes, and its per-cell errors carry straight into `VelocityKernel`. On scVelo's pancreas data (same deterministic velocity, kernel 0.8 + `ConnectivityKernel` 0.2, GPCCA `n_states=8`, checked on cellrank 2.3.3), mean fate-probability entropy in Ductal progenitors vs Alpha/Beta was 0.36 vs 0.32 with `VelocityKernel` (barely any separation) but 1.02 vs 0.45 with `PseudotimeKernel` on `velocity_pseudotime`. When only deterministic velocity exists, take direction from `PseudotimeKernel` (or RealTime/CytoTRACE) and use velocity only as a cross-check; either way inspect the predicted terminal states against markers.
+
+**Windows note:** `compute_transition_matrix()` and `compute_fate_probabilities()` spawn a `multiprocessing.Manager()` progress-bar queue that raises `RuntimeError: An attempt has been made to start a new process before the current process has finished its bootstrapping phase` when this code runs as a plain `.py` script on Windows (not from a notebook). Keep the entry point under `if __name__ == '__main__':` (as above, with `n_jobs=1`).
 
 ### Slingshot and Monocle3 (R)
 
