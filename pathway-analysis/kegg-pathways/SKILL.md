@@ -61,7 +61,7 @@ The three-generations framing (ORA -> FCS -> pathway topology) is Khatri 2012 *P
 | Pre-selected gene list, "which KEGG pathways" | enrichKEGG (ORA), set the universe | no ranking available; membership test |
 | All genes carry a DE statistic, no clear cutoff | gseKEGG -> gsea | uses the full ranking; no arbitrary cutoff |
 | Want WHERE in a broad pathway the signal sits | enrichMKEGG (modules) | M-numbers are tighter functional units |
-| Have named log2FC + want signed perturbation on a SIGNALING map | SPIA (or graphite + runSPIA) | propagates fold-changes through the wiring; uses direction |
+| Have named log2FC + want signed perturbation on a SIGNALING map | SPIA (graphite + runSPIA as a cross-check; routes can disagree on direction) | propagates fold-changes through the wiring; uses direction |
 | Metabolic-pathway question (glycolysis, TCA) | enrichKEGG / gseKEGG | metabolic maps are compound-mediated; SPIA is undefined there |
 | Human / mouse / model eukaryote | bitr -> Entrez, keyType='ncbi-geneid' | KEGG gene ID == Entrez for these organisms |
 | Bacterial / prokaryotic data | locus tags, keyType='kegg', NO OrgDb/bitr | bacterial KEGG IDs ARE locus tags; no org.*.eg.db exists |
@@ -156,7 +156,7 @@ kk2 <- gseKEGG(geneList=geneList, organism='hsa', keyType='ncbi-geneid', minGSSi
 
 **Goal:** Score how perturbed each SIGNALING pathway is given both the over-representation of DE genes and the propagation of their fold-changes through the signed wiring.
 
-**Approach:** SPIA combines pNDE (the classical over-representation evidence) with pPERT (the probability of the observed total accumulated perturbation tA, computed by propagating log2 fold-changes through KGML activation/inhibition edges) into a single global pG, then FDR-corrects it. It needs a NAMED vector of DE fold-changes plus the universe, and is defined only for signaling maps. graphite is the modern route: it harmonizes node IDs, resolves complexes/families, removes compounds, and can run SPIA over Reactome topology too.
+**Approach:** SPIA combines pNDE (the classical over-representation evidence) with pPERT (the probability of the observed total accumulated perturbation tA, computed by propagating log2 fold-changes through KGML activation/inhibition edges) into a single global pG, then FDR-corrects it. It needs a NAMED vector of DE fold-changes plus the universe, and is defined only for signaling maps. Two routes: `spia()` reads SPIA's bundled `hsaSPIA` KEGG topology (the default for direction calls); graphite harmonizes node IDs, resolves complexes/families, removes compounds and reads current KEGG (or Reactome) topology, but its perturbation direction can differ (see the caveat below the code).
 
 ```r
 library(SPIA)
@@ -169,7 +169,7 @@ res <- spia(de=de_vec, all=universe, organism='hsa', nB=2000, plots=FALSE)   # n
 # output cols: Name, ID, pSize, NDE, pNDE, tA, pPERT, pG, pGFdr, pGFWER, Status, KEGGLINK
 # Status reports inferred Activated / Inhibited from the sign of tA
 
-# graphite route (decouples from KEGG's bundled data; works on Reactome too)
+# graphite route (current KEGG topology instead of SPIA's bundled snapshot; works on Reactome too)
 library(graphite)
 db <- pathways('hsapiens', 'kegg')
 db <- convertIdentifiers(db, 'ENTREZID')
@@ -188,6 +188,8 @@ set.seed(123)   # graphite's runSPIA bootstraps pPERT the same way spia() does
 gr <- runSPIA(de=de_vec_gr, all=universe_gr, 'kegg_hsa_spia')
 setwd(owd)
 ```
+
+**The two routes are complementary evidence, not interchangeable.** Same `de_vec`, universe and seed, they score different topologies (bundled `hsaSPIA`: 139 pathways, an older snapshot; graphite: 319 graphs from the live KEGG conversion, e.g. 233 binding/association and 269 inhibition edges in Cell cycle) and disagree on direction for a meaningful fraction of pathways. On the audit's synthetic data (nB=50; 99 pathways scored by both) tA correlated only r=0.60, 14 pathways had opposite-sign tA, 18 Activated/Inhibited calls differed (further pathways had tA=0 in one route), and Cell cycle (planted UP) was Activated in `spia()` but Inhibited in graphite (re-run at nB=100: same split; SPIA 2.58.0, graphite 1.52.0). Report Activated/Inhibited only where both routes agree, state which topology produced a single-route call, and prefer `spia()` when only one is run; use graphite when current KEGG or Reactome topology is required.
 
 SPIA aborts if more than ~1% of the DE IDs are absent from `all`, so build the universe from the same ID space. The standalone SPIA package also ships a frozen `hsaSPIA` data object that is an OLDER snapshot than a live enrichKEGG query - do not mix the two in one comparison.
 
@@ -261,6 +263,9 @@ SPIA (`spia()`) output adds NDE, pNDE (over-representation), tA and pPERT (pertu
 ### SPIA on metabolic maps
 **Trigger:** running SPIA/graphite topology on glycolysis or other metabolic maps. **Mechanism:** metabolic maps are compound-mediated and give no clean signed gene->gene graph, so SPIA's bundled `hsaSPIA` dataset only contains signaling pathways. **Symptom:** the metabolic pathway is simply absent from SPIA's output entirely (e.g. hsa00010 never appears in `res`), not scored with a meaningless value. **Fix:** restrict SPIA to signaling maps; use enrichKEGG/gseKEGG for metabolism.
 
+### graphite and spia() disagree on SPIA direction
+**Trigger:** running both SPIA routes, or reporting a graphite `runSPIA()` Activated/Inhibited call as if it were `spia()`'s. **Mechanism:** different topology sources (frozen `hsaSPIA` vs graphite's converted live KEGG graphs) and edge-type mixes. **Symptom:** opposite-sign tA for a sizeable minority of shared pathways, including a known-UP pathway called Inhibited. **Fix:** treat the routes as complementary; report direction only where they agree, and name the topology used.
+
 ### Whole-database universe in ORA
 **Trigger:** omitting `universe`. **Mechanism:** the default background is all KEGG-annotated genes, biased toward well-studied, metabolically central genes. **Symptom:** inflated significance for pathways enriched in measured/expressed genes (the tissue-specificity artifact). **Fix:** set universe to the genes that could have been called DE, in the same ID type.
 
@@ -279,7 +284,7 @@ SPIA (`spia()`) output adds NDE, pNDE (over-representation), tA and pPERT (pertu
 | pAdjustMethod='BH' | clusterProfiler default | Benjamini-Hochberg FDR; less conservative than Bonferroni for discovery |
 | minGSSize=10 | enrichKEGG default | drop tiny sets that overfit and give unstable p-values |
 | maxGSSize=500 | enrichKEGG default | drop very broad sets that always 'enrich' |
-| nB=2000 | SPIA default | bootstrap replicates for the pPERT null; raise for stable small p-values |
+| nB=2000 | SPIA default | bootstrap replicates for the pPERT null; raise for stable small p-values; 200-500 is fine for interactive exploration, 2000+ for the reported result |
 | SPIA aborts if >1% of DE IDs absent from `all` | Tarca 2009 *Bioinformatics* 25:75 | the perturbation null requires the DE genes live in the universe |
 | set.seed before gseKEGG/SPIA | reproducibility | gseKEGG seed=FALSE and SPIA bootstrap are stochastic; fix the seed |
 | ID-conversion loss > ~15% | practice heuristic | report the bitr conversion rate; heavy loss makes the result unreliable |
@@ -292,6 +297,7 @@ SPIA (`spia()`) output adds NDE, pNDE (over-representation), tA and pPERT (pertu
 | `setReadable` errors | no OrgDb for the organism (prokaryote) | skip setReadable; keep raw KEGG IDs |
 | `gson=` rejected by enrichKEGG | enrichKEGG/gseKEGG have no gson argument | pass the gson to the generic enricher()/GSEA() instead |
 | Different pathways on rerun | live KEGG changed between runs | pin with a gson snapshot and record the access date |
+| `spia()` and graphite `runSPIA()` give opposite Activated/Inhibited for a pathway | different topology sources (see "graphite and spia() disagree") | report direction only where both agree; name the route |
 | SPIA: "more than 1% of de IDs not in all" | DE IDs not a subset of the universe | build de and all from the same ID space |
 | SPIA output has no row for a metabolic pathway | hsaSPIA only contains signaling pathways | use enrichKEGG/gseKEGG for metabolism; SPIA is signaling-only |
 | Bacterial list gives 0 hits | Entrez/bitr forced onto a prokaryote | pass locus tags with keyType='kegg', no OrgDb |
