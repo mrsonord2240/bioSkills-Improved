@@ -1,4 +1,4 @@
-# Reference: clusterProfiler 4.18.4+, org.Hs.eg.db 3.22+, msigdbr 26+ | Verify API if version differs
+# Checked 2026-09-21: clusterProfiler 4.14.6, org.Hs.eg.db 3.20.0, msigdbr 26.1.0 | Verify API if version differs
 # Preranked GSEA on GO biological processes from a DESeq2-style ranked vector.
 # Self-contained: builds a synthetic signed ranking over real Entrez IDs so it runs offline (no network, no DE fixture).
 

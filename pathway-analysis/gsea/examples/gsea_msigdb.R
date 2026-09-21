@@ -1,4 +1,4 @@
-# Reference: clusterProfiler 4.18.4+, org.Hs.eg.db 3.22+, msigdbr 26+ | Verify API if version differs
+# Checked 2026-09-21: clusterProfiler 4.14.6, org.Hs.eg.db 3.20.0, msigdbr 26.1.0 | Verify API if version differs
 # GSEA against the MSigDB Hallmark collection using the generic GSEA(TERM2GENE) function.
 # Self-contained: builds a synthetic signed ranking over real Entrez IDs so it runs offline.
 
