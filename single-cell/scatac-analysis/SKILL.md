@@ -142,34 +142,11 @@ da <- FindMarkers(obj, ident.1 = 'cluster1', ident.2 = 'cluster2',
 
 **Approach:** Attach motif matches, then compute deviations against a GC- and accessibility-matched background; rank with z-scores, never raw deviations.
 
-```r
-library(JASPAR2020); library(TFBSTools); library(motifmatchr)
-library(BSgenome.Hsapiens.UCSC.hg38)
-library(chromVAR); library(SummarizedExperiment); library(BiocParallel)
-register(SerialParam())   # chromVAR/motifmatchr default to a multicore backend unsupported on Windows
-
-pfm <- getMatrixSet(JASPAR2020, opts = list(collection = 'CORE', tax_group = 'vertebrates', all_versions = FALSE))
-obj <- AddMotifs(obj, genome = BSgenome.Hsapiens.UCSC.hg38, pfm = pfm)
-
-# Signac::RunChromVAR() was removed in Signac 1.17.0 (chromVAR became unavailable in Bioconductor
-# 3.23, per Signac's own NEWS.md) -- call chromVAR's own lower-level API directly instead; this is
-# the same sequence RunChromVAR used to wrap, and runs on any Signac version.
-se <- SummarizedExperiment(assays = list(counts = as.matrix(GetAssayData(obj, assay = 'peaks', layer = 'counts'))),
-                            rowRanges = granges(obj[['peaks']]))
-se <- addGCBias(se, genome = BSgenome.Hsapiens.UCSC.hg38)
-motif_ix <- matchMotifs(pfm, se, genome = BSgenome.Hsapiens.UCSC.hg38)
-set.seed(1)                                        # getBackgroundPeaks() samples background peaks at
-                                                    # random and is NOT internally seeded -- omitting
-                                                    # this makes chromVAR's differential-motif calls and
-                                                    # rankings change from run to run on identical input
-bg_peaks <- getBackgroundPeaks(se)                 # GC- and accessibility-matched background
-dev <- computeDeviations(object = se, annotations = motif_ix, background_peaks = bg_peaks)
-obj[['chromvar']] <- CreateAssayObject(data = deviationScores(dev))   # background-normalized z-scores
-
-DefaultAssay(obj) <- 'chromvar'
-diff_motifs <- FindMarkers(obj, ident.1 = 'cluster1', ident.2 = 'cluster2',
-                           mean.fxn = rowMeans, fc.name = 'avg_diff')
+```bash
+Rscript scripts/run_chromvar.R obj.rds out_prefix cluster1 cluster2   # on Windows call it through the env's r.sh
 ```
+
+`scripts/run_chromvar.R` adds JASPAR2020 CORE vertebrate motifs (`AddMotifs`), then runs chromVAR's own `addGCBias` / `matchMotifs` / `getBackgroundPeaks` / `computeDeviations` (`Signac::RunChromVAR()` was removed in Signac 1.17.0 because chromVAR became unavailable in Bioconductor 3.23, per Signac's NEWS.md). It calls `set.seed(1)` before `getBackgroundPeaks()`, which samples backgrounds at random and is not internally seeded; omitting it makes motif rankings change between identical reruns. It registers `SerialParam()` because the default multicore backend is unsupported on Windows. Output: a `chromvar` assay of background-normalized z-scores in `<out_prefix>_obj.rds`, and `FindMarkers(mean.fxn = rowMeans, fc.name = 'avg_diff')` results in `<out_prefix>_diff_motifs.csv`.
 
 chromVAR's deviation is meaningful only against a GC- and accessibility-matched background; an unmatched background manufactures apparent enrichment for GC-rich motifs (most TF motifs are GC-rich). Use z-scores (background-normalized) for cross-motif ranking, raw deviations are not comparable across motifs. Motif != TF: paralogous TFs share near-identical motifs, so an enriched motif implicates a family, not a factor; motif presence != occupancy; and a footprint (TOBIAS, needs pseudobulk) is stronger occupancy evidence than motif-in-peak. Disambiguate with TF expression (Multiome) before claiming "TF X drives this program".
 
