@@ -16,6 +16,8 @@ Before using code patterns, verify installed versions match. If versions differ:
 
 If code throws an error, introspect the installed package and adapt to the actual API. Notes: `RNASeqPower::rnapower()` solves for whichever of `n` or `power` is omitted, and despite its name applies to any negative-binomial per-feature count assay, not only RNA-seq (its own vignette is titled "Sample Size for RNA-Seq and **similar** Studies") — see the ATAC/ChIP/methylation section below; PROPER is a multi-step pipeline (`RNAseq.SimOptions.2grp` -> `simRNAseq` -> `runSims` -> `comparePower`) whose `RNAseq.SimOptions.2grp` hard-codes `sim.seed = 11111` when `sim.seed` is not supplied, which is why repeated runs of the blocks below are byte-identical without an explicit `set.seed()`; pass `sim.seed = <n>` explicitly for a documented, intentional re-run. powsimR, if installed separately, is GitHub-only and its `estimateParam`/`Setup`/`simulateDE` signatures drift — pin a commit SHA for reproducible work. Verify each against the installed help before relying on argument names.
 
+**Parameter ranges (checked on RNASeqPower 1.46.0, pwr 1.3.0):** `alpha` and `power` must lie in (0, 1); `effect` is a positive fold change other than 1 (`0.5` gives the same result as `2`, so depletion needs no separate handling); `cv`, `depth` and `n` must be positive. `pwr.t.test` stops with an error on `power`/`sig.level` outside [0, 1], but `rnapower()` does not validate: `power = 1.2` returns `NaN` (with a warning), `power = 1` or `effect = 1` returns `Inf`, `alpha = 1.5` returns power 0.999 and `effect = 0` returns power 1 with no warning, and a negative `cv` is silently treated as positive. Check inputs before calling, and treat any `NaN`/`Inf`/implausible result as a bad input rather than a finding.
+
 # Power Analysis for Genomics Experiments
 
 **"How many replicates does my sequencing experiment need?"** -> Compute the probability of detecting a biologically meaningful effect given replicate number, sequencing depth, and biological variability — modeling counts as negative-binomial and recognizing that power is a per-gene quantity, not one number for the whole transcriptome.
@@ -101,20 +103,10 @@ plotPower(powr)   # the grant-ready power curve (per-Nreps marginal power at the
 
 **Goal:** Size a scRNA-seq cross-condition DE study by the quantity that actually sets population power: number of donors, not number of cells.
 
-**Approach:** powsimR is the tool most often named for this, but it is GitHub-only with a compile-required dependency (`bayNorm`) and is not required — population DE power is a donor-level NB power problem, so aggregating (summing) counts per donor into a pseudobulk matrix and running the same edgeR machinery already used elsewhere in this Skill answers it directly, with `n` = number of donors. `examples/scrna_pseudobulk_power.R` runs a full donor x cell simulation end-to-end (edgeR 4.4.2, verified 2026-09-17) and contrasts pseudobulk power against the anti-pattern of testing cells as if they were independent replicates:
+**Approach:** powsimR is the tool most often named for this, but it is GitHub-only with a compile-required dependency (`bayNorm`) and is not required — population DE power is a donor-level NB power problem, so aggregating (summing) counts per donor into a pseudobulk matrix and running the same edgeR machinery already used elsewhere in this Skill answers it directly, with `n` = number of donors. `examples/scrna_pseudobulk_power.R` runs a full donor x cell simulation end-to-end (edgeR 4.4.2, verified 2026-09-17) and contrasts pseudobulk power against the anti-pattern of testing cells as if they were independent replicates.
 
-```r
-suppressPackageStartupMessages(library(edgeR))
-# pb_counts: genes x donors, each column = summed counts across that donor's cells
-y <- DGEList(counts = pb_counts, group = donor_group)   # donor_group: 0/1 per donor, length = n_donors
-y <- y[filterByExpr(y), , keep.lib.sizes = FALSE]
-y <- calcNormFactors(y)
-design <- model.matrix(~donor_group)
-y <- estimateDisp(y, design)
-fit <- glmQLFit(y, design)
-qlf <- glmQLFTest(fit, coef = 2)
-padj <- p.adjust(qlf$table$PValue, 'BH')   # power/FDR read off against the known-DE gene set
-```
+The pseudobulk step itself is `DGEList` on the donor-summed matrix (genes x donors, one column per donor) -> `filterByExpr` -> `calcNormFactors` -> `estimateDisp` -> `glmQLFit`/`glmQLFTest`, then BH-adjusted p-values read against the known-DE gene set; the full code is in `examples/scrna_pseudobulk_power.R`.
+
 Run `Rscript examples/scrna_pseudobulk_power.R` for the full sweep: at 4 donors/group, pseudobulk power stays near 0 regardless of cells per donor (200 vs. 50 makes no difference), while naive cell-level testing looks strong (power > 0.8) at a realized FDR near 0.9 — nine in ten "discoveries" false, because cells are pseudoreplicates, not biological replicates. More donors (not more cells) is the only fix; a quick closed-form cross-check on the pseudobulk matrix (`RNASeqPower::rnapower(depth = <post-aggregation depth>, n = <n_donors>, ...)`) applies exactly as in the bulk case once counts are aggregated.
 
 ## ATAC-seq / ChIP-seq / Methylation Power -- Same NB Machinery, Per-Region Counts
