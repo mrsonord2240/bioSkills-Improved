@@ -9,7 +9,9 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: MSstats 4.14.2, MSnbase 2.32.0, iq 2.0.1, numpy 2.5.3, pandas 3.0.5 (checked 2026-09-15)
+Reference examples tested with: MSstats 4.14.2, MSnbase 2.32.0, iq 2.0.1, numpy 2.5.3, pandas 3.0.5 (checked 2026-09-21)
+
+Install: `pip install numpy pandas`; in R `BiocManager::install(c('MSstats', 'MSnbase'))` and `install.packages('iq')`.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
@@ -140,6 +142,8 @@ sample_medians = log_int.median(axis=0)
 normalized = log_int - sample_medians + sample_medians.median()
 ```
 
+Runnable with asserted output: `examples/lfq_normalization.py` (median centering, sample-loading + IRS, the SILAC pilot checks and the AP-MS scorer on seeded data).
+
 ## Isobaric (TMT/iTRAQ) Quantification
 
 ### Extract and impurity-correct reporter ions
@@ -153,16 +157,22 @@ library(MSnbase)
 
 raw <- readMSData('experiment.mzML', mode = 'onDisk')
 # method='max' for centroided spectra; reporters=TMT10 defines the 126-131 reporter m/z.
-# TMTpro 16plex uses reporters = TMT16 (126..134N); MSnbase 2.32.0 has no TMT18 set.
+# MSnbase 2.32.0 has no TMT18 set.
 quant <- quantify(raw, reporters = TMT10, method = 'max')
+# TMTpro 16plex (126..134N): swap in TMT16 for TMT10 here and use the CoA route below
+# quant <- quantify(raw, reporters = TMT16, method = 'max')
 
 # edit = FALSE: the default edit = TRUE calls edit(M) and blocks under Rscript / on a cluster.
 # x = is a MANUFACTURER TEMPLATE and MSnbase ships templates only for x = 4, 6, 8, 10; any other x
 # (TMTpro 16) falls through to an unnamed diag(x) and stops with "length of 'dimnames' [1] not equal
 # to array extent". REPLACE with lot-specific Certificate of Analysis values -- for TMTpro the only route:
-# imp <- makeImpuritiesMatrix(filename = 'lot_coa.csv', edit = FALSE)  # layout as MSnbase extdata
-#   TMT6plexPurityCorrections.csv: one row per channel, one column per neighbour OFFSET
-#   (-n/2..-1, +1..+n/2) in percent, so a 16plex CoA needs 16 offset columns
+# imp <- makeImpuritiesMatrix(filename = 'lot_coa.csv', edit = FALSE)
+#   CSV layout (MSnbase extdata TMT6plexPurityCorrections.csv): a leading Tag column of channel names
+#   (read as row.names; omit it and R stops with "duplicate 'row.names' are not allowed"), then n
+#   neighbour-OFFSET columns in percent (-n/2..-1, +1..+n/2), so a 16plex CoA has Tag + 16 columns:
+#     Tag,-3,-2,-1,+1,+2,+3
+#     126,0,0,0,6.1,0,0
+#     127,0,0,0.5,6.7,0,0
 imp <- makeImpuritiesMatrix(x = 10, edit = FALSE)
 quant <- purityCorrect(quant, imp)
 ```
@@ -195,6 +205,8 @@ def irs_scale(plexes, ref_cols):
         out.append(p.mul(factor, axis=0))
     return out
 ```
+
+Worked example with a planted plex offset: `examples/lfq_normalization.py`.
 
 ## SILAC Quantification
 
@@ -239,6 +251,8 @@ def arg_to_pro_shift(peptides, seq='Sequence', ratio='Ratio H/L'):
             'conversion_per_proline': round(float(1 - 2 ** slope), 4)}
 ```
 
+Seeded pilot recovering the planted 0.93 incorporation and 0.08 conversion: `examples/lfq_normalization.py`.
+
 ### Ratios that keep on/off biology
 ```python
 import numpy as np
@@ -260,7 +274,7 @@ def silac_log2_ratio(heavy, light):
 
 **Goal:** Rank prey in a pulldown by enrichment over NEGATIVE-CONTROL IPs, not by abundance or by ratio to the input lysate.
 
-**Approach:** A pulldown is deliberately non-representative, so no data-internal normalization (median, sample-loading, IRS) applies, and the input lysate is not a control -- sticky background (ribosome, chaperones, tubulin, keratin) binds the beads in the pulldown and is diluted in the input, so "top N over input" returns background. The control IP is the only thing that separates a bead binder from an interactor. Require reproducible detection across bait replicates and enrichment over control, and floor absent controls at the run's detection limit so bait-only prey score finitely instead of `+Inf`.
+**Approach:** A pulldown is deliberately non-representative, so no data-internal normalization (median, sample-loading, IRS) applies, and the input lysate is not a control -- sticky background (ribosome, chaperones, tubulin, keratin) binds the beads in the pulldown and is diluted in the input, so "top N over input" returns background. The control IP is the only thing that separates a bead binder from an interactor. Require reproducible detection across bait replicates and enrichment over control, and floor absent controls at the run's detection limit so bait-only prey score finitely instead of `+Inf`. The default `min_bait_reps` is every bait replicate (reproducibility first), which trades sensitivity for specificity: at 3 replicates a true interactor missing from one by stochastic dropout is dropped (an enrichment of 5.4 was, on the audit fixture). `min_bait_reps=2` is the usual compromise; run both and report how many prey the looser setting adds so the choice is visible.
 
 ```python
 import numpy as np, pandas as pd
@@ -272,15 +286,23 @@ def score_vs_control_ips(ip, bait_cols, ctrl_cols, fc_cutoff=2.0, min_bait_reps=
     if min_bait_reps is None:
         min_bait_reps = len(bait_cols)          # default: every bait replicate, reproducibility first
     n_bait, n_ctrl = L[bait_cols].notna().sum(axis=1), L[ctrl_cols].notna().sum(axis=1)
+    # a control IP that produced no data is skipped by every mean/min below, so say so out loud
+    dead = [c for c in ctrl_cols if L[c].notna().sum() == 0]
+    if dead:
+        print(f'AP-MS: control runs with no data, excluded: {dead}')
+    if len(dead) == len(ctrl_cols):
+        raise ValueError('every control IP is empty -- nothing to score against')
     Lf = L.copy()
     Lf[ctrl_cols] = Lf[ctrl_cols].fillna(L[ctrl_cols].min())      # per-control-run detection floor
     enrich = Lf[bait_cols].mean(axis=1) - Lf[ctrl_cols].mean(axis=1)
     worst = Lf[bait_cols].min(axis=1) - Lf[ctrl_cols].max(axis=1)  # weakest bait rep vs best control
-    out = pd.DataFrame({'n_bait': n_bait, 'n_ctrl': n_ctrl,
+    out = pd.DataFrame({'n_bait': n_bait, 'n_ctrl': n_ctrl, 'n_ctrl_runs_used': len(ctrl_cols) - len(dead),
                         'log2_enrichment': enrich, 'worst_case_log2': worst})
     out['interactor'] = (n_bait >= min_bait_reps) & ((n_ctrl == 0) | (enrich >= fc_cutoff))
     return out.sort_values('log2_enrichment', ascending=False)
 ```
+
+Seeded matrix (sticky binders excluded, dead control announced, `min_bait_reps` dropout): `examples/lfq_normalization.py`.
 
 This fold-change/presence score is the honest ceiling for ONE bait with a few controls. For a
 probability rather than a cutoff use SAINTexpress (spectral counts, `interaction`/`prey`/`bait`
