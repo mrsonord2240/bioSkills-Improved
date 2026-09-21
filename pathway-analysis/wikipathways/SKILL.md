@@ -127,31 +127,14 @@ as.data.frame(wp_gsea)   # NES, p.adjust, core_enrichment (the leading edge)
 
 **Goal:** Make a WP analysis reproducible across re-runs by pinning a dated release instead of pulling `current/`.
 
-**Approach:** Download a dated GMT (pass `format='gmt'` - the default is `gpml`), split the compound `name%version%wpid%org` term field into TERM2GENE/TERM2NAME, run `enricher`/`GSEA` on the pinned sets, and report the date in methods. The live archive retains only the last ~12 months of monthly releases (10th of each month) - compute a recent date rather than hardcoding one that will 404 as time passes, and loop over successive months (`Sys.Date() - 60, -90, -120, ...`) with `tryCatch` so a single missing release does not stop the run - the block below does this, and reports the date that succeeded. If every in-window date fails, or for a fixed historical date beyond the window, use the Zenodo GMT/GPML archive instead (https://zenodo.org/communities/wikipathways).
+**Approach:** Download a dated GMT (pass `format='gmt'` - the default is `gpml`), split the compound `name%version%wpid%org` term field into TERM2GENE/TERM2NAME, run `enricher`/`GSEA` on the pinned sets, and report the date in methods. The live archive retains only the last ~12 months of monthly releases (10th of each month) - compute a recent date rather than hardcoding one that will 404 as time passes, and loop over successive months (`Sys.Date() - 60, -90, -120, ...`) with `tryCatch` so a single missing release does not stop the run - `scripts/wikipathways_pinned_enrich.R` does this and prints the date that succeeded. If every in-window date fails, or for a fixed historical date beyond the window, use the Zenodo GMT/GPML archive instead (https://zenodo.org/communities/wikipathways).
 
-```r
-library(rWikiPathways)
-library(tidyr)
-
-# newest-first candidate release dates, all inside the ~12-month window (10th of each month)
-candidates <- unique(format(Sys.Date() - seq(60, 330, by=30), '%Y%m10'))
-gmt <- NULL
-for (archive_date in candidates) {   # a missing release 404s: step back one month, then fall back to Zenodo
-  # downloadPathwayArchive needs an organism to actually download a file (organism=NULL opens the index)
-  gmt <- tryCatch(suppressWarnings(downloadPathwayArchive(date=archive_date, organism='Homo sapiens',
-                                                          format='gmt', destpath=tempdir())),
-                  error=function(e) NULL)
-  if (!is.null(gmt) && file.exists(file.path(tempdir(), gmt))) break
-  gmt <- NULL
-}
-if (is.null(gmt)) stop('no release in the last ~12 months; use the Zenodo GMT archive')
-wp2gene <- read.gmt(file.path(tempdir(), gmt))
-wp2gene <- separate(wp2gene, term, c('name','version','wpid','org'), sep='%')   # term is a %-joined compound
-t2g <- wp2gene[, c('wpid','gene')]   # TERM2GENE
-t2n <- wp2gene[, c('wpid','name')]   # TERM2NAME
-
-wp_pinned <- enricher(sig, universe=all_entrez, TERM2GENE=t2g, TERM2NAME=t2n)   # report date=archive_date
+```bash
+# sig_entrez.txt / universe_entrez.txt: one Entrez ID per line (tested genes as universe); prints the release date used
+Rscript scripts/wikipathways_pinned_enrich.R sig_entrez.txt universe_entrez.txt 'Homo sapiens' wp_pinned.csv
 ```
+
+For GSEA, build the same `t2g` (`wpid`, `gene`) / `t2n` (`wpid`, `name`) tables and call `GSEA(geneList, TERM2GENE=t2g, TERM2NAME=t2n)`; `examples/wikipathways_explore.R` shows the pattern inline.
 
 `gson_WP(organism)` returns a GSON snapshot object, but it still pulls `current/` - it freezes a session, NOT a chosen historical date. Only the dated `downloadPathwayArchive` GMT survives a re-run months later.
 
