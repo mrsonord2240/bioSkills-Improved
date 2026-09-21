@@ -47,6 +47,7 @@ Cysteine is frequently targeted because its thiol/thiolate can be nucleophilic a
 |---------|----------------|------------|---------------|----------------|
 | Acrylamide | `[CX3](=[OX1])([NX3])[CX3]=[CX3]` | Moderate (Michael acceptor) | Usually irreversible | Often Cys-directed |
 | Chloroacetamide | `[CX3](=[OX1])([NX3])[CH2]Cl` | High (SN2) | Irreversible | Often Cys-directed |
+| Iodoacetamide (ABPP probes) | `[CX3](=[OX1])([NX3])[CH2][I]` | High (SN2) | Irreversible | Often Cys-directed |
 | α-haloketone | `[CX3](=O)C[F,Cl,Br]` | Very high | Irreversible | Yes (but reactive) |
 | Vinyl sulfone | `S(=O)(=O)C=C` | Moderate (Michael) | Irreversible | Yes |
 | Sulfonyl fluoride | `S(=O)(=O)F` | Moderate | Irreversible | Lys/Tyr/Ser |
