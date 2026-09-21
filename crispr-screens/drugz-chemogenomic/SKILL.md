@@ -61,6 +61,11 @@ the 4-6 sgRNAs *per gene* needed for a stable per-gene Z.
 
 ## Run drugZ on a Drug-Modifier Screen
 
+**Input:** tab-separated count matrix, guide ID in the first column, `GENE` second, then one column per
+sample (extra columns such as `T0` are ignored unless named in `-c`/`-x`). Vehicle and drug arms must
+share the same time point (Day 14 vehicle vs Day 14 drug). Check library coverage and replicate concordance first (`screen-qc`, `mageck count`). Helper libraries for the snippets below:
+`pandas numpy scipy statsmodels matplotlib`.
+
 **Goal:** Quantify per-gene sensitizing and suppressor effects from a chemogenomic screen.
 
 **Approach:** Run `drugz.py` with vehicle and drug sample columns; output per-gene sumZ, normZ, and direction-specific p-values + FDR.
@@ -73,13 +78,16 @@ cd drugz
 # Vehicle (DMSO or carrier) replicates: Veh_r1, Veh_r2, Veh_r3
 # Drug-treated replicates: Drug_r1, Drug_r2, Drug_r3
 
+# -i input counts (tab-separated); -o output file; -c vehicle samples, -x drug samples (comma-separated)
+# -r OPTIONAL comma-delimited GENE NAMES to exclude (not a file path)
+# -p pseudocount (default 5; raise for low-count screens)
 python drugz.py \
-    -i counts.txt \                       # input read-count file (tab-separated)
-    -o drugz_output.txt \                  # output file
-    -c Veh_r1,Veh_r2,Veh_r3 \              # control samples (comma-separated)
-    -x Drug_r1,Drug_r2,Drug_r3 \           # treated samples (comma-separated)
-    -r RPS3,RPL11,EIF3A \                  # OPTIONAL: comma-delimited GENE NAMES to exclude (not a file path)
-    -p 5                                   # pseudocount (default 5)
+    -i counts.txt \
+    -o drugz_output.txt \
+    -c Veh_r1,Veh_r2,Veh_r3 \
+    -x Drug_r1,Drug_r2,Drug_r3 \
+    -r RPS3,RPL11,EIF3A \
+    -p 5
 
 # Output: drugz_output.txt with columns:
 #   GENE, sumZ, numObs, normZ, pval_synth, rank_synth, fdr_synth, pval_supp, rank_supp, fdr_supp
@@ -138,9 +146,10 @@ for DOSE in low mid high; do
 done
 ```
 
-Then aggregate. A dose-consistent hit is one that keeps the same sign at every tested dose and
-reaches FDR < 0.05 at the highest dose; report the others as dose-inconsistent rather than dropping
-them silently:
+Then aggregate. **Dose consistency rule:** a dose-consistent hit keeps the same `normZ` sign at every
+tested dose and reaches FDR < 0.05 at the highest dose; report the others as dose-inconsistent rather
+than dropping them silently. `|normZ|` growing with dose is supporting evidence, not a requirement
+(saturation at the top dose is common):
 
 ```python
 import pandas as pd
@@ -177,8 +186,9 @@ def dose_consistent_hits(dose_files, top_dose, fdr=0.05, direction='synth'):
 | Synergy / antagonism detection | Limited (per-drug calling only) | YES (interaction term in MLE) |
 | Small effect sizes (LFC <0.5) | Highest sensitivity | Lower sensitivity |
 | Heavy selection (>40% guides change) | OK | Norm needs control sgRNAs |
+| Essentiality plus drug effect | drugZ for the drug effect | BAGEL2 for essentiality |
 
-**Dose consistency rule:** same sign of `normZ` at every tested dose and FDR < 0.05 at the highest dose. Report `|normZ|` increasing with dose as supporting evidence, not as a requirement -- saturation at the top dose is common.
+Dose consistency: see the rule in "Drug-Dose and Time-Course Designs".
 
 **Reconciliation:** For simple drug-modifier screens with one drug and one vehicle, run both drugZ and MAGeCK MLE; hits called by both are high confidence; drugZ-only hits at low LFC need orthogonal validation (drug + arrayed validation).
 
@@ -258,6 +268,12 @@ because they drop out under any condition, removing them gives a cleaner drug-sp
 **Symptom:** Drug-target gene like PARP1 appears in suppressor list for PARPi screen.
 **Fix:** Expected biology. Annotate the drug target separately. The suppressor list is correct.
 
+### Low replicate concordance (Pearson < 0.85) or a crashed run
+
+**Trigger:** replicate Pearson (within an arm, on log2 counts) below 0.85, or drugZ exits with a traceback.
+**Mechanism:** drugZ's small-effect sensitivity also amplifies noise, so a noisy replicate produces false positives.
+**Fix:** run `screen-qc` first; drop the worst replicate from `-c`/`-x` (drugZ accepts any number of columns, checked on 2 vs 2) and re-run; if hits change materially, flag the screen as QC-failed instead of reporting them. For a crash, check the guide count against `--half_window_size` and that every `-c`/`-x` name matches a header column exactly.
+
 ## Quantitative Thresholds
 
 | Threshold | Value | Source / Rationale |
@@ -269,6 +285,7 @@ because they drop out under any condition, removing them gives a cleaner drug-sp
 | Min sgRNAs per gene for stable Z | 4-6 | Below this, Z varies between runs |
 | Vehicle replicates needed | 3+ | For stable Z null distribution |
 | Drug replicates needed | 3+ | For per-gene sumZ stability |
+| Replicate Pearson within an arm | > 0.85 | Pre-drugZ QC; below it, see "Low replicate concordance" |
 
 ## Common Errors
 
@@ -280,6 +297,7 @@ because they drop out under any condition, removing them gives a cleaner drug-sp
 | Drug-target appears in suppressor | Real biology | Annotate separately |
 | MAGeCK and drugZ disagree | Different statistical sensitivity | drugZ more sensitive; trust for chemogenomic |
 | Inconsistent between doses | Real dose effect | Require consistency across doses |
+| `IndexError: single positional indexer is out-of-bounds` | `--half_window_size` too large for the total guide count (needs about 4x) | Set `--half_window_size` to about 1/4 of total guides; see "Library size vs `--half_window_size`" |
 
 ## References
 
