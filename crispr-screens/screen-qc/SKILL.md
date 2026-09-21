@@ -346,7 +346,7 @@ Before any metric, check the count table and fail with a clear message rather th
 
 | Check | Expectation | If it fails |
 |-------|-------------|-------------|
-| Required columns | an sgRNA identifier column (index) and a `Gene` column, then one numeric column per sample | name the missing column; do not guess |
+| Required columns | an sgRNA identifier column (index) and a `Gene` column, then one numeric column per sample; a default `0..n-1` index means the identifier column was lost | name the missing column; do not guess |
 | Dtypes | every sample column numeric | report which column is non-numeric and the first offending value |
 | All-zero sample | at least one non-zero count per sample | report the sample as failed at sequencing, and skip (not `nan`-propagate) its Gini and correlation |
 | Negative counts | none | reject the file; these are not counts |
