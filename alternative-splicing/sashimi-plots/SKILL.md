@@ -51,14 +51,14 @@ Visualize RNA-seq coverage tracks with splice junction arcs labeled by read coun
 
 | Goal | Recommended tool |
 |------|-------------------|
-| Validate a specific rMATS hit | rmats2sashimiplot (one-line) or ggsashimi (custom) |
-| Validate a leafcutter cluster | leafviz (interactive) or ggsashimi with cluster coordinates |
-| Validate a MAJIQ LSV (complex topology) | MAJIQ-VOILA (only tool that shows full LSV graph) |
+| Validate a specific rMATS hit | rmats2sashimiplot (one-line; `references/rmats2sashimiplot.md`) or ggsashimi (custom) |
+| Validate a leafcutter cluster | leafviz (interactive; `references/leafviz.md`) or ggsashimi with cluster coordinates |
+| Validate a MAJIQ LSV (complex topology) | MAJIQ-VOILA (only tool that shows full LSV graph; `references/majiq-voila.md`) |
 | Publication-quality two-condition comparison | ggsashimi `-O 3 -A mean_j` for grouped overlay |
-| Multi-track figure (RNA-seq + H3K4me3 + ATAC) | pyGenomeTracks |
+| Multi-track figure (RNA-seq + H3K4me3 + ATAC) | pyGenomeTracks (`references/pygenometracks.md`) |
 | Quick ad-hoc browsing during development | IGV sashimi |
-| Tool-agnostic batch heatmap of significant events | Jutils |
-| Interactive cohort-level filtering of leafcutter results | leafviz Shiny |
+| Tool-agnostic batch heatmap of significant events | Jutils (`references/jutils.md`) |
+| Interactive cohort-level filtering of leafcutter results | leafviz Shiny (`references/leafviz.md`) |
 
 ## ggsashimi for Publication Overlays
 
@@ -160,186 +160,17 @@ assert not failed, f'no figure for {failed}'
 
 MXE files also carry `upstreamES`/`downstreamEE`, and that span already covers both alternative exons. `examples/plot_sashimi.py` `batch_plot_rmats_events()` is the same recipe with the `--shrink` guard and a `RuntimeError` listing every failed event.
 
-## rmats2sashimiplot
+## Reference Files
 
-**Goal:** Plot directly from rMATS event coordinates without manual region calculation.
+The ggsashimi recipes, interpretation guide, failure modes and Common Errors stay in this file. Read the tool's file when the request needs that tool:
 
-**Approach:** Filter the rMATS event file to the events to plot (it draws every row), pass BAM lists + a group file + event type, then check the output: rmats2sashimiplot **exits 0 when it fails** and leaves `Sashimi_plot/` empty. The contig is matched to the BAM header automatically (`chrX` in the event file, `X` in the BAM works).
-
-```bash
-# rmats2sashimiplot plots every row: keep only significant events (columns found by header name)
-awk -F'\t' 'NR==1{for(i=1;i<=NF;i++)c[$i]=i; print; next}
-    $c["FDR"]<0.05 && ($c["IncLevelDifference"]>0.1 || $c["IncLevelDifference"]<-0.1)' \
-    rmats_output/SE.MATS.JC.txt > sig.SE.MATS.JC.txt
-
-# group file: "label: first-last", 1-based over the --b1 replicates then the --b2 replicates
-printf 'Control: 1-3\nTreatment: 4-6\n' > grouping.gf
-
-rmats2sashimiplot \
-    --b1 ctrl1.bam,ctrl2.bam,ctrl3.bam \
-    --b2 trt1.bam,trt2.bam,trt3.bam \
-    --event-type SE \
-    -e sig.SE.MATS.JC.txt \
-    --l1 Control \
-    --l2 Treatment \
-    -o sashimi_rmats \
-    --exon_s 1 \
-    --intron_s 5 \
-    --group-info grouping.gf \
-    --color '#1f77b4,#ff7f0e'
-
-n_events=$(( $(wc -l < sig.SE.MATS.JC.txt) - 1 ))
-n_pdf=$(find sashimi_rmats/Sashimi_plot -name '*.pdf' -size +0 2>/dev/null | wc -l)
-[ "$n_pdf" -eq "$n_events" ] || { echo "rmats2sashimiplot wrote $n_pdf of $n_events figures" >&2; exit 1; }
-```
-
-`--event-type` (4.0.0; the old `-t SE` is rejected, rc 2) takes SE, A5SS, A3SS, MXE or RI. `--exon_s 1 --intron_s 5` draws introns at 1/5 of their real length. `--group-info` gives one plot per group (arc labels = group mean, plus the group's mean IncLevel); without it there is one plot per replicate and `--color` needs one colour per replicate, otherwise it prints `Error: Must provide sample label and color for each entry in bam_files!` and still exits 0.
-
-## MAJIQ-VOILA Interactive Viewer
-
-**Goal:** Browse LSV posterior PSI distributions interactively with splice-graph topology.
-
-**Approach:** Run `voila view` on MAJIQ output; it starts a local web server (open the printed address in a browser; there is no `-o` output file).
-
-MAJIQ/VOILA (bundled with MAJIQ, majiq.biociphers.org) is licence-gated (academic/commercial download) and was **not installed or run** in testing; the commands follow MAJIQ's public docs, so check `voila view --help` for your version.
-
-```bash
-# MAJIQ V2 build: splicegraph.sql + one .voila file per quantification
-voila view -p 5000 -j 8 build/splicegraph.sql psi_output/sample.psi.voila
-voila view -p 5000 -j 8 build/splicegraph.sql deltapsi_output/group1_group2.deltapsi.voila
-
-# MAJIQ V3 build (per the V2-to-V3 migration page): sg.zarr + the .psicov quantification + the .sgc coverage file of the group
-voila view build/sg.zarr psi_output/Brain_Cerebellum.psicov build/Brain_Cerebellum.sgc
-```
-
-Do not mix V2 and V3 inputs in one call. Check `voila view --help` for the options (`-p`, `-j`) your version accepts.
-
-VOILA shows:
-- Complete LSV graphs (single source / single target nodes)
-- Per-junction posterior PSI violin plots
-- ΔPSI distributions across all conditions
-- Confidence by junction within an LSV
-
-**The only tool that visualizes complex multi-junction LSVs intuitively.** For events that don't fit canonical SE/A5SS/A3SS, VOILA is the visualization of choice. It needs the MAJIQ build's splicegraph plus the quantification file (`.voila` in V2; `.psicov` and `.sgc` in V3); without a licence use ggsashimi on the region instead.
-
-## leafviz Shiny App
-
-**Goal:** Browse leafcutter clusters with intron-level effects and sashimi-like plots.
-
-**Approach:** leafviz is a script directory inside the leafcutter repo (not an R package: `library(leafviz)` and `run_leafviz()` do not exist). Build annotation files from the GTF, prepare the results `.RData`, then launch the Shiny app from the `leafviz` directory. leafcutter is a GitHub R package (`devtools::install_github('davidaknowles/leafcutter/leafcutter')`), not Bioconductor (the as-shipped 0.2.9 fails to build against rstan >= 2.33 because of the old Stan array syntax; confirm `library(leafcutter)` loads); the `leafviz/` directory comes with its repo. Checked end to end on the planted 3v3 leafcutter results (leafcutter 0.2.9; the app serves HTTP 200).
-
-```bash
-# annotation_code = prefix of four files (_all_exons.txt.gz, _all_introns.bed.gz, _fiveprime.bed.gz, _threeprime.bed.gz);
-# build them from the GTF version used in the differential analysis
-perl leafcutter/leafviz/gtf2leafcutter.pl -o annot annotation.gtf
-
-# groups.txt = the support file given to leafcutter_ds.R (sample <TAB> condition)
-Rscript leafcutter/leafviz/prepare_results.R \
-    -o leafviz.RData \
-    -m groups.txt \
-    leafcutter_perind_numers.counts.gz \
-    ds_results_cluster_significance.txt \
-    ds_results_effect_sizes.txt \
-    annot
-
-# runApp() uses the working directory: start from leafviz/, pass the .RData by absolute path
-cd leafcutter/leafviz && Rscript run_leafviz.R /abs/path/leafviz.RData    # prints "Listening on http://127.0.0.1:<port>"
-```
-
-`download_human_annotation_codes.sh` in the same directory fetches prebuilt hg19 codes. Useful for cohort-level interactive filtering of clusters.
-
-## Jutils for Tool-Agnostic Output
-
-**Goal:** Visualize differential splicing output uniformly across rMATS, leafcutter, MntJULiP, and MAJIQ.
-
-**Approach:** Convert tool output to Jutils' standard TSV, then plot. Run from the Jutils clone (`python3 jutils.py ...`). Run on rMATS output; the leafcutter/MntJULiP/MAJIQ converters follow `jutils.py convert-results --help` and were not run.
-
-```bash
-# writes rmats_JC_results.tsv and rmats_JCEC_results.tsv into --out-dir
-python3 jutils.py convert-results --rmats-dir rmats_output/ --out-dir jutils_out/
-
-# meta.tsv: sample<TAB>condition. Needs >= 2 events passing the cutoffs; writes clustermap*.pdf
-python3 jutils.py heatmap --tsv-file jutils_out/rmats_JC_results.tsv --meta-file meta.tsv --q-value 0.05 --out-dir hm/ --pdf
-
-# bam_list.tsv: sample<TAB>bam<TAB>condition
-python3 jutils.py sashimi --tsv-file jutils_out/rmats_JC_results.tsv --meta-file meta.tsv \
-    --gtf annotation.gtf --coordinate chr1:1000-2000 --bam-list bam_list.tsv --out-dir sh/ --pdf
-
-# --tsv-file-list is a FILE with one "path<TAB>label" line per TSV, not a comma-separated list
-printf 'jutils_out/rmats_JC_results.tsv\trMATS_JC\njutils_out/rmats_JCEC_results.tsv\trMATS_JCEC\n' > tsv_list.txt   # one line per TSV to compare
-python3 jutils.py venn-diagram --tsv-file-list tsv_list.txt --out-dir vn/
-```
-
-(Yang 2021 *Bioinformatics*) Useful when comparing multiple tools' outputs across publications or doing meta-analysis. The sashimi labels are per-sample junction counts and matched pysam.
-
-## pyGenomeTracks for Multi-Track Figures
-
-**Goal:** Combine splicing with chromatin or coverage tracks for publication figures.
-
-**Approach:** Build coverage bedGraphs and a junction BEDPE from the BAMs, define tracks in an INI file (genes, bedGraph/BigWig, BED, links), then run `pyGenomeTracks --tracks tracks.ini --region ... -o figure.pdf`. pyGenomeTracks 3.9 cannot draw a BAM (`InputError ... can not identify file type`).
-
-```bash
-# one merged BAM per group; -split is essential: without it introns are filled with coverage
-samtools merge -f ctrl_merged.bam ctrl1.bam ctrl2.bam ctrl3.bam && samtools index ctrl_merged.bam
-samtools merge -f trt_merged.bam trt1.bam trt2.bam trt3.bam && samtools index trt_merged.bam
-bedtools genomecov -ibam ctrl_merged.bam -split -bga > ctrl.bedgraph
-bedtools genomecov -ibam trt_merged.bam -split -bga > trt.bedgraph
-```
-
-```ini
-[gene_models]
-file = annotation.gtf
-height = 3
-title = GENCODE v45
-fontsize = 10
-file_type = gtf
-
-[ctrl_coverage]
-file = ctrl.bedgraph
-title = Control
-color = #1f77b4
-height = 3
-min_value = 0
-max_value = 200
-file_type = bedgraph
-
-[trt_coverage]
-file = trt.bedgraph
-title = Treatment
-color = #ff7f0e
-height = 3
-min_value = 0
-max_value = 200
-file_type = bedgraph
-
-[junctions]
-file = junctions.bedpe
-title = Junctions
-height = 5
-file_type = links
-links_type = arcs
-```
-
-Arc height grows with the junction's span, so a short `[junctions]` track crops the widest arc (`height = 2` did on a 3-exon locus whose skipping junction spans 60% of the window; 5 shows it whole): raise `height`, or narrow `--region`, until the widest arc is complete, and look at the figure.
-
-Tracks are scaled independently: set the same `min_value`/`max_value` on both coverage tracks (pick `max_value` from the data) or the two groups are not comparable. A BigWig made from the same `-split` bedGraph works too (`file_type = bigwig`).
-
-The `junctions.bedpe` file must be in **BEDPE format** (6 columns: chr1 start1 end1 chr2 start2 end2 [+ optional score]). Convert from regtools .bed12 junctions (the score is the read count summed over the merged BAM; `-s XS` needs XS-tagged BAMs, otherwise the strand is `?`):
-
-```bash
-samtools merge -f all_merged.bam ctrl_merged.bam trt_merged.bam && samtools index all_merged.bam   # regtools needs an indexed BAM
-regtools junctions extract -s XS -o regtools_junctions.bed all_merged.bam
-# regtools BED12 column 11 is blockSizes (anchor_left, anchor_right);
-# column 12 is blockStarts (0, intron_length + anchor_left).
-# Intron start = chromStart + anchor_left = $2 + a[1]
-# Intron end   = chromStart + blockStarts[2] = $2 + b[2]
-awk 'BEGIN{OFS="\t"} {split($11,a,","); split($12,b,","); s=$2+a[1]; e=$2+b[2]; print $1, s, s+1, $1, e-1, e, $5}' \
-    regtools_junctions.bed > junctions.bedpe
-```
-
-```bash
-pyGenomeTracks --tracks tracks.ini --region chr17:43094000-43125000 -o figure.pdf
-```
+| File | Read when |
+|------|-----------|
+| `references/rmats2sashimiplot.md` | Plotting rMATS events directly, `--group-info`, `--event-type`, or its exit-0 failures |
+| `references/majiq-voila.md` | Browsing MAJIQ LSVs with `voila view` (V2 and V3 inputs; licence-gated, not run) |
+| `references/leafviz.md` | The leafcutter Shiny app: annotation codes, `prepare_results.R`, `run_leafviz.R`, the annotation-code mismatch |
+| `references/jutils.md` | Tool-agnostic heatmaps, sashimi and Venn from rMATS/leafcutter/MntJULiP/MAJIQ output |
+| `references/pygenometracks.md` | Multi-track figures: bedGraph/BigWig coverage, regtools junction arcs as BEDPE, tracks.ini |
 
 ## Reading Sashimi Plots (Interpretation Guide)
 
@@ -373,16 +204,6 @@ pyGenomeTracks --tracks tracks.ini --region chr17:43094000-43125000 -o figure.pd
 **Symptom:** rc 0 with a dropped sample, an empty figure, or no figure at all.
 
 **Fix:** Check that every BAM exists, that the region has reads (`samtools view -c sample.bam chr1:100-200`), and that the figure file exists and is non-empty (recipes above).
-
-### leafviz: Annotation Codes Mismatch
-
-**Trigger:** Using leafviz with annotation_codes from different GENCODE version than leafcutter clusters.
-
-**Mechanism:** annotation_codes encodes intron-to-event-class mapping per GTF version.
-
-**Symptom:** Many clusters show as "unannotated" despite being in canonical GTF.
-
-**Fix:** Generate annotation_codes with `gtf2leafcutter.pl` from the same GTF used in differential analysis.
 
 ## Best Practices
 
