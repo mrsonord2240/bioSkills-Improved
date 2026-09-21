@@ -428,7 +428,7 @@ library(EValue)
 
 acme_rr <- exp(med_result$d0)
 acme_lower_rr <- exp(med_result$d0.ci[1])
-evalues.RR(acme_rr, lo=acme_lower_rr, hi=NULL)
+evalues.RR(acme_rr, lo=acme_lower_rr)   # omit `hi`: its default is NA; `hi=NULL` crashes (`if (est < true & !is.na(hi))`, EValue 4.1.4)
 ```
 
 For binary outcomes, convert ACME on probability scale to RR; for continuous, use `evalues.OLS()` with the standardized indirect effect. E-value > 2 indicates a confounder would need >2-fold associations with both M and Y to nullify the indirect effect (Smith & VanderWeele 2019). By hand: convert ACME to a risk-ratio bound (`acme_rr = exp(ACME)` on the log scale for continuous outcomes, or VanderWeele's marginal RR conversion for binary), then `E = RR + sqrt(RR * (RR - 1))`; apply the same formula to the CI bound closer to the null for the E-value of the CI. `EValue::evalues.OLS()` automates this for linear outcomes.
@@ -451,7 +451,7 @@ For binary outcomes, convert ACME on probability scale to RR; for continuous, us
 
 | Error / symptom | Cause | Solution |
 |-----------------|-------|----------|
-| `Error in storage.mode(x) <- "double"` inside `hima()` | NA in `data.pheno` columns referenced by formula, or unconverted factors | `na.omit(data.pheno)` first; ensure all RHS vars in formula are numeric or factor |
+| `Error in storage.mode(x) <- "double"` inside `hima()` | NA in `data.pheno` columns referenced by formula, or unconverted factors | `na.omit(data.pheno)` first; ensure all RHS vars in formula are numeric or dummy-coded via `model.matrix()` (HIMA 2.3.4 rejects `factor` columns; see "HIMA covariate or data.pheno error") |
 | ACME significant, ADE significant, total NOT significant | Suppression / inconsistent mediation | Report transparently; effect partitioning can exceed total in suppression |
 | `medsens()` errors on glm outcome | `medsens` requires linear OR probit (not logit) outcome | Refit outcome as `glm(..., family=binomial(link='probit'))` |
 | `mediate()` runs forever with binary outcome | `sims=5000` with bootstrap and small n | Use `sims=1000` exploratory; verify model converges first; consider parallel via `parallel='multicore'` |
