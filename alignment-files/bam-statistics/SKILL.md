@@ -68,7 +68,7 @@ Mate-overlap handling differs between tools, so **mean depth differs 2x on the s
 |------|-------------------|
 | `samtools depth`, `samtools coverage`, pysam `pileup()`, `mosdepth --fast-mode` | counted twice (16.77x); no overlap option in `coverage` |
 | `samtools depth -s`, `mosdepth` (default) | counted once (8.86x) |
-| `samtools mpileup` | counted once at the default `-Q 13` (8.85x); `-x` disables it (16.75x). The lower-quality mate base is zeroed, so `-Q 0` defeats the removal (16.77x) |
+| `samtools mpileup` | counted once at the default `-Q 13` (8.85x); `-x` disables it (16.75x). The lower-quality mate base is zeroed, so `-Q 0` defeats the removal (16.77x). Its depth column also counts D and N positions (unlike `samtools depth`) |
 | `bcftools mpileup` | counted once in `FORMAT/DP` (`-a FORMAT/DP`) and in the bases used for calling: 8.85x at the default, 16.77x with `-x` or `-Q 0`. `INFO/DP` is 16.77x either way (counted before overlap removal) |
 
 ## samtools flagstat
@@ -264,7 +264,7 @@ mosdepth -t 4 --by exome.bed --thresholds 1,10,20,30,100 --no-per-base sample in
 mosdepth -t 4 --quantize 0:1:10:100: sample input.bam                                # CNV-style bands
 mosdepth -t 4 -f ref.fa sample input.cram                                            # CRAM: needs the reference and a .crai (samtools index input.cram)
 ```
-`mosdepth` excludes unmapped, secondary, QC-fail, and duplicate reads by default (`--flag 1796`); supplementary reads are NOT excluded (use `--flag 3844` to drop them too). Configurable via `--flag`. Memory ~ 4 bytes x longest chrom (1 GB for human chr1, 12+ GB for axolotl). Does not honor base quality; use `samtools depth -q INT` if needed. The summary `total` row covers only contigs that have reads (19000 of 22000 bp, 2.95x against 2.57x from `samtools coverage` / `depth -aa` on a BAM with one read-less contig); `--fast-mode` also counts deletion (D) bases as covered (69.97x vs 68.84x on an amplicon BAM). For a whole-reference mean use `samtools coverage` or `depth -aa`.
+`mosdepth` excludes unmapped, secondary, QC-fail, and duplicate reads by default (`--flag 1796`); supplementary reads are NOT excluded (use `--flag 3844` to drop them too). Configurable via `--flag`. Memory ~ 4 bytes x longest chrom (1 GB for human chr1, 12+ GB for axolotl). Does not honor base quality; use `samtools depth -q INT` if needed. The summary `total` row covers only contigs that have reads (19000 of 22000 bp, 2.95x against 2.57x from `samtools coverage` / `depth -aa` on a BAM with one read-less contig); `--fast-mode` ignores internal CIGAR operations, so deletion (D) and spliced (N) bases count as covered (69.97x vs 68.84x on an amplicon BAM; 49.40x vs 17.67x on an RNA-seq BAM). For a whole-reference mean use `samtools coverage` or `depth -aa`.
 
 ### Depth from BED Regions
 ```bash
@@ -427,7 +427,7 @@ print(f'Min: {min(sizes)}, Max: {max(sizes)}')
 
 ## QC Thresholds Are Assay-Specific
 
-A single "mapping rate > 95%" rule rejects valid ATAC, ChIP, RNA-seq, metagenomics, and aDNA samples. The threshold question is "is this rate normal for this assay?" not "is this rate above 95%?" Values below are literature ranges, not thresholds verified on this machine.
+A single "mapping rate > 95%" rule rejects valid ATAC, ChIP, RNA-seq, metagenomics, and aDNA samples. The threshold question is "is this rate normal for this assay?" not "is this rate above 95%?" The table below is **orientation only**: approximate ranges from common practice, not sourced to a specific study and not checked on this machine's data. Judge a sample against its own assay's pipeline or facility spec.
 
 | Metric | WGS PCR-free | WGS PCR | WES | Targeted panel | Deep panel (UMI) | RNA-seq | scRNA (10x) | ATAC | ChIP | Long-read | aDNA |
 |--------|--------------|---------|-----|----------------|------------------|---------|-------------|------|------|-----------|------|
@@ -483,7 +483,7 @@ A 99% flagstat mapping rate does NOT mean the data is usable. Common false-posit
 
 `samtools stats` reports the IS section for every pair with both mates mapped and splits the pairs into `inward oriented`, `outward oriented` and `other orientation` counts (checked on a synthetic mate-pair library with the proper-pair flag set and unset: `insert size average` 2000.0, 100 outward pairs both times). So:
 - Mate-pair libraries (RF orientation): IS is reported, with outward-oriented counts dominating. The pysam snippets and `qc_report.py` only look at properly paired reads, so they report nothing when the aligner leaves the proper-pair flag unset
-- `qc_report.py` keeps insert sizes below `MAX_INSERT` = 8000 (the `samtools stats` default, `-i`); longer templates are dropped from its mean and median
+- `qc_report.py` drops templates >= `MAX_INSERT` = 8000 from its mean and median; `samtools stats -i 8000` (the default) instead counts them at 8000, so the two means differ on long-insert libraries (3555.5 vs 2286 on a test BAM with four templates of 8000 bp or longer)
 - ATAC-seq: bimodal/multimodal expected (nucleosome ladder ~50/~180/~370 bp). Unimodal suggests poor transposition.
 - RNA-seq: TLEN includes intron span -- mean meaningless
 - Bisulfite (PBAT): orientation reversed; samtools may not flag proper pair
