@@ -123,70 +123,25 @@ A series matrix (`GSE12345_series_matrix.txt.gz`) is a header (sample metadata a
 
 **Goal:** Avoid mixing platforms by detecting SuperSeries structure first.
 
-**Approach:** Download SOFT family file and read `!Series_relation` keys.
+**Approach:** Stream the SOFT family file and read the `!Series_relation` keys in its header (stops at the first `^PLATFORM`; family files can be hundreds of MB).
 
-```python
-import gzip
-import urllib.request
-
-
-def check_super_or_sub_series(gse):
-    prefix = gse[:-3] + 'nnn'
-    url = f'https://ftp.ncbi.nlm.nih.gov/geo/series/{prefix}/{gse}/soft/{gse}_family.soft.gz'
-    urllib.request.urlretrieve(url, f'{gse}.soft.gz')
-    super_of = []
-    sub_of = None
-    with gzip.open(f'{gse}.soft.gz', 'rt', encoding='utf-8', errors='replace') as f:
-        for line in f:
-            if line.startswith('!Series_relation'):
-                if 'SuperSeries of' in line:
-                    super_of.append(line.split('SuperSeries of: ')[1].strip())
-                elif 'SubSeries of' in line:
-                    sub_of = line.split('SubSeries of: ')[1].strip()
-            if line.startswith('^SAMPLE'):
-                break   # Speed: don't read past header
-    return {'super_of': super_of, 'sub_of': sub_of}
-
-
-print(check_super_or_sub_series('GSE346738'))
+```bash
+python scripts/geo_series.py relation GSE346738
 # {'super_of': ['GSE283260', 'GSE346737'], 'sub_of': None}  -> SuperSeries; process subseries separately
-# (checked live 2026-09-19; SuperSeries status drifts as submitters restructure series, re-verify before relying on a fixed example)
+# (checked live 2026-09-21; SuperSeries status drifts as submitters restructure series, re-verify before relying on a fixed example)
 ```
+
+As a library: `from geo_series import check_super_or_sub_series` (returns `{'super_of': [...], 'sub_of': ...}`).
 
 ### Download series matrix with submitter caveat
 
-```python
-import gzip
-import urllib.request
-import pandas as pd
-
-
-def download_series_matrix(gse):
-    prefix = gse[:-3] + 'nnn'
-    url = f'https://ftp.ncbi.nlm.nih.gov/geo/series/{prefix}/{gse}/matrix/{gse}_series_matrix.txt.gz'
-    urllib.request.urlretrieve(url, f'{gse}_matrix.txt.gz')
-    return f'{gse}_matrix.txt.gz'
-
-
-def parse_series_matrix(path):
-    metadata = {}
-    with gzip.open(path, 'rt', encoding='utf-8', errors='replace') as f:
-        for line in f:
-            if line.startswith('!series_matrix_table_begin'):
-                break
-            if line.startswith('!'):
-                key, *vals = line.rstrip('\n').split('\t')
-                metadata[key] = [v.strip('"') for v in vals]
-        expr = pd.read_csv(f, sep='\t', index_col=0, comment='!')
-    # Series matrix values are whatever submitter chose -- check metadata['!Sample_data_processing']
-    return metadata, expr
-
-
-meta, expr = parse_series_matrix(download_series_matrix('GSE123456'))
-print('Sample-level data processing notes:')
-for note in set(meta.get('!Sample_data_processing', [])):
-    print(f'  - {note}')
+```bash
+python scripts/geo_series.py matrix GSE470
+# GSE470: 12625 features x 12 samples; then every distinct !Sample_data_processing note (none for GSE470)
+python scripts/geo_series.py selftest   # offline regression test: non-ASCII fixtures, encoding= on every gzip.open 'rt'
 ```
+
+As a library: `from geo_series import download_series_matrix, parse_series_matrix`; `parse_series_matrix(path)` returns `(metadata, expr)`, where `metadata` maps each `!` header key to its list of values.
 
 ## Reference Files
 
