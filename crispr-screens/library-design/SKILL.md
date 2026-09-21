@@ -29,7 +29,7 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 
 **Before designing anything, stop and confirm the required inputs:** gene list (HGNC symbols or Ensembl IDs), target genome assembly (GRCh38 / GRCm39 / project-specific), screen chemistry (Cas9 / CRISPRi / CRISPRa / Cas12a / BE / PE), and either FANTOM5 CAGE peaks (CRISPRi/a) or coding-exon coordinates (Cas9 KO). If any is missing, ask for it rather than defaulting to Cas9 KO or inventing a gene list from context.
 
-**Deliverable:** library table + oligo synthesis order + expected coverage / cell number / sequencing depth.
+**Deliverable:** library table + oligo synthesis order + expected coverage / cell number / sequencing depth. Oligo layout: `references/oligo-design.md`.
 
 - Python: `crispor.py` (web + CLI) for batch genome-wide guide scoring with CFD+MIT off-target
 - Python: this Skill's own GC-content heuristic (default, always available) or Broad CRISPick / R `crisprScore::getAzimuthScores()` for real Rule Set 2 on-target predictions -- **not** the `azimuth` PyPI package, which is unrunnable Python 2 (see Version Compatibility above)
@@ -46,6 +46,8 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 | Paralog buffering, GI screens | enAsCas12a multiplex | Inzolia, in4mer | 4-guide arrays | Constitutive exons |
 | Variant function, SNV scanning | CBE / ABE | Custom tiling library | Tile editing windows | Editing window pos 4-8 from PAM-distal end |
 | Precise edit, indel-free | Prime editor | Custom PRIDICT-designed | Tile pegRNAs | Anywhere with NGG PAM within 30 nt of edit |
+
+Window functions for the CRISPRi/a rows: `references/crispri-crispra-tss.md`. Library sizes and PAM/enzyme choices: `references/library-catalog-and-pam.md`.
 
 **Off-the-shelf first:** for a new screen in a well-characterized cancer line, use the published Brunello / Dolcetto / Calabrese / Inzolia pool (Addgene) rather than re-designing it; you inherit the community validation and the calibration of MAGeCK / BAGEL2 / Chronos against that library. Cas9 and Cas12a libraries are not interchangeable (different enzyme and PAM); do not mix them in one screen.
 
@@ -132,73 +134,6 @@ def select_independent_guides(candidates_df, n_guides, min_spacing=5, score_col=
     return pd.DataFrame(selected)
 ```
 
-## CRISPRi / CRISPRa TSS Targeting
-
-**Goal:** Position guides relative to the empirical TSS for maximum knockdown (CRISPRi) or activation (CRISPRa).
-
-**Approach:** Resolve TSS from FANTOM5 CAGE peaks (highest-ranked peak per gene; fall back to Ensembl/RefSeq if absent), define the modality-specific window, score candidate spacers in that window with Rule Set 2 plus the Horlbeck/Sanson CRISPRi/a-tailored rules, and select 5-6 guides per gene biased toward the window center.
-
-```python
-def crispri_window(tss_coord, strand='+'):
-    '''Dolcetto convention: search -50 to +300 around the FANTOM5 highest-rank CAGE peak.
-    Reason: Sanson 2018 found +25 to +75 nt downstream of the TSS optimal for CRISPRi,
-    so rank candidates toward that band; the search is relaxed outward to fill the
-    per-gene guide quota when poorly-annotated TSSs leave too few candidates.'''
-    if strand == '+':
-        return (tss_coord - 50, tss_coord + 300)
-    return (tss_coord - 300, tss_coord + 50)
-
-def crispra_window(tss_coord, strand='+'):
-    '''Calabrese convention: -150 to -75 upstream of TSS.
-    Reason: dCas9-VP64 (and SAM, SunTag) activate maximally when bound
-    just upstream of Pol II loading. Horlbeck v2 CRISPRa uses -550 to -25
-    (broader, lower per-guide signal). For SAM, prefer Calabrese tightness;
-    for SunTag, Horlbeck width is acceptable.
-    Caveat: at only 75bp wide, this window routinely fails to contain a full
-    6-guide quota's worth of PAM sites passing the GC/poly-T filter -- budget
-    for shortfalls (report actual count per gene rather than padding with
-    out-of-window guides) or widen to Horlbeck v2 when the quota must be met.'''
-    if strand == '+':
-        return (tss_coord - 150, tss_coord - 75)
-    return (tss_coord + 75, tss_coord + 150)
-```
-
-**Critical nuance:** Cell-type-specific TSSs differ from the FANTOM5 consensus in ~15% of genes. For tissue-specific screens (e.g., neuron, hepatocyte), re-derive TSSs from a matched CAGE / GRO-seq / PRO-seq dataset before locking guide positions, or knockdown efficiency drops several-fold. The single most common cause of "weak" CRISPRi hits is mis-positioned guides against an alternative TSS: dCas9-KRAB knockdown is maximal within +/-100 bp of the actual Pol II loading site, and canonical Ensembl/RefSeq annotation can be off by 1-10 kb for genes with broad or non-canonical promoters. Symptom: "easy" essentials (RPS, RPL, EIF) show normal dropout but newer genes do not, and the library validates poorly against CEGv2.
-
-## Genome-Wide Library Selection
-
-| Library | Year | Modality | Size (genes x guides) | sgRNA rules | Notable |
-|---------|------|----------|-----------------------|-------------|---------|
-| GeCKOv2 | 2014 | Cas9 KO | ~19k x 6 (~123k) | Exon position + off-target specificity (predates Rule Set 1) | Older; legacy datasets still use it |
-| Avana | 2016 | Cas9 KO | 110,257 as published; DepMap screens a ~4-guide subset (Meyers 2017: 70,086 after filtering, 17,670 genes) | Rule Set 1 | Still the Broad's primary Cas9 library; CERES->Chronos changed in 2021, not the library |
-| Brunello | 2016 | Cas9 KO | ~19k x 4 (~77k) | Rule Set 2 + CFD | Modern standard for new screens |
-| TKOv3 | 2017 | Cas9 KO | ~18k x 4 (~71k) | Hart on/off-target | Bagel/BAGEL2-optimized |
-| Humagne | 2020 | enAsCas12a | ~19.8k x 1 dual-guide construct (~20k per set) | enAsCas12a rules | Compact Cas12a sets C and D |
-| Horlbeck CRISPRi v2 | 2016 | dCas9-KRAB | ~18k x 5 (~104k) | Horlbeck CRISPRi rules | First-gen, still widely used |
-| Dolcetto | 2018 | dCas9-KRAB | ~19k x 3 per set (114,061 across Sets A+B) | Horlbeck + Rule Set 2 | Modern CRISPRi standard |
-| Horlbeck CRISPRa | 2016 | dCas9-VP64 | ~18k x 5 (~104k) | Horlbeck CRISPRa rules | Original CRISPRa |
-| Calabrese | 2018 | dCas9-VP64 | ~18.9k x 3 per set (113,238 across Sets A+B) | Tight TSS window | Modern CRISPRa standard |
-| Inzolia | 2024 | enAsCas12a | ~49k arrays: 19,687 genes (2 arrays each) plus ~4,435 paralog pairs | enAsCas12a rules | Paralog-pair multiplex; ~30% smaller than a typical Cas9 library |
-| in4mer | 2024 | Cas12a (4-guide) | Custom | enAsCas12a multiplex | Triple/quadruple KO per cassette |
-
-**dAUC trajectory (essentiality benchmark):** GeCKOv2 < Avana < Brunello/TKOv3 (Doench 2016 + Hart 2017). Moving from 4 to 6 sgRNAs/gene gives diminishing returns; the larger gain is moving from Rule Set 1 to Rule Set 2.
-
-**Cost-coverage tradeoff:** A 77k-guide Brunello at 500x cells/sgRNA needs 38.5M cells in pool, scalable. A 117k-guide Calabrese at 500x needs 59M cells -- often the deciding factor against CRISPRa for difficult-to-grow lines.
-
-## PAM Variants and Alternative Cas Enzymes
-
-| Enzyme | PAM | Spacer length | Best for |
-|--------|-----|---------------|----------|
-| SpCas9 (WT) | NGG | 20 nt | Standard pooled screens; broadest library support |
-| eSpCas9, SpCas9-HF1 | NGG | 20 nt | Lower off-target rate; use for therapeutic-grade nomination |
-| SpCas9-NG | NG | 20 nt | Expanded targeting (~4x coverage); accept lower activity per guide |
-| SpRY | NRN / NYN | 20 nt | Near-PAMless; coverage at every position; ~50% lower per-guide activity |
-| SaCas9 | NNGRRT | 21 nt | AAV-packageable (small ORF); rarely used in pooled screens |
-| AsCas12a, LbCas12a | TTTV | 23 nt | AT-rich regions; staggered cut; lower expression noise |
-| enAsCas12a (DeWeirdt 2021) | Expanded TTTV + several non-canonical | 23 nt | Combinatorial / paralog screens |
-
-**Decision rule:** If the screen requires every possible TSS position (saturation tiling, dense regulatory dissection), use SpRY despite lower activity; otherwise, NGG is best because the on-target predictors were trained on it.
-
 ## Control Guides
 
 A genome-wide library should include:
@@ -221,35 +156,6 @@ A genome-wide library should include:
 
 **Tiling / regulatory dissection:** Dense (every 5-10 bp) CRISPRi or CRISPRa guides across the candidate region; CRISPRi has broader signal width (good for enhancer discovery) but Cas9-indel tiling has sharper resolution (good for pinpointing critical bases). Pair with CRISPR-SURF deconvolution.
 
-## Oligo Design for Pooled Synthesis
-
-**Goal:** Generate the final oligo sequence ready for chip-based synthesis. Vendor limits differ: Twist oligo pools cap at ~300 nt per oligo with no fixed pool size, GenScript's 92K format spans 20-170 nt, and Agilent OLS 244K spans 30-230 nt.
-
-**Approach:** Add subpool PCR primers (so multiple sublibraries can share a synthesis array), the BsmBI/Esp3I overhang for golden-gate cloning into LentiGuide-Puro (Addgene 52963) or LentiCRISPRv2, and append the tracrRNA scaffold if the array length permits.
-
-```python
-def build_oligo(spacer, vector='lentiGuide-Puro', subpool_idx=None):
-    '''Construct final oligo for pooled synthesis.
-
-    LentiGuide-Puro / LentiCRISPRv2 use BsmBI (Esp3I) with these overhangs:
-        forward: 5'-CACCG[spacer]-3'
-        reverse: 5'-AAAC[revcomp(spacer)]C-3'
-    For chip synthesis, the spacer is flanked by subpool-specific PCR primers.'''
-    subpool_fwd = {
-        1: 'GGAAAGGACGAAACACCG',   # subpool 1 forward primer + BsmBI overhang
-        2: 'GAGGCACTGGGCAGGTACCG',
-    }.get(subpool_idx, 'GGAAAGGACGAAACACCG')
-    # First 33 nt of the Chen 2013 sgRNA(F+E) optimized scaffold. NOTE: lentiGuide-Puro (#52963)
-    # and lentiCRISPRv2 (#52961) carry the ORIGINAL scaffold; F+E belongs to lentiCRISPRv2-Opti (#163126).
-    scaffold_short = 'GTTTAAGAGCTATGCTGGAAACAGCATAGCAAG'
-    oligo = subpool_fwd + spacer + scaffold_short
-    if len(oligo) > 200:
-        raise ValueError(f'Oligo length {len(oligo)} exceeds the 200 nt design budget; check the vendor limit')
-    return oligo
-```
-
-**Subpool design:** A large synthesis pool can be partitioned into multiple sublibraries via subpool primers; each sub-PCR amplifies its subpool, allowing one synthesis batch to serve several screens. Typical subpool size: 10k-20k oligos.
-
 ## Library QC After Cloning
 
 | Metric | Target | Failure mode if missed |
@@ -260,31 +166,7 @@ def build_oligo(spacer, vector='lentiGuide-Puro', subpool_idx=None):
 | % zero-count sgRNAs in plasmid pool | <0.5% | Plasmid bottleneck during cloning; re-amplify or re-clone |
 | Replicate Pearson on plasmid pool (between sequencing technical replicates) | >0.99 | Sequencing artifact, not biology |
 
-**Plasmid pool sequencing convention:** 200-500 reads per sgRNA before any biology (i.e. 15-40M reads for a 77k Brunello). This is the baseline against which all downstream depletion is computed; sequencing the plasmid is non-negotiable.
-
-## Failure Modes
-
-### Library skew from PCR bias during amplification
-
-**Trigger:** Amplifying the cloned plasmid pool with too many PCR cycles (>20) or with high-GC-bias polymerase.
-**Mechanism:** GC-extreme guides amplify nonlinearly; high-GC guides dominate, low-GC guides drop out.
-**Symptom:** Gini >0.2 on plasmid pool; sgRNAs with GC <30% systematically depleted.
-**Fix:** Cap PCR at 15 cycles; use Q5 or NEBNext Ultra II (low-bias); sequence at 500x post-amp to confirm Gini.
-
-### Oligo-synthesis dropouts in low-complexity guides
-
-**Trigger:** Chip-synthesis errors at homopolymer runs or guides starting with GGGG.
-**Mechanism:** Synthesis chemistry has higher error rate at low-complexity regions; missing oligos cannot be cloned.
-**Symptom:** Specific guides absent from plasmid pool despite no design-rule violation.
-**Fix:** Re-design replacement guides; for production runs, request 2-3x synthesis depth so dropouts are buffered.
-
-### Polyclonality from high MOI
-
-**Trigger:** Infection at MOI >0.5 to "save cells."
-**Mechanism:** Poisson math: at MOI 0.3, 26% of all cells are infected and 4% carry >=2 sgRNAs (14% of the infected fraction); at MOI 0.5, 39% are infected and 9% carry >=2.
-**Symptom:** Hits include neutral genes that co-infect with true essentials.
-**Fix:** MOI 0.3 strict; titer Cas9-positive cells specifically; re-check by qPCR of integration.
-
+**Plasmid pool sequencing convention:** 200-500 reads per sgRNA before any biology (i.e. 15-40M reads for a 77k Brunello). This is the baseline against which all downstream depletion is computed; sequencing the plasmid is non-negotiable. If a metric misses its target, see `references/failure-modes.md`.
 
 ## Quantitative Thresholds
 
@@ -308,7 +190,16 @@ Windows: Library Chemistry Decision Tree. NTC counts: Control Guides. MIT/CFD cu
 | Paralog gene absent from hit list despite expression | Cas9 single-KO buffering | Switch to Cas12a multiplex; see [[combinatorial-screens]] |
 | Cas12a oligo doesn't cut | Forgot Cas12a's TTTV PAM is 5' of spacer, not 3' | Re-orient: PAM-then-spacer for Cas12a, opposite of Cas9 |
 
-No knockdown from a CRISPRi guide (wrong TSS): see CRISPRi / CRISPRa TSS Targeting. Plasmid-pool skew, synthesis dropouts, polyclonality: see Failure Modes.
+No knockdown from a CRISPRi guide (wrong TSS): see `references/crispri-crispra-tss.md`. Plasmid-pool skew, synthesis dropouts, polyclonality: see `references/failure-modes.md`.
+
+## Reference Files
+
+| File | Read when |
+|------|-----------|
+| `references/crispri-crispra-tss.md` | Designing a CRISPRi or CRISPRa library: TSS window functions and the TSS-resolution caveats |
+| `references/library-catalog-and-pam.md` | Choosing a published genome-wide library, or a non-SpCas9 enzyme / PAM (SpRY, SaCas9, Cas12a) |
+| `references/oligo-design.md` | Laying out oligos for chip synthesis and cloning (BsmBI overhangs, subpool primers, vendor limits) |
+| `references/failure-modes.md` | Diagnosing a freshly cloned pool: PCR skew, synthesis dropouts, polyclonality from high MOI |
 
 ## References
 
