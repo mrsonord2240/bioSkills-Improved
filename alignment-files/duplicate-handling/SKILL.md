@@ -1,6 +1,6 @@
 ---
 name: bio-duplicate-handling
-description: Mark and remove PCR/optical duplicates using samtools fixmate and markdup. Use when preparing alignments for variant calling or when duplicate reads would bias analysis.
+description: Mark and remove PCR/optical duplicates using samtools fixmate and markdup. Use when preparing alignments for variant calling or when duplicate reads would bias analysis. Not for RNA-seq, amplicon or UMI libraries (see the decision table).
 tool_type: cli
 primary_tool: samtools
 license: MIT
@@ -63,7 +63,7 @@ If the BAM came from 10x Cell Ranger / STARsolo and `samtools markdup` produces 
 |------|-------|-----------|---------|-----|-------|
 | `samtools markdup` | Fast | Yes | Yes (`-d`) | Limited (`--barcode-tag` exact-match) | Fast production choice (nf-core/sarek defaults to GATK MarkDuplicates) |
 | `picard MarkDuplicates` | Slow | No | Yes | UmiAware variant (BETA, transcriptome bug) | GATK Best Practices reference |
-| `biobambam2 bammarkduplicates2` | Fastest | Yes | Yes | No | Sanger / 1KGP pipelines |
+| `biobambam2 bammarkduplicates2` | Fast | Yes | Yes | No | Sanger / 1KGP pipelines |
 | `samblaster` | Streaming, fast | No | Optional | No | Pipe directly from aligner; no name sort |
 | `sambamba markdup` | Fast | Yes | Yes | No | Less actively maintained |
 | `fgbio GroupReadsByUmi` + `CallMolecularConsensusReads` | Fast | Yes | n/a | **Best UMI tool** | Graph-based; supports duplex |
@@ -110,7 +110,7 @@ samtools `--use-read-groups` keys on RG ID; Picard's library-aware behavior keys
 
 **Goal:** Mark PCR/optical duplicates so they can be excluded from downstream variant calling and coverage analysis.
 
-**Approach:** Step 0: confirm the assay against the decision table above (stop and hand off if it says NO: bulk RNA-seq, scRNA, UMI, amplicon, long-read native, 16S/ITS). Then name-sort, add mate tags with fixmate, coordinate-sort, and run markdup. The pipeline version avoids intermediate files. `examples/markdup_pipeline.sh` runs the pipeline with the assay gate, `pipefail`, a record-count check and an indexed output: `ASSAY=wgs bash examples/markdup_pipeline.sh in.bam out.bam`.
+**Approach:** Step 0: confirm the assay against the decision table above (stop and hand off if it says NO: bulk RNA-seq, scRNA, UMI, amplicon, long-read native, 16S/ITS). Then name-sort, add mate tags with fixmate, coordinate-sort, and run markdup. The pipeline version avoids intermediate files. `examples/markdup_pipeline.sh` runs the pipeline with the assay gate (it also refuses a BAM that looks spliced, i.e. RNA-seq, whatever `ASSAY` says; `ALLOW_SPLICED=1` overrides), `pipefail`, a record-count check, an indexed output and the flagged percentage: `ASSAY=wgs bash examples/markdup_pipeline.sh in.bam out.bam`.
 
 **Reference (samtools 1.19+):**
 ```bash
@@ -150,7 +150,7 @@ test "$(samtools view -c input.bam)" -gt 0 && \
 test "$(samtools view -c input.bam)" -eq "$(samtools view -c marked.bam)"
 ```
 
-This is ~30% faster than `sort -n | fixmate | sort | markdup` on typical 30x WGS.
+This gives the same flagged counts as the plain `sort -n | fixmate | sort | markdup` chain and skips the intermediate files, but it was not faster in a measured run (800k reads, 4 threads: 6.4 s vs 4.6 s for the plain chain). No speed figure is claimed for 30x WGS.
 
 **Critical pitfall:** `samtools markdup` requires `ms` (mate score, lowercase) and `MC` (mate CIGAR) tags from `fixmate -m`. A re-sort that loses these tags (e.g. a Python round-trip) makes samtools 1.24 stop with an error (see Common Errors), not mark silently. Verify `MC:Z:` is present in the input to markdup.
 
@@ -329,7 +329,7 @@ For UMI libraries (10x scRNA, ctDNA panels, Twist/IDT/Roche UMI capture), naive 
 ### umi_tools dedup
 
 Input must be **coordinate-sorted and indexed**.
-Pass `--paired` for paired-end libraries: without it the mates are deduplicated independently and the output is silently wrong (5689 vs 2805 records on a paired-end capture BAM).
+Pass `--paired` for paired-end libraries: without it the mates are deduplicated independently and the output is silently wrong (5689 vs 2805 records on a paired-end capture BAM). Add `--random-seed=1` for a reproducible output: umi_tools picks among tied reads at random, so without it the count moves by about 1 between runs (5688 or 5689 here).
 
 ```bash
 # 10x / scRNA -- group by cell barcode + UMI. Check the tags exist first: with absent CB/UB,
@@ -337,13 +337,13 @@ Pass `--paired` for paired-end libraries: without it the mates are deduplicated 
 samtools view cellranger_possorted.bam | head -1000 | grep -c 'CB:Z:'    # must be > 0
 umi_tools dedup --stdin=cellranger_possorted.bam --stdout=dedup.bam \
     --extract-umi-method=tag --umi-tag=UB --cell-tag=CB \
-    --per-cell --method=directional
+    --per-cell --method=directional --random-seed=1
 test "$(samtools view -c dedup.bam)" -gt 0
 
 # Bulk UMI, paired-end (UMI in the RX tag)
 samtools sort -o sorted.bam raw.bam && samtools index sorted.bam
 umi_tools dedup --stdin=sorted.bam --stdout=dedup.bam --paired \
-    --extract-umi-method=tag --umi-tag=RX --method=directional
+    --extract-umi-method=tag --umi-tag=RX --method=directional --random-seed=1
 ```
 
 ### fgbio consensus (bulk UMI / ctDNA, best practice for low-VAF detection)
@@ -360,8 +360,9 @@ samtools fixmate -m qn.bam mated.bam        # or: fgbio SetMateInformation -i qn
 fgbio GroupReadsByUmi -i mated.bam -o grouped.bam --strategy=adjacency --edits=1 --raw-tag=RX
 fgbio CallMolecularConsensusReads -i grouped.bam -o consensus.bam --min-reads=1
 
-# Duplex (xGen-Prism, NEBNext duplex): needs --strategy=paired, which writes MI tags with /A /B strand
-# suffixes. CallDuplexConsensusReads on adjacency-grouped reads crashes (StringIndexOutOfBoundsException).
+# Duplex (xGen-Prism, NEBNext duplex): needs --strategy=paired, which requires RX as two UMIs joined by '-'
+# (UMI1-UMI2; a single-UMI RX fails with IllegalArgumentException; single-UMI libraries use the adjacency
+# branch above) and writes MI tags with /A /B strand suffixes. CallDuplexConsensusReads on adjacency-grouped reads crashes (StringIndexOutOfBoundsException).
 fgbio GroupReadsByUmi -i mated.bam -o grouped_duplex.bam --strategy=paired --edits=1 --raw-tag=RX
 fgbio CallDuplexConsensusReads -i grouped_duplex.bam -o duplex.bam --min-reads 1 1 0
 ```
