@@ -6,25 +6,10 @@ Moved out of `SKILL.md`: read when running MAGMA gene-based or gene-set analysis
 
 **Approach:** Pre-format the SNP-to-gene annotation (per-gene SNP membership using a configurable window); run gene-based analysis with `--gene-results`; downstream, test gene sets via `--set-annot`. MAGMA's lambda-correction handles LD via the reference panel.
 
+The three steps (annotate, gene-based, gene-set) are in `examples/magma_genebased.sh`; edit the variables at its top (GWAS file, gene-loc, reference bfile, window) and run:
+
 ```bash
-# Step 1: SNP-to-gene annotation using a 35kb upstream + 10kb downstream window (FUMA default)
-magma --annotate window=35,10 \
-    --snp-loc gwas.snploc \
-    --gene-loc NCBI37.3.gene.loc \
-    --out annot_35_10
-
-# Step 2: Gene-based association (raw GWAS sumstats; multi-model approach)
-magma --bfile g1000_eur \
-    --pval gwas.pval ncol=N \
-    --gene-annot annot_35_10.genes.annot \
-    --out gene_step
-
-# Step 3: Gene-set enrichment via competitive testing (recommended over self-contained)
-magma --gene-results gene_step.genes.raw \
-    --set-annot msigdb_v7.5_C2.gmt \
-    --out gene_set_step
-
-# Inspect: gene_step.genes.out (per-gene Z, p); gene_set_step.gsa.out (per-set p)
+bash examples/magma_genebased.sh   # Step 1 annotate window=35,10 -> Step 2 gene-based -> Step 3 --set-annot (skipped below 200 genes)
 ```
 
 The `--gene-annot` window choice is the dominant methodological lever; 35kb upstream + 10kb downstream is the FUMA recommendation but is not universally accepted. Sensitivity over 0+0, 35+10, and 50+50 is good practice for high-stakes reports.

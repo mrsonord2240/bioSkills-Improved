@@ -159,36 +159,15 @@ Read the file when the task needs that method; the routine flow (decision tree, 
 
 **Approach:** Per-locus, gather evidence per candidate gene from each method; score each evidence stream as pass / fail at the canonical threshold; sum the passing streams; report >= 3 passing as high-confidence.
 
-```r
-library(dplyr)
+Run `scripts/concordance_scoring.R` on a per-locus candidate table (one row per (locus, gene); columns `locus, gene, pip_top_variant, credible_set_purity, coloc_pph4, distance_to_tss, pops_decile_rank, l2g_score, abc_score, encode_re2g_score`; leave a cell `NA` when a stream is unavailable):
 
-# Per-locus candidate gene table; one row per (locus, gene)
-candidates <- read.table('locus_candidates.tsv', header = TRUE, sep = '\t')
-
-# Score each evidence stream against canonical thresholds
-candidates <- candidates %>%
-  mutate(
-    pass_finemap = pip_top_variant > 0.5 & credible_set_purity > 0.5,
-    pass_coloc = coloc_pph4 >= 0.7,
-    pass_distance = distance_to_tss <= 100000,
-    pass_pops = pops_decile_rank == 1,
-    pass_l2g = l2g_score >= 0.5,
-    pass_abc = abc_score >= 0.02 | encode_re2g_score >= 0.5,
-    concordance = pass_finemap + pass_coloc + pass_distance +
-                  pass_pops + pass_l2g + pass_abc,
-    confidence_tier = case_when(
-      concordance >= 5 ~ 'near_certain',
-      concordance >= 4 ~ 'strong',
-      concordance >= 3 ~ 'high',
-      concordance >= 2 ~ 'suggestive',
-      TRUE ~ 'associational_only'))
-
-# Report
-candidates %>%
-  filter(concordance >= 3) %>%
-  arrange(desc(concordance), desc(l2g_score)) %>%
-  select(locus, gene, concordance, confidence_tier, l2g_score, pops_decile_rank, coloc_pph4)
+```bash
+Rscript scripts/concordance_scoring.R locus_candidates.tsv out_prefix
+# writes out_prefix.scored.tsv (every gene, per-stream pass flags, n_streams_available) and
+# out_prefix.concordance.tsv (concordance >= 3 only); thresholds are the canonical ones above
 ```
+
+A stream with no data counts as not passed, so `n_streams_available` shows whether a low tier is negative or absent evidence.
 
 Concordance scoring is conservative; some real causal genes score 2-of-6 because not all evidence streams are available at all loci. Report the per-stream availability alongside the concordance score so readers know whether failure reflects negative evidence or absent evidence.
 
