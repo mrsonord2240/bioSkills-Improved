@@ -47,11 +47,12 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 | Diagnostic finding | Recommended correction |
 |--------------------|------------------------|
 | PCA shows samples cluster by condition, not batch | No correction needed; biology dominates |
-| PCA PC1 separates batches, PC2 separates conditions | Apply ComBat with condition passed as `mod` |
+| PCA PC1 separates batches, PC2 separates conditions | Apply ComBat with condition passed as `mod` (`references/combat.md`) |
 | Batch fully confounded with condition (e.g. all drug in batch 2, all vehicle in batch 1) | Correction will destroy biology; instead redesign next screen with cross-batch balance OR re-analyze with batch in MAGeCK MLE design matrix |
-| Day-0 (pre-perturbation) samples cluster by batch | Strong batch effect; ComBat needed |
+| Day-0 (pre-perturbation) samples cluster by batch | Strong batch effect; ComBat needed (`references/combat.md`) |
 | Endpoint samples cluster by batch but not Day-0 | Selection-driven artifact (FBS lot etc); correct or include batch as covariate |
 | Replicates within a batch are tight; across-batch much wider | Classic batch effect; ComBat |
+| Batch not annotated (unknown technical confounders) | RUV with the NTCs as controls (`references/ruv.md`); or SVA factors as covariates (`references/sva.md`) |
 | Each replicate scatters randomly across PCs | Sample-level noise; no batch correction will help |
 | Cancer-line panel with multiple batches | Use Chronos (built-in batch and CN modeling). Copy-number bias is a separate, batch-like effect per line: apply CN correction (CRISPRcleanR / Chronos) before batch correction |
 | Several screens sharing one library | JACKS (joint efficacy across screens) or Chronos |
@@ -99,111 +100,16 @@ rules, the CEGv2 PR-AUC and essential-dropout validation, and the MAGeCK MLE / C
 For batch correction outside CRISPR screens, keep the method and replace those checks with the
 assay's own.
 
-## ComBat Empirical-Bayes Correction
+## Reference Files
 
-**Goal:** Remove batch-specific location and scale shifts while preserving biological condition signal.
+Read the file for the method you are about to run. Everything else a request needs is in this file.
 
-**Approach:** Log-transform counts, fit ComBat with the condition passed as `mod` (so the model knows which signal to preserve), back-transform. Features ComBat cannot fit are left as raw counts and returned by name.
-
-```python
-import numpy as np
-import pandas as pd
-from combat.pycombat import pycombat
-
-def combat_correct(counts_df, batch_vector, condition_vector=None, verbose=True):
-    '''ComBat on log2 counts with optional condition covariate (`mod`).
-    Preserves condition signal while removing batch shifts.
-    Returns (corrected_counts, uncorrected): the matrix (same rows and columns as the input) and
-    the index of features that were left as raw counts.
-
-    pycombat takes the matrix as a DataFrame (rows = features, columns = samples) and both
-    `batch` and `mod` as plain lists of labels -- it one-hot-encodes `mod` itself, so passing a
-    pre-encoded array fails inside pycombat.
-
-    ComBat divides each feature by its pooled residual variance after batch (and `mod`) are
-    regressed out. A feature with none left -- constant in every batch, or fully explained by
-    batch + condition (e.g. counts 0,0,1,1 in each batch with condition 0,0,1,1) -- corrupts the
-    shared empirical-Bayes prior, with no exception and exit code 0. Depending on the data the
-    result is an all-NaN matrix (568,720 of 568,720 values on real TKOv3 counts) or the feature
-    silently collapsing to a constant with no NaN at all. The pre-fit filter below is what
-    prevents both; the NaN check after the fit is only a backstop. A feature that is constant in
-    ONE batch but varies in another is safe and is corrected.
-    '''
-    data = pd.DataFrame(np.log2(counts_df.values + 1),
-                        index=counts_df.index, columns=counts_df.columns)
-
-    # Pre-fit filter: residual sum of squares after regressing out the design pycombat will use.
-    design = [pd.get_dummies(pd.Series(list(batch_vector)), dtype=float)]
-    if condition_vector is not None:
-        design.append(pd.get_dummies(pd.Series(list(condition_vector)), drop_first=True, dtype=float))
-    X = pd.concat(design, axis=1).to_numpy()
-    resid = data.values - data.values @ (X @ np.linalg.pinv(X))
-    usable = pd.Series((resid ** 2).sum(axis=1) > 1e-8, index=data.index)   # not == 0: round-off
-    uncorrected = data.index[~usable]
-    if verbose and len(uncorrected):
-        print(f'ComBat: {len(uncorrected)} features have no variance left after batch and condition; '
-              f'returned as raw counts (see the `uncorrected` return value)')
-
-    if condition_vector is not None:
-        corrected = pycombat(data[usable], list(batch_vector), mod=list(condition_vector))
-    else:
-        corrected = pycombat(data[usable], list(batch_vector))
-
-    # Backstop only -- fail loudly rather than pass a dead matrix on.
-    if corrected.isna().any().any():
-        raise ValueError('ComBat returned NaN values despite the pre-fit filter; do not use the '
-                         'output. Inspect the design (batch/condition labels) and the count matrix.')
-
-    out = pd.DataFrame(np.power(2, corrected.values) - 1,
-                       index=corrected.index, columns=corrected.columns).clip(lower=0)
-    return out.reindex(counts_df.index).fillna(counts_df), uncorrected   # dropped features keep raw counts
-```
-
-Run `combat_correct()` only when the diagnostic says batch dominates; on a batch-free design ComBat has nothing to remove and adds noise. Keep the `uncorrected` index and flag those features (or exclude them) in hit calling: they still carry their batch effect. Model them with batch as a covariate instead ("Batch as Explicit Covariate" below).
-
-**Critical caveat:** ComBat assumes batch effects are linear shifts of mean and variance in log space. Non-linear effects (e.g., gene-specific batch sensitivity) remain. Always re-check PCA after correction to confirm batches now overlap.
-
-## RUV (Remove Unwanted Variation)
-
-**Goal:** Identify hidden batch sources via control sgRNAs whose true signal is known.
-
-**Approach:** Designate non-targeting controls as "negative controls" (assumed unchanged); RUV decomposes their variance into unwanted factors, then subtracts these from all data.
-
-```r
-library(RUVSeq)
-# counts_df: rows = sgRNAs, columns = samples
-# RUVg's SeqExpressionSet method takes cIdx as control ROWNAMES (character), not positions;
-# which() returns integers and fails S4 dispatch here (the matrix method would accept them).
-ntc_rownames <- rownames(counts_df)[rownames(counts_df) %in% ntc_sgrna_names]
-stopifnot(length(ntc_rownames) > 0)
-seqset <- newSeqExpressionSet(counts = as.matrix(counts_df))
-ruv_corrected <- RUVg(seqset, cIdx = ntc_rownames, k = 2)  # k = 2 unwanted factors
-# Two outputs. The W factors are what goes into a downstream model (MAGeCK MLE design matrix,
-# edgeR/DESeq2 design); normCounts() is the adjusted matrix for PCA and visual checks.
-W <- pData(ruv_corrected)          # W_1, W_2: the estimated unwanted factors, one column per k
-corrected_counts <- normCounts(ruv_corrected)
-```
-
-**When to use:** RUV preferred over ComBat when batches are not annotated (e.g., unknown technical confounders). Worse than ComBat when batch is known and well-annotated; ComBat is more direct.
-
-## SVA (Surrogate Variable Analysis)
-
-**Goal:** Estimate unknown latent factors that may confound the screen.
-
-**Approach:** SVA computes surrogate variables that capture variance not explained by known biological factors; these can then be added to the MAGeCK MLE design matrix as covariates.
-
-```r
-library(sva)
-# counts_df: rows = sgRNAs, columns = samples
-mod <- model.matrix(~ condition, data = metadata)
-mod0 <- model.matrix(~ 1, data = metadata)
-sv_obj <- sva(as.matrix(counts_df), mod, mod0)
-n_sv <- sv_obj$n.sv  # number of surrogate variables
-# Add to design matrix for MAGeCK MLE
-design_mat <- cbind(mod, sv_obj$sv)
-```
-
-**Use case:** When the screen has clear biological signal (e.g. essentiality recovery passes) but small effect sizes are hidden by noise; SVA-discovered latent factors as covariates can recover them.
+| File | Read when |
+|------|-----------|
+| `references/combat.md` | Batches are annotated, at least 3 samples per batch, and the diagnostic says batch dominates: `combat_correct()` (empirical Bayes, condition passed as `mod`) |
+| `references/ruv.md` | Batch sources are unknown but the library has non-targeting controls: `RUVg` unwanted factors |
+| `references/sva.md` | Latent confounders are suspected and surrogate variables are wanted as design-matrix covariates |
+| `references/ntc-anchored-normalization.md` | The library has at least 500 NTCs and per-sample NTC scaling is wanted |
 
 ## Batch as Explicit Covariate (Preferred for MAGeCK MLE / Chronos)
 
@@ -242,23 +148,6 @@ identical input. Fix `--permutation-round` (higher = more stable, linearly slowe
 value, or treat borderline FDRs as borderline.
 
 **Why this is preferred:** ComBat shifts counts before testing; the MLE-with-covariates approach correctly propagates uncertainty from the batch term into the condition beta's standard error. ComBat-then-test pretends the corrected counts are noise-free, biasing FDR.
-
-## Control-Sgrna Anchored Normalization
-
-**Goal:** Use non-targeting controls as the per-sample reference so batch shifts cancel.
-
-**Approach:** Scale each sample so its NTC sgRNAs have a constant median. Subsequent fold changes are relative to NTCs in each sample, automatically batch-controlling.
-
-```python
-def ntc_anchored_normalize(counts_df, ntc_sgrna_names, target_median=1000):
-    '''Scale each sample so its NTC median is target_median. Subsequent LFC is NTC-anchored.'''
-    is_ntc = counts_df.index.isin(ntc_sgrna_names)
-    ntc_medians = counts_df.loc[is_ntc].median(axis=0)
-    scale_factors = target_median / ntc_medians.replace(0, np.nan)
-    return counts_df * scale_factors, scale_factors
-```
-
-**Critical:** Requires ≥500 NTCs in the library (see [[library-design]]). With fewer, the NTC median is unstable and amplifies noise rather than removing batch; fall back to median normalization.
 
 ## When NOT to Correct
 
