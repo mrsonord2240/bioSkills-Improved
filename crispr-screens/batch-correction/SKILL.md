@@ -63,32 +63,11 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 
 **Approach:** Run PCA on log10(counts+1); fit ANOVA decomposing variance into batch and condition components; report variance explained.
 
-```python
-import pandas as pd
-import numpy as np
-from sklearn.decomposition import PCA
-from scipy import stats
-
-def batch_diagnostic(counts_df, metadata_df, batch_col='batch', condition_col='condition'):
-    '''Variance decomposition: report fraction of PC1/PC2 variance attributable to batch vs condition.'''
-    log_counts = np.log10(counts_df + 1).T  # samples as rows
-    pca = PCA(n_components=5)
-    pcs = pca.fit_transform(log_counts)
-    out = pd.DataFrame({
-        'PC': range(1, 6),
-        'var_explained': pca.explained_variance_ratio_,
-    })
-    pc_df = pd.DataFrame(pcs, columns=[f'PC{i+1}' for i in range(5)], index=counts_df.columns).join(metadata_df)
-    for i in range(5):
-        pc = pc_df[f'PC{i+1}']
-        f_b, p_b = stats.f_oneway(*[pc[pc_df[batch_col] == b] for b in pc_df[batch_col].unique()])
-        f_c, p_c = stats.f_oneway(*[pc[pc_df[condition_col] == c] for c in pc_df[condition_col].unique()])
-        out.loc[i, 'batch_F'] = f_b
-        out.loc[i, 'batch_p'] = p_b
-        out.loc[i, 'cond_F'] = f_c
-        out.loc[i, 'cond_p'] = p_c
-    return out
+```bash
+python scripts/batch_diagnostic.py counts.txt metadata.txt --batch-col batch --condition-col condition
 ```
+
+Prints PC1-PC5 with variance explained and the ANOVA F and p for batch and for condition, then the PC1 batch F / condition F ratio. From Python: `from batch_diagnostic import batch_diagnostic` (with `scripts/` on the path).
 
 **Interpretation:** If PC1 has batch F-stat > condition F-stat by 10x, batch is dominating and correction is warranted. If condition dominates PC1, no correction needed.
 
