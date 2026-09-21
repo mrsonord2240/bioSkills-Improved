@@ -75,41 +75,19 @@ Each is buffered: loss of one is tolerated; loss of both is lethal.
 
 **Approach:** From per-pair and per-singleton fitness data, compute GI = observed_double_LFC - (single_A_LFC + single_B_LFC). Synthetic lethal: GI < threshold (more depleted than additive). Synthetic rescue: GI > threshold (less depleted than additive).
 
-```python
-import pandas as pd
-import numpy as np
-from scipy.stats import zscore
-
-def gi_score(paired_lfc_df, single_lfc_df):
-    '''Score genetic interactions from paired vs single LFCs.
-
-    paired_lfc_df: rows = paired-KO; columns = ['gene_A', 'gene_B', 'lfc']
-    single_lfc_df: rows = single-KO; columns = ['gene', 'lfc']
-    (both files use the same 'lfc' column name -- see examples/gi_scoring.py)
-    '''
-    single = dict(zip(single_lfc_df['gene'], single_lfc_df['lfc']))
-    df = paired_lfc_df.copy()
-    df['single_A_lfc'] = df['gene_A'].map(single)
-    df['single_B_lfc'] = df['gene_B'].map(single)
-    df['expected_additive'] = df['single_A_lfc'] + df['single_B_lfc']
-    df['gi_score'] = df['lfc'] - df['expected_additive']
-    df = df.dropna(subset=['gi_score'])          # a single missing singleton would NaN every z-score
-    df['gi_z'] = zscore(df['gi_score'])
-    df['gi_class'] = np.where(df['gi_z'] < -2, 'synthetic_lethal',
-                                np.where(df['gi_z'] > 2, 'synthetic_rescue', 'no_interaction'))
-    return df.sort_values('gi_z')
-```
+Run `examples/gi_scoring.py` (reads `paired_lfc.tsv` = `cassette_id, gene_A, gene_B, lfc` and `single_lfc.tsv` = `gene, lfc`; both files use the column name `lfc`). It aggregates cassettes to pairs, drops pairs with a missing singleton (one NaN would otherwise NaN every z-score), computes `gi_score = lfc - (single_A_lfc + single_B_lfc)`, z-normalizes across pairs, and classifies at z < -2 / z > 2.
 
 **Interpretation:**
 - GI z-score < -2: Synthetic lethal (double-KO more lethal than expected) -- candidate drug target combinations
 - GI z-score > 2: Synthetic rescue (double-KO less lethal than expected) -- compensatory pathway / paradoxical hit
 - GI z-score -1 to 1: No interaction; effects are additive
+- **Minimum pair count:** the z-score is normalized against the tested pairs themselves, so a small set gives an unstable null and the planted hits inflate the SD they are measured against. Use the z cutoff only with dozens of tested pairs (>= ~20-30) in which interactions are a small minority. For a handful of specific pairs, rank by raw `gi_score` instead (a z-score cannot reach |2| at all with 5 or fewer pairs). Checked on synthetic data (2 planted GI = -2.5 pairs, null GI SD 0.4, 200 reps): the z < -2 cutoff missed 393/400 planted hits at N=9, 89/400 at N=12, 0/400 at N >= 20; raw `gi_score` ranking put both planted pairs first at N=9.
 
 ## Run Combinatorial Screen Analysis (MAGeCK MLE with Interaction Indicator)
 
 **Goal:** Use MAGeCK MLE to estimate the effect of each gene independently and the additional effect when both genes are simultaneously perturbed.
 
-**Approach:** Design matrix encodes single-A, single-B, double-AB conditions; the `interaction` column is set to 1 only for double-KO samples. The resulting beta for that column captures the extra effect beyond the sum of single-gene betas. Note: MAGeCK MLE does not natively perform a formal interaction-significance test, but the `interaction|beta` and `|fdr` columns serve as the GI estimate; for formal interaction testing, compute GI = observed_double_lfc - (single_A_lfc + single_B_lfc) explicitly (see GI scoring section below).
+**Approach:** Design matrix encodes single-A, single-B, double-AB conditions; the `interaction` column is set to 1 only for double-KO samples. The resulting beta for that column captures the extra effect beyond the sum of single-gene betas. Note: MAGeCK MLE does not natively perform a formal interaction-significance test, but the `interaction|beta` and `|fdr` columns serve as the GI estimate; for formal interaction testing, compute GI = observed_double_lfc - (single_A_lfc + single_B_lfc) explicitly (see Genetic Interaction (GI) Scoring above).
 
 ```bash
 # Design matrix encoding double-KO as a separate "interaction" indicator
@@ -144,7 +122,7 @@ mageck mle \
 | `interaction|beta` | Additional effect under joint perturbation beyond sum of singles |
 | `interaction|p-value`, `|fdr` | Significance vs zero |
 
-A significantly negative `interaction|beta` is synthetic lethal; positive is synthetic rescue. For formal GI hypothesis testing, prefer the explicit GI scoring approach (next section) over MAGeCK MLE interpretation, since MAGeCK MLE does not validate the additive null.
+A significantly negative `interaction|beta` is synthetic lethal; positive is synthetic rescue. For formal GI hypothesis testing, prefer the explicit GI scoring approach (Genetic Interaction (GI) Scoring, above) over MAGeCK MLE interpretation, since MAGeCK MLE does not validate the additive null.
 
 **`interaction|fdr` is not reproducible across reruns.** MAGeCK MLE's FDR is permutation-based and exposes no `--seed` flag: two consecutive `mageck mle` runs on byte-identical count/design-matrix inputs produced different `interaction|fdr` for 39 of 40 genes, while `interaction|beta` point estimates stayed bit-identical (checked on MAGeCK 0.5.9.5). Treat `interaction|beta` sign/magnitude as the stable signal; do not report a specific `interaction|fdr` value as reproducible, and use the deterministic GI z-score method above for any significance claim that must hold across reruns.
 
