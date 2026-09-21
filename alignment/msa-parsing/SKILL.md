@@ -1,6 +1,6 @@
 ---
 name: bio-alignment-msa-parsing
-description: Parse and analyze multiple sequence alignments using Biopython. Extract sequences, identify conserved regions, analyze gaps, work with annotations, and manipulate alignment data for downstream analysis. Use when parsing or manipulating multiple sequence alignments.
+description: Parse and analyze multiple sequence alignments using Biopython. Extract sequences, identify conserved regions, analyze gaps, work with annotations, and manipulate alignment data for downstream analysis, including sequence weights, Neff, MI-APC coevolution and MUSCLE5 column confidence. Use when parsing or manipulating multiple sequence alignments.
 tool_type: python
 primary_tool: Bio.AlignIO
 license: MIT
@@ -69,9 +69,11 @@ def select_columns(alignment, keep, upper=None):
     letter_annotations and column_annotations (so Stockholm GC/GR lines survive).
     upper=True/False also maps "." -> "-" (and upper-cases when True); None leaves sequences as is.'''
     keep = list(keep)
+    full = keep == list(range(alignment.get_alignment_length()))
     records = []
     for record in alignment:
-        seq = ''.join(str(record.seq)[i] for i in keep)
+        text = str(record.seq)  # once per record: str(record.seq) inside the join would be quadratic
+        seq = text if full else ''.join(text[i] for i in keep)
         if upper is not None:
             seq = (seq.upper() if upper else seq).replace('.', '-')
         new = SeqRecord(Seq(seq), id=record.id, name=record.name, description=record.description,
@@ -153,6 +155,8 @@ def find_conserved_positions(alignment, threshold=0.8, weights=None):
     weights = np.ones(len(alignment)) if weights is None else np.asarray(weights, dtype=float)
     if len(weights) != len(alignment):
         raise ValueError('weights must have one value per sequence')
+    if not weights.sum() > 0:
+        raise ValueError('weights must sum to a positive value')
     conserved = []
     for col_idx in range(alignment.get_alignment_length()):
         counts = Counter()
@@ -248,7 +252,7 @@ Columns exhibiting **both** high gap fraction AND low conservation are the stron
 
 ```bash
 muscle -align seqs.fa -stratified -output ens.efa      # ensemble of replicate alignments
-muscle -maxcc ens.efa -output maxcc.afa                # stderr ends "best <name>", e.g. acb.2
+muscle -maxcc ens.efa -output maxcc.afa                # stderr line "CC min .., best <name>", e.g. acb.2
 muscle -addconfseq ens.efa -output ens_cc.efa          # adds per-column confidence (CC) rows
 python examples/muscle5_column_confidence.py ens_cc.efa acb.2 0.9 masked.fa
 ```
@@ -276,6 +280,8 @@ def consensus_sequence(alignment, threshold=0.5, gap_char='-', ambiguous=None, w
     weights = np.ones(len(alignment)) if weights is None else np.asarray(weights, dtype=float)
     if len(weights) != len(alignment):
         raise ValueError('weights must have one value per sequence')
+    if not weights.sum() > 0:
+        raise ValueError('weights must sum to a positive value')
     consensus = []
     for col_idx in range(alignment.get_alignment_length()):
         counts = Counter()
@@ -341,8 +347,13 @@ def filter_by_gap_content(alignment, max_gap_fraction=0.1):
     return _require_kept(kept, alignment, f'max_gap_fraction={max_gap_fraction} (lowest fraction {min(fractions):.2f})')
 
 def remove_duplicates(alignment):
-    seen = set()
-    kept = [r for r in alignment if not (str(r.seq) in seen or seen.add(str(r.seq)))]
+    # Rows are compared after normalisation (AC-GT, AC.GT and ac-gt are one sequence); the original records are kept.
+    seen, kept = set(), []
+    for record, normalized in zip(alignment, normalize_alignment(alignment)):
+        key = str(normalized.seq)
+        if key not in seen:
+            seen.add(key)
+            kept.append(record)
     return _require_kept(kept, alignment, 'remove_duplicates')
 ```
 
@@ -359,7 +370,7 @@ for record in alignment:
 ss_cons = alignment.column_annotations.get('secondary_structure')
 ```
 
-GC SS_cons (consensus secondary structure), GC RF (reference coordinates), and GS metadata (organism, taxonomy) survive read/write through the `'stockholm'` format string but are silently discarded when writing to FASTA, PHYLIP, or NEXUS. Keep a Stockholm master copy if annotations matter for downstream analysis. `select_columns`, `remove_gappy_columns` and the filters above keep them; hand-built `SeqRecord(Seq(new_seq), id=...)` loops do not.
+GC SS_cons (consensus secondary structure), GC RF (reference coordinates), and GS metadata (organism, taxonomy) survive read/write through the `'stockholm'` format string but are silently discarded when writing to FASTA, PHYLIP, or NEXUS. Biopython 1.88 keeps only the tags it recognises even on a Stockholm round trip: on the Pfam PF00042 seed `#=GC seq_cons` and `#=GR pAS` were dropped (`#=GR AS` and `#=GS AC` kept, a `#=GS DE` line added), so keep the original file as the master copy if annotations matter for downstream analysis. `select_columns`, `remove_gappy_columns` and the filters above keep them; hand-built `SeqRecord(Seq(new_seq), id=...)` loops do not.
 
 ## Position Mapping
 
@@ -388,7 +399,7 @@ residue_index_at_column_100 = aln_to_seq[100]
 
 ### Mapping Alignment Columns to PDB Residues
 
-A column-to-PDB mapping requires THREE coordinate systems: alignment column -> SEQRES residue (ungapped FASTA) -> ATOM residue (resolved structure). The SEQRES-to-ATOM map is non-trivial because PDB structures have unmodelled loops, N-terminal tags, engineered mutations, and seleno-substitutions. Conservation scores mapped via the bare alignment-to-SEQRES path will be off-by-many residues whenever the structure has missing density. Even the simplest case is offset: PDB 1MBN numbers residues from the first Val, so His93 is UniProt P02185 residue 94 (0-based index 93, checked). For SEQRES/ATOM extraction and the authoritative `_pdbx_poly_seq_scheme` mapping, see `structural-biology/structure-navigation`.
+A column-to-PDB mapping requires THREE coordinate systems: alignment column -> SEQRES residue (ungapped FASTA) -> ATOM residue (resolved structure). The SEQRES-to-ATOM map is non-trivial because PDB structures have unmodelled loops, N-terminal tags, engineered mutations, and seleno-substitutions. Conservation scores mapped via the bare alignment-to-SEQRES path will be off-by-many residues whenever the structure has missing density. Even the simplest case is offset: PDB 1MBN numbers residues from the first Val, so His93 is UniProt P02185 residue 94 (0-based index 93, checked). For SEQRES/ATOM extraction, `missing_residues`, and mapping by residue number (auth_seq_id) or SIFTS rather than string index, see `structural-biology/structure-navigation` (sections "Reading the Declared (SEQRES) Sequence and Locating Gaps" and "Reading mmCIF with an Explicit Numbering Scheme").
 
 ## Sequence Weighting and Neff
 
@@ -460,11 +471,11 @@ def mi_matrix_apc(alignment):
 
 `examples/mi_apc.py` enforces the guard below itself: it computes Neff/L, warns and returns raw MI when the guard fails, and prints a column-shuffled null (each column permuted independently, best of 5 shuffles) so a ranking that does not beat it is visibly noise. Run it as `python examples/mi_apc.py alignment.sto`.
 
-**Apply APC only when L > 100 and Neff/L > 1.** APC subtracts each column-pair's product of column-average MIs. For alignments with <100 columns, the column-averages are noisy estimates dominated by their constituent column-pairs, and APC removes signal proportional to noise; empirically on Pfam alignments <100 columns, APC-corrected MI underperforms raw MI for contact prediction (Cocco et al 2018 Rep Prog Phys review). Below the guard, raw MI plus a phylogenetic-distance threshold is more reliable, and shallow alignments give noise either way: on the PF00042 seed (L = 141, Neff/L = 0.47) the best MI-APC pair (0.603 bits) scored below the best column-shuffled pair (0.616), and none of the top 30 pairs were 1MBN contacts. For production-grade contact prediction, switch to plmDCA (Ekeberg et al 2013 Phys Rev E) or EVcouplings (Hopf et al 2017 Nat Biotechnol), which auto-skip APC when depth is insufficient. APC-corrected MI scales to a few hundred columns; deeper analyses need approximate likelihood methods.
+**Apply APC only when L > 100 and Neff/L > 1.** APC subtracts each column-pair's product of column-average MIs. For alignments with <100 columns, the column-averages are noisy estimates dominated by their constituent column-pairs, and APC removes signal proportional to noise; treat APC as unreliable there (this is reasoning from the estimator, not a measured, cited result). Below the guard, raw MI plus a phylogenetic-distance threshold is more reliable, and shallow alignments give noise either way: on the PF00042 seed (L = 141, Neff/L = 0.47) the best MI-APC pair (0.603 bits) scored below the best column-shuffled pair (0.616), and none of the top 30 pairs were 1MBN contacts (top-30 contact precision: raw MI 0.13, MI-APC 0.00, random baseline 0.09, so both are noise). For production-grade contact prediction, switch to plmDCA (Ekeberg et al 2013 Phys Rev E) or EVcouplings (Hopf et al 2017 Nat Biotechnol), which auto-skip APC when depth is insufficient. Background on APC and DCA: Cocco et al 2018 (review). APC-corrected MI scales to a few hundred columns; deeper analyses need approximate likelihood methods.
 
 ## A2M / A3M Conventions
 
-A2M (HMMER) and A3M (HHsuite, ColabFold) encode insert vs match columns via case (uppercase = match column residue, lowercase = insert). A3M does not pad inserts across sequences and must be reformatted to A2M before loading as a rectangular MSA. Match-only extraction: `examples/a2m_a3m_io.py`. See `alignment/alignment-io` A2M / A3M Conventions section for the full character table, BioPython load pattern, and the `reformat.pl` reference-sequence pitfall.
+A2M (HMMER) and A3M (HHsuite, ColabFold) encode insert vs match columns via case (uppercase = match column residue, lowercase = insert). A3M does not pad inserts across sequences and must be reformatted to A2M before loading as a rectangular MSA. Match-only extraction: `examples/a2m_a3m_io.py`, which reads with `SeqIO.parse` because HMMER 3.4 `hmmalign --outformat a2m` writes UNPADDED rows (no `.` characters; `AlignIO.read(..., 'fasta')` raises "Sequences must all be the same length"), whereas HH-suite pads. To get a rectangle from HMMER A2M use `pyhmmer.easel.MSAFile(path, format='a2m')`. See `alignment/alignment-io` A2M / A3M Conventions section for the full character table, BioPython load pattern, and the `reformat.pl` reference-sequence pitfall.
 
 ## Streaming Large Alignments
 
@@ -478,6 +489,7 @@ For Pfam-scale streaming (multi-gigabyte Stockholm or A3M databases that exceed 
 | Unequal sequence lengths | Invalid MSA | Ensure all sequences same length |
 | `ValueError: ... removes all N sequences` | Filter threshold too strict | Loosen the threshold; the message names the lowest gap fraction |
 | `ValueError: every column contains a gap` | `henikoff_weights` on an all-gappy alignment | Trim gappy columns or use pyhmmer `compute_weights` |
+| `ValueError: weights must sum to a positive value` | all-zero `weights=` (e.g. from a degenerate weighting) | Recompute the weights; a 0/0 would otherwise return an all-placeholder consensus |
 | Empty Counter | All gaps in column | Handled: consensus returns the gap character, conservation skips the column |
 
 ## Related Skills
