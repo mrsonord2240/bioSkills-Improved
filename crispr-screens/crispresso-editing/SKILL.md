@@ -17,6 +17,17 @@ Before using code patterns, verify installed versions match. If versions differ:
 
 If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
 
+Install: `conda install -c bioconda crispresso2` (not on PyPI; bioconda has no win-64 build, so on Windows use the
+`pinellolab/crispresso2` Docker image). Plotting/parsing helpers: `pip install pandas matplotlib seaborn`.
+
+Required inputs:
+- FASTQ files (paired-end recommended, single-end accepted)
+- Amplicon reference sequence, primer-trimmed (do NOT include primer regions)
+- Guide protospacer sequence (20 nt; PAM not included)
+- For HDR: expected edited amplicon sequence
+- For BE: target nucleotide conversion direction (C->T for CBE; A->G for ABE)
+- For PE: pegRNA spacer + extension (RTT+PBS) + scaffold sequences
+
 ## CRISPResso2 Editing Quantification
 
 **"Quantify CRISPR editing from my amplicon sequencing"** -> Align amplicon reads against the reference, classify each read as unmodified / NHEJ / HDR / base-edited / prime-edited within the quantification window, and report per-edit-type frequencies, indel size distributions, allele-frequency tables, and substitution-position profiles.
@@ -42,7 +53,7 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 | Prime editor (templated edit) | `CRISPResso` with pegRNA parameters | `--prime_editing_pegRNA_spacer_seq`, `--prime_editing_pegRNA_extension_seq`, `--prime_editing_pegRNA_scaffold_seq` |
 
 **Fails when:**
-- Pooled-amplicon mode applied to amplicons that share primer sequences -- reads get misassigned.
+- Pooled-amplicon mode applied to amplicons that share primer sequences -- reads get assigned to whichever amplicon comes first. Design primers with >=3-bp distinguishing regions or use unique molecular identifiers.
 - Base editor mode without specifying `--conversion_nuc_from`/`--conversion_nuc_to` -- defaults assume CBE (C->T); ABE runs will misclassify.
 - Prime editor mode without `--prime_editing_pegRNA_extension_seq` -- the RTT template is missing, no edit is detectable.
 
@@ -87,11 +98,11 @@ CRISPResso \
     --name sample_id
 
 # Outputs:
-#   sample_results/<name>/CRISPResso_mapping_statistics.txt
-#   sample_results/<name>/CRISPResso_quantification_of_editing_frequency.txt
-#   sample_results/<name>/Alleles_frequency_table.zip
-#   sample_results/<name>/3a.<ref>.Indel_size_distribution.pdf
-#   sample_results/<name>/4b.<ref>.Insertion_deletion_substitution_locations.pdf
+#   sample_results/CRISPResso_on_<name>/CRISPResso_mapping_statistics.txt
+#   sample_results/CRISPResso_on_<name>/CRISPResso_quantification_of_editing_frequency.txt
+#   sample_results/CRISPResso_on_<name>/Alleles_frequency_table.zip
+#   sample_results/CRISPResso_on_<name>/3a.Indel_size_distribution.pdf
+#   sample_results/CRISPResso_on_<name>/4b.Insertion_deletion_substitution_locations.pdf
 #   (PDF by default; add --save_also_png for PNG)
 ```
 
@@ -152,8 +163,8 @@ CRISPResso \
 |--------|-------|----------------|
 | Target editing % | `Quantification_window_nucleotide_percentage_table.txt`, target C/A row | Primary endpoint |
 | Bystander editing % | Same table, other C/A positions in window | Off-target byproduct in window |
-| Indel rate | `CRISPResso_quantification_of_editing_frequency.txt` | Cas9-like cut artifacts; should be <5% for clean BE |
-| Substitution-vs-indel ratio | Derived | Ratio >10 indicates clean BE; <3 indicates cut-mediated mutagenesis instead |
+| Indel rate | `CRISPResso_quantification_of_editing_frequency.txt` | Cas9-like cut artifacts (limit in Quantitative Thresholds) |
+| Substitution-vs-indel ratio | Derived | Distinguishes clean BE from cut-mediated mutagenesis (cutoffs in Quantitative Thresholds) |
 
 **Critical:** Bystander editing is intrinsic to base editors (the deaminase acts across a 5-nt window); it is not noise. Report bystander rates alongside target rates. See [[base-editing-analysis]] for variant-call implications.
 
@@ -188,7 +199,7 @@ CRISPResso \
 | Indel % | Nick-only editing without templated repair; common at low-PE-activity sites |
 | Unmodified % | Read matches the reference exactly |
 
-A high-quality prime-edit run shows intended-edit fraction >5% and scaffold incorporation <2%. See [[prime-editing-screens]] for pegRNA design rules.
+Acceptance levels are in Quantitative Thresholds. See [[prime-editing-screens]] for pegRNA design rules.
 
 ## Batch Mode (Multi-Sample, Same Amplicon)
 
@@ -211,9 +222,9 @@ CRISPRessoBatch \
     --n_processes 8
 
 # Outputs:
-#   batch_run/CRISPRessoBatch_RUNNING_LOG.txt
-#   batch_run/CRISPRessoBatch_quantification_of_editing_frequency.txt  (aggregated)
-#   batch_run/CRISPResso_on_<name>/ for each sample
+#   batch_run/CRISPRessoBatch_on_<batch file name>/CRISPRessoBatch_RUNNING_LOG.txt
+#   batch_run/CRISPRessoBatch_on_<batch file name>/CRISPRessoBatch_quantification_of_editing_frequency.txt  (aggregated)
+#   batch_run/CRISPRessoBatch_on_<batch file name>/CRISPResso_on_<name>/ for each sample
 ```
 
 ## Pooled-Amplicon Mode
@@ -238,8 +249,8 @@ CRISPRessoPooled \
     --n_processes 8
 
 # Outputs:
-#   pooled_run/SAMPLES_QUANTIFICATION_SUMMARY.txt
-#   pooled_run/CRISPResso_on_<amplicon>/ for each amplicon
+#   pooled_run/CRISPRessoPooled_on_<fastq name>/SAMPLES_QUANTIFICATION_SUMMARY.txt
+#   pooled_run/CRISPRessoPooled_on_<fastq name>/CRISPResso_on_<amplicon>/ for each amplicon
 ```
 
 **`--min_reads_to_use_region` defaults to 1000.** Any amplicon with fewer aligned reads than this is silently
@@ -248,8 +259,6 @@ but every field for that amplicon is `NA` (confirmed: a real 2-amplicon, ~250-re
 exactly the "arrayed validation pool" use case this mode is for -- returns all-NA at the default). Set
 `--min_reads_to_use_region` below the expected per-amplicon read depth for pilot/validation-scale pools.
 Always check `SAMPLES_QUANTIFICATION_SUMMARY.txt` for `NA` rows before trusting the output.
-
-**Failure mode:** Amplicons with shared primer regions get reads assigned to whichever amplicon comes first. Design primers with ≥3-bp distinguishing regions or use unique molecular identifiers.
 
 ## WGS Off-Target Mode
 
@@ -278,7 +287,7 @@ threshold when the BAM is a small slice. Checked on CRISPResso2 2.3.4 with the C
 `smallGenome.fa` (chr9/chr11 slices) and `Both.Cas9.fastq.smallGenome.bam`: FANCF 23 reads, 26.09% Modified;
 HEK3 2 reads, `NA` at the default and 50% Modified with `--min_reads_to_use_region 1`.
 
-**Use case:** Validate empirically that an in vivo / clinical-grade edit has minimal off-target activity (combine with GUIDE-seq or CIRCLE-seq predicted sites).
+**Use case:** Validate empirically that an in vivo / clinical-grade edit has minimal off-target activity (combine with GUIDE-seq or CIRCLE-seq predicted sites; randomly chosen regions yield no useful comparison).
 
 ## Parse Output in Python
 
@@ -359,30 +368,25 @@ def parse_crispresso(output_dir):
 | Threshold | Value | Source / Rationale |
 |-----------|-------|--------------------|
 | Cas9 editing efficiency (functional KO) | >70% indels | Field convention; below this, KO is incomplete |
-| Indel rate (clean base editor) | <5% | Field convention; >5% = unwanted cut activity |
+| Indel rate (clean base editor) | <5% | Field convention; >5% = unwanted cut activity (usually Cas9 / nCas9 expression mismatch) |
+| Substitution-vs-indel ratio (BE) | >10 = clean BE; <3 = cut-mediated (Cas9-like) mutagenesis, use Cas9-like analysis | Diagnostic for BE purity |
 | Target conversion (CBE) | >30% | Variable by target; below this, screen power is poor |
 | Target conversion (ABE) | >30% | ABE typically lower per-base than CBE |
 | Bystander rate (BE) | <10% acceptable; <5% ideal | Application-dependent; for variant function studies, must be controlled |
-| Intended-edit % (prime editor) | >5% per-edit | Field convention; can be 50%+ at favorable sites |
+| Intended-edit % (prime editor) | >5% per-edit | Field convention; >20% at favorable sites, can be 50%+ |
 | Scaffold incorporation (PE) | <2% | High-quality pegRNA design |
 | Alignment rate | >85% | Below this, amplicon design or contamination issue |
 | Minimum read quality | Phred 30 | Q30 Illumina base-call-accuracy standard |
-| Quantification window size (Cas9) | 1 | Clement 2019 default; precise cut-site analysis |
-| Quantification window size (BE) | 10 | Cover editing window positions 4-13 |
+| Read depth per sample | 1,000+ | Reliable allele table; higher for low-frequency variants |
 
 ## Common Errors
 
 | Error / symptom | Cause | Solution |
 |-----------------|-------|----------|
-| Alignment rate <50% | Wrong amplicon sequence | Re-verify; primers should NOT be in amplicon_seq |
-| `CRITICAL: No alignments were found`, exit 1, no output folder | Amplicon from the wrong locus entirely | Confirm amplicon matches the intended target locus before re-checking trimming/strand |
 | All reads "modified" | Misaligned reference | Check amplicon strand; reverse-complement test |
 | BE shows mostly indels | Cas9 contamination or wrong protein | Re-derive cell line origin; check Cas9 vs nCas9-BE3 |
 | Inconsistent batch results | Different amplicon_seq per sample | Use CRISPRessoBatch with consistent amplicon |
-| Pooled-amplicon misassignment | Primer overlap between amplicons | Re-design with ≥3-bp distinguishing regions |
-| Pooled amplicon rows all `NA` | Per-amplicon reads below `--min_reads_to_use_region` (default 1000) | Lower `--min_reads_to_use_region` for pilot/validation-scale pools |
 | Out-of-window edits ignored | Window too narrow | Increase `--quantification_window_size` |
-| Scaffold incorporation high (PE) | RTT too short | Re-design pegRNA |
 | Allele frequency dominated by 1 read | Low input / clonal | Verify input cell count; rerun if singleton |
 
 ## References
