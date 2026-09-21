@@ -11,6 +11,8 @@ author: GPTomics
 
 Reference examples tested with: pyComBat 0.3.3+ (epigenelabs/pyComBat), MAGeCK 0.5.9+, R/limma 3.58+, sva 3.50+, RUVSeq 1.36+, pandas 2.2+, numpy 1.26+, scikit-learn 1.4+, scipy 1.12+.
 
+Install: `pip install combat` (provides `combat.pycombat`; the PyPI package named `pycombat` is a different project); `mageck` from bioconda (`conda install -c bioconda mageck`, not on PyPI); R: `BiocManager::install(c('sva', 'RUVSeq', 'limma'))`. Inputs: a count matrix (rows = sgRNA, columns = samples), a metadata table with `batch`, `condition` and `replicate`, and for NTC-anchored normalization a list of non-targeting sgRNAs. Code checked 2026-09-21 on pyComBat (`combat`) 0.3.3, MAGeCK 0.5.9.5, sva 3.54.0, RUVSeq 1.40.0.
+
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show combat`; `from combat.pycombat import pycombat`
 - R: `packageVersion('sva')`; `?ComBat`; `packageVersion('RUVSeq')`; `?RUVg`
@@ -51,7 +53,8 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 | Endpoint samples cluster by batch but not Day-0 | Selection-driven artifact (FBS lot etc); correct or include batch as covariate |
 | Replicates within a batch are tight; across-batch much wider | Classic batch effect; ComBat |
 | Each replicate scatters randomly across PCs | Sample-level noise; no batch correction will help |
-| Cancer-line panel with multiple batches | Use Chronos (built-in batch modeling) |
+| Cancer-line panel with multiple batches | Use Chronos (built-in batch and CN modeling). Copy-number bias is a separate, batch-like effect per line: apply CN correction (CRISPRcleanR / Chronos) before batch correction |
+| Several screens sharing one library | JACKS (joint efficacy across screens) or Chronos |
 
 ## Diagnose: PCA + Variance Decomposition
 
@@ -255,7 +258,7 @@ def ntc_anchored_normalize(counts_df, ntc_sgrna_names, target_median=1000):
     return counts_df * scale_factors, scale_factors
 ```
 
-**Critical:** Requires ≥500 NTCs in the library (see [[library-design]]). With fewer, the NTC median is unstable and amplifies noise rather than removing batch.
+**Critical:** Requires ≥500 NTCs in the library (see [[library-design]]). With fewer, the NTC median is unstable and amplifies noise rather than removing batch; fall back to median normalization.
 
 ## When NOT to Correct
 
@@ -314,6 +317,20 @@ def ntc_anchored_normalize(counts_df, ntc_sgrna_names, target_median=1000):
 | NTCs needed for NTC-anchored norm | ≥500 in library | Stable median |
 | Post-correction PCA check | Batches must overlap in PC1/PC2 plot | Visual sanity check |
 | Post-correction PR-AUC | Should be same or higher than pre | If lower, correction destroyed biology |
+
+## Validation Checklist
+
+After applying correction:
+
+- [ ] Corrected matrix has no NaN/Inf values (ComBat can return all-NaN with exit code 0)
+- [ ] Features in `uncorrected` are flagged or excluded in hit calling
+- [ ] PCA: batches now overlap (visual)
+- [ ] Within-batch Pearson preserved (should be unchanged)
+- [ ] Across-batch Pearson improved
+- [ ] CEGv2 PR-AUC preserved or higher
+- [ ] NTC distribution stable across batches
+- [ ] No new outlier samples introduced
+- [ ] Hit list compared with the uncorrected hit list; every difference explained by the batch effect, not lost biology
 
 ## Common Errors
 
