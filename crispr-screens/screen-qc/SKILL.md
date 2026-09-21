@@ -12,10 +12,23 @@ author: GPTomics
 Reference examples tested with: MAGeCK 0.5+ (count + VISPR), MAGeCKFlute 2.0+ (R), pandas 2.2+, numpy 1.26+, scikit-learn 1.4+, matplotlib 3.8+, seaborn 0.13+.
 
 Before using code patterns, verify installed versions match. If versions differ:
-- CLI: `mageck --version` then `mageck count --help`; R: `packageVersion('MAGeCKFlute')`
+- CLI: `mageck --version` then `mageck count --help`
 - R: `packageVersion('MAGeCKFlute')` then `?BatchRemove` / `?FluteRRA`
 
 If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
+
+## Install and Inputs
+
+```bash
+conda install -c bioconda mageck   # not on PyPI
+pip install pandas numpy scipy matplotlib seaborn scikit-learn
+# MAGeCK QC dashboard
+conda install -c bioconda -c conda-forge mageck-vispr
+# R dashboard (optional)
+R -e "remotes::install_github('WubingZhang/MAGeCKFlute')"   # removed from Bioconductor at 3.22
+```
+
+Required inputs: MAGeCK count output (`screen.count.txt`), plasmid-pool counts (separate file or first sample), known copy-number profile per cell line (from WGS / SNP-array / ASCAT / matched cell-line database), and CEGv2 / NEGv1 reference gene sets (CEGv2 from Hart 2017, NEGv1 from Hart 2014; `hart-lab/bagel` repository).
 
 ## CRISPR Screen Quality Control
 
@@ -321,9 +334,9 @@ This is a pipeline gate, not a publication metric. DepMap reports `gene effect s
 ### Low Day-0 coverage from high MOI
 
 **Trigger:** Infection at MOI >0.5.
-**Mechanism:** Poisson: at MOI 0.5, 23% of infected cells carry multiple sgRNAs; the "single-perturbation" assumption underlying every analysis method is violated.
+**Mechanism:** Multiple sgRNAs per cell (Poisson table under MOI Verification); the "single-perturbation" assumption underlying every analysis method is violated.
 **Symptom:** Apparent gene-gene interactions in single-gene screens; gene-level z-scores noisy; Pearson lower than expected for high-quality counts.
-**Fix:** No analytical correction. Re-titrate, re-infect at MOI 0.3, re-run screen.
+**Fix:** Re-titrate, re-infect at MOI 0.3, re-run screen (no analytical correction, see MOI Verification decision rule).
 
 ### CRISPRi/a screen with no signal on validated essentials
 
@@ -331,6 +344,15 @@ This is a pipeline gate, not a publication metric. DepMap reports `gene effect s
 **Mechanism:** dCas9-KRAB knockdown is maximal within ±100 bp of the actual Pol II loading site; canonical annotation can be off 1-10 kb.
 **Symptom:** RPS/RPL/EIF families dropping out as expected (these have clean canonical TSSs) but downstream genes failing; PR-AUC on broader CEGv2 panel drops.
 **Fix:** Re-design library against FANTOM5 highest-CAGE-peak TSS (Sanson 2018); for tissue-specific lines, use matched CAGE / GRO-seq.
+
+## Interpretation Notes
+
+- Plasmid-pool sequencing (Gini <0.1, >=99% guide detection at >25 reads/guide) is non-negotiable; everything downstream is normalized against this baseline. A screen with an un-sequenced plasmid pool is uninterpretable.
+- Day-0 vs plasmid: Pearson >0.9 is expected; below it, diagnose the infection step.
+- CEGv2 PR-AUC is the single most diagnostic metric: a pass means the screen has biology even if individual sample metrics look weak, and a screen below 0.5 cannot be fixed in software. "Passing" every earlier stage is necessary but not sufficient; PR-AUC is the final gate.
+- Drug screens: endpoint Gini drifting to 0.3-0.5 is normal because biology drives selection. Compare against vehicle, not Day 0, for any chemogenomic interpretation.
+- CRISPRi/a: expect lower per-gene PR-AUC than Cas9 (not every essential responds to knockdown as it does to knockout); calibrate against the DepMap CRISPRi sub-essentialome rather than CEGv2.
+- Pick the hit-calling method from the quality grade: high quality -> MAGeCK MLE or Chronos; low quality -> RRA or drugZ; cancer line -> Chronos with CN correction; in vivo -> bottleneck-adjusted thresholds.
 
 ## When NOT to Use This Skill
 
