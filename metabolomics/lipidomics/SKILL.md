@@ -92,6 +92,16 @@ to_lipidr_sphingoid <- function(x) {
   x
 }
 raw$Molecule <- to_lipidr_sphingoid(raw$Molecule)   # e.g. 'Cer 18:1;O2/16:0' -> 'Cer d18:1/16:0'
+
+# After import, fail loud on any lipid lipidr could not classify (Class = NA); flag un-converted ';O#' names.
+d <- as_lipidomics_experiment(raw)                  # or read_skyline(); raw = Molecule + one column per sample
+bad <- rownames(d)[is.na(rowData(d)$Class)]
+if (length(bad) > 0) {
+  o_hint <- grepl(';O[0-9]', rowData(d)[bad, 'Molecule'])
+  warning(sprintf('%d lipid(s) have Class = NA and would drop out of every class-based step: %s%s',
+                  length(bad), paste(rowData(d)[bad, 'Molecule'], collapse = ', '),
+                  if (any(o_hint)) " -- ';O#' names remain: run to_lipidr_sphingoid() before import" else ''))
+}
 ```
 
 ```r
@@ -133,6 +143,14 @@ d_raw <- add_sample_annotation(
 # zero recognized standards passes through with a silent correction factor of 1 -- i.e. completely
 # uncorrected data reported as if it had been normalized (verified against lipidr 2.20.0's
 # internal normalize_istd(): `if (length(istd_list[[i]]) == 0) f <- 1`). Fail loud instead:
+# table() drops NA groups, so an unclassified lipid (Class = NA) would reach normalize_istd() unflagged.
+# Drop it loudly (lipidr's own bundled export has one such row, 'PI 34:1p'); fix the name instead if it is real.
+unclassified <- is.na(rowData(d_raw)$Class)
+if (any(unclassified)) {
+  warning(sprintf('Dropping %d lipid(s) with Class = NA (unparsed names): %s',
+                  sum(unclassified), paste(rowData(d_raw)$Molecule[unclassified], collapse = ', ')))
+  d_raw <- d_raw[!unclassified, ]
+}
 istd_coverage <- table(rowData(d_raw)$Class, rowData(d_raw)$istd)
 uncovered <- rownames(istd_coverage)[
   !('TRUE' %in% colnames(istd_coverage)) | istd_coverage[, 'TRUE'] == 0
@@ -224,7 +242,7 @@ sum_name = lipid.get_lipid_string(LipidLevel.SPECIES) if claimed_level.value >= 
 | `de_results$FDR` is NULL | wrong column name | `de_analysis` returns limma columns: `adj.P.Val`, `P.Value`, `logFC` |
 | pygoslin `LipidLevel.MOLECULAR_SUBSPECIES` AttributeError | pre-2.0 enum name | current enum is `SPECIES` / `MOLECULAR_SPECIES` / `SN_POSITION` / `STRUCTURE_DEFINED` / `FULL_STRUCTURE` / `COMPLETE_STRUCTURE` |
 | `get_lipid_string(LipidLevel.MOLECULAR_SPECIES)` raises `RuntimeException: LipidSpecies does not know how to create a lipid string for level ...` | requested a target level more specific than what was actually parsed (a sum-composition, ether, or plasmalogen name parsed at `SPECIES` has no chains to invent) | cap the target at `min(MOLECULAR_SPECIES, claimed_level, key=lambda l: l.value)` before calling `get_lipid_string` (see Honest Annotation-Level Assignment code above) |
-| A sphingolipid name imports with `Class = NA` / lipidr's "couldn't be parsed" warning | lipidr's importer expects the old `d18:1`/`m18:1`/`t18:1` sphingoid prefix, not the `;O2`/`;O1`/`;O3` suffix this Skill documents | rewrite `;O1`/`;O2`/`;O3` to `m`/`d`/`t` before `as_lipidomics_experiment()`/`read_skyline()` (see Load/Normalize code above) |
+| A sphingolipid name imports with `Class = NA` / lipidr's "couldn't be parsed" warning | lipidr's importer expects the old `d18:1`/`m18:1`/`t18:1` sphingoid prefix, not the `;O2`/`;O1`/`;O3` suffix this Skill documents | rewrite `;O1`/`;O2`/`;O3` to `m`/`d`/`t` before `as_lipidomics_experiment()`/`read_skyline()`; the post-import Class = NA check (see Load/Normalize code above) names any that remain |
 | Elevated LPC reported from shotgun data | in-source fragmentation with no RT to flag it | add the in-source-fragment caveat; confirm with LC-MS RT co-elution before claiming lyso biology |
 
 ## References
