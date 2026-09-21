@@ -42,20 +42,6 @@ Indirect effect = beta_EM * beta_MY (product of coefficients). CI via delta meth
 
 **Approach:** Univariable MR for total E->Y; MVMR for direct E->Y conditional on M; indirect = total - direct via delta-method CI.
 
-```r
-library(TwoSampleMR); library(MVMR)
-
-total <- mr_ivw(beta_E, beta_Y, se_E, se_Y)
-mvmr_dat <- format_mvmr(BXGs=cbind(beta_E, beta_M),
-                        BYG=beta_Y, seBXGs=cbind(se_E, se_M), seBYG=se_Y, RSID=snps)
-fstat <- strength_mvmr(mvmr_dat, gencov=0)
-mvmr_fit <- ivw_mvmr(mvmr_dat)
-direct <- mvmr_fit[1, 'Estimate']
-direct_se <- mvmr_fit[1, 'Std. Error']
-
-indirect <- total$b - direct
-indirect_se <- sqrt(total$se^2 + direct_se^2)
-indirect_ci <- indirect + c(-1.96, 1.96) * indirect_se
-```
+Runnable: `examples/mvmr_mediation.R` (`mr_ivw` total, `format_mvmr` + `strength_mvmr` + `ivw_mvmr` direct, indirect = total - direct with delta-method CI).
 
 Require `fstat` conditional F > 10 for both E and M independently. If `fstat < 10`, use Q-statistic-adjusted IVW (`qhet_mvmr`) or report the result as weak-instrument-limited.

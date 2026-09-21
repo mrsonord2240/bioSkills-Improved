@@ -36,28 +36,11 @@ Cell composition is the canonical unmeasured confounder in EWAS mediation: inclu
 
 **Approach:** HIMA v2.3+ uses a formula interface and auto-detects outcome family (Gaussian / binomial / Cox / Poisson). Screening + MCP/DBlasso penalisation + joint significance with BH; the `sigcut` argument controls the FDR threshold (default 0.05).
 
-```r
-library(HIMA)
-
-dat <- na.omit(dat[, c('outcome', 'exposure', 'age', 'sex', 'cell_pc1', 'cell_pc2')])
-M_matrix <- as.matrix(beta_values)
-
-result <- hima(
-  outcome ~ exposure + age + sex + cell_pc1 + cell_pc2,
-  data.pheno=dat,
-  data.M=M_matrix,
-  mediator.type='gaussian',          # 'negbin' for count, 'compositional' for microbiome
-  penalty='DBlasso',                  # default; alternatives 'MCP', 'SCAD', 'lasso'
-  scale=TRUE,
-  sigcut=0.05,
-  parallel=TRUE, ncore=8, verbose=TRUE
-)
-# result is a LIST of class "hima" ($ID, $alpha, $beta, `$alpha*beta`, $rimp, `$p-value`),
-# NOT a data.frame -- nrow(result) and rownames(result) both return NULL rather than
-# erroring (verified on HIMA 2.3.4). Use result$ID and length(result$ID):
-sig_mediators <- result$ID
-n_sig <- length(sig_mediators)
+```bash
+Rscript scripts/hima_ewas.R pheno.csv mediators.csv "outcome ~ exposure + age + sex + cell_pc1 + cell_pc2" out.csv gaussian DBlasso 0.05 8   # mediator.type ('negbin' count, 'compositional' microbiome), penalty, sigcut, ncore
 ```
+
+`scripts/hima_ewas.R` drops NA rows in both `data.pheno` and the mediator matrix (kept aligned), dummy-codes character/factor covariates, calls `hima()` and writes the significant mediators to `out.csv`. `hima()` returns a LIST of class `"hima"` (`$ID`, `$alpha`, `$beta`, `` `$alpha*beta` ``, `$rimp`, `` `$p-value` ``), not a data.frame: use `result$ID` and `length(result$ID)`, not `nrow()`.
 
 For survival outcomes wrap the LHS as `Surv(time, status)`; HIMA auto-routes to Cox. The old `hima_classic()` (Zhang 2016 original) is still exported but screens by beta only and misses mediators with strong alpha + weak beta -- prefer the wrapper `hima()` unless reproducing a 2016-2021 paper.
 

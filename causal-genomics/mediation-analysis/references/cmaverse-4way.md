@@ -35,19 +35,6 @@ Without an exposure-mediator interaction term, INTref = INTmed = 0 and the decom
 
 **Approach:** Use CMAverse regression-based estimator with `EMint=TRUE`; bootstrap CIs.
 
-```r
-library(CMAverse)
-
-result_4way <- cmest(
-  data=dat, model='rb',
-  outcome='disease', exposure='genotype', mediator='expression',
-  basec=c('age','sex','pc1','pc2'),
-  EMint=TRUE,
-  mreg=list('linear'), yreg='logistic',
-  astar=0, a=1, mval=list(0),
-  estimation='paramfunc', inference='bootstrap', nboot=1000
-)
-summary(result_4way)
-```
+Runnable: `examples/cmaverse_4way.R` (`cmest(model='rb', EMint=TRUE, mreg=list('linear'), yreg='logistic', astar=0, a=1, mval=list(0), estimation='paramfunc', inference='bootstrap', nboot=1000)`, plus the mediational E-value and probit `medsens()`).
 
 CMAverse reports the 4-way decomposition (Vanderweele 2014): for continuous outcomes the components are `cde`, `intref`, `intmed`, `pnie` (or `pie`), `te`, `pm`; for non-continuous outcomes (logistic / Cox / Poisson) the ratio effects `Rcde`, `Rpnde`, `Rtnde`, `Rpnie`, `Rtnie`, `Rte` are reported ALONGSIDE an excess-relative-risk decomposition with an `ER` prefix -- `ERcde`, `ERintref`, `ERintmed`, `ERpnie` (plus a `(prop)` share for each) -- **not** the bare `intref`/`intmed` names, which belong only to the continuous-outcome case. When `EMint=TRUE`, `pm`, `int`, `pe` are also included. Verified column set on a logistic-outcome, `EMint=TRUE` fit (CMAverse 0.1.0, 2026-09-17): `Rcde Rpnde Rtnde Rpnie Rtnie Rte ERcde ERintref ERintmed ERpnie ERcde(prop) ERintref(prop) ERintmed(prop) ERpnie(prop) pm int pe`. Verify column names in the installed CMAverse version with `summary(result)$summarydf` (not `$results`, which does not exist on the summary object), since naming has evolved.

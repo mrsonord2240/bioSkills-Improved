@@ -161,21 +161,7 @@ Reference: AGReMA guideline (Lee H et al 2021 JAMA 326:1045) and MacKinnon 2008 
 
 **Approach:** Fit mediator and outcome models, bootstrap ACME/ADE, run `medsens()` for Imai rho-based sensitivity.
 
-```r
-library(mediation)
-
-med_model <- lm(expression ~ genotype + age + sex + pc1 + pc2 + pc3, data=dat)
-out_model <- glm(disease ~ genotype + expression + age + sex + pc1 + pc2 + pc3,
-                 data=dat, family=binomial)
-
-med_result <- mediate(med_model, out_model,
-                      treat='genotype', mediator='expression',
-                      boot=TRUE, sims=5000, boot.ci.type='bca')
-summary(med_result)
-
-sens <- medsens(med_result, rho.by=0.05, effect.type='indirect', sims=1000)
-summary(sens)
-```
+Runnable: `examples/eqtl_mediation.R` (mediator + outcome models, `mediate(..., boot=TRUE, sims=1000)`, multi-gene loop; use `sims=5000` and `boot.ci.type='bca'` for publication) and `examples/sensitivity_analysis.R` (`medsens(..., rho.by=0.05, effect.type='indirect')`, which needs a **probit** outcome model -- see Common Errors).
 
 `d0`, `z0`, `n0`, `tau.coef` slots return ACME, ADE, proportion mediated, total effect.
 
@@ -206,6 +192,8 @@ Read the file for the method in use; everything a request always needs (scope, t
 | `references/mr-mediation.md` | Two-step MR (instrument independence, Steiger) or total-minus-direct MVMR mediation |
 | `references/time-varying-and-dml.md` | Longitudinal mediator/exposure (g-formula, SNMM, MSM) or `causalweight::medDML` double-ML |
 | `references/reconciliation-and-reviewers.md` | Observational ACME and MR-mediation disagree, or drafting responses to reviewers |
+
+Runnable code: `scripts/hima_ewas.R` (HIMA pipeline); `examples/` (`eqtl_mediation.R`, `sensitivity_analysis.R`, `cmaverse_4way.R`, `mvmr_mediation.R`).
 
 ## Tool Install Notes
 
