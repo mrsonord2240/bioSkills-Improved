@@ -20,6 +20,20 @@ Before using code patterns, verify installed versions match. If versions differ:
 If code throws ImportError, AttributeError, or TypeError, introspect the installed
 package and adapt the example to match the actual API rather than retrying.
 
+## Install
+
+```r
+install.packages('Signac')
+BiocManager::install(c('EnsDb.Hsapiens.v86', 'BSgenome.Hsapiens.UCSC.hg38', 'chromVAR', 'motifmatchr', 'JASPAR2020', 'TFBSTools', 'scDblFinder', 'biovizBase'))   # biovizBase is required by GetGRangesFromEnsDb()
+devtools::install_github('GreenleafLab/ArchR')   # large on-disk workflows
+```
+
+```bash
+pip install snapatac2 scanpy   # Python alternative, >1M cells (the SnapATAC2 example imports scanpy)
+```
+
+MACS2 or MACS3 must be on PATH for peak calling. Peaks, fragments, the EnsDb annotation, and the BSgenome must all be on the same genome build; a mismatch is silently wrong (no crash).
+
 # scATAC-seq Analysis
 
 **"Analyze my single-cell ATAC-seq data"** -> Process fragments, QC on chromatin signal, reduce dimensions with TF-IDF/LSI, cluster, call consensus peaks per cell type, and score TF motif activity.
@@ -29,7 +43,7 @@ package and adapt the example to match the actual API rather than retrying.
 
 ## Governing Principle
 
-A zero in the cell-by-peak matrix is epistemically ambiguous: it can mean "closed in this cell" (biology) or "accessible but no Tn5 fragment captured here" (sampling). With ~2 DNA copies per diploid locus and shallow per-cell coverage, sampling dominates the zeros. The matrix is near-binary by sampling statistics, not by biology; underlying accessibility is continuous but observed as a Bernoulli-like draw.
+A zero in the cell-by-peak matrix is epistemically ambiguous: it can mean "closed in this cell" (biology) or "accessible but no Tn5 fragment captured here" (sampling). With ~2 DNA copies per diploid locus and shallow per-cell coverage, sampling dominates the zeros. The matrix is near-binary by sampling statistics, not by biology (about 1-10% of peaks are non-zero per cell, versus 10-45% of genes in scRNA-seq); underlying accessibility is continuous but observed as a Bernoulli-like draw.
 
 Binarization is now disfavored. Among non-zero entries the count (1 vs 2 vs >2) is informative, and collapsing to 1 discards it (Martens 2024). Model fragment counts with a count likelihood (Paired-Insertion Counting, SnapATAC2; PoissonVI), never read counts (PCR noise). Caveat: the extra information lives in the count=2 tier, so the benefit scales with sequencing depth; binarized analyses of shallow data are leaving little on the table, deep data more.
 
@@ -51,6 +65,10 @@ Framework choice is an infrastructure decision (language, memory, multimodal nee
 | muon + scanpy | Python, MuData | Multimodal Python container (RNA+ATAC) | Not ATAC-optimized for the heaviest steps |
 
 R<->Python interop (reticulate, zellkonverter, sceasy) loses information (ChromatinAssay slots, ArchR HDF5 do not round-trip); plan to stay in one ecosystem. Verify the current best-practice default against installed docs before committing.
+
+**ArchR flow (large, on-disk, ~1M cells).** `createArrowFiles(filterTSS=4, filterFrags=1000, addTileMat=TRUE, addGeneScoreMat=TRUE)` -> `ArchRProject()` -> `filterDoublets()` -> `addIterativeLSI(useMatrix='TileMatrix')` -> `addClusters()` -> `addUMAP()` -> `addGroupCoverages()` -> `addReproduciblePeakSet(pathToMacs2=...)` -> `addPeakMatrix()`. Motifs: `addMotifAnnotations(motifSet='cisbp')` + `peakAnnoEnrichment()` (set `background='bgdPeaks'` for a GC-fair test; default `'all'` is not GC-matched). Deviations: `addBgdPeaks()` + `addDeviationsMatrix()`. `filterTSS=4`/`filterFrags=1000` are human-tuned defaults whose numeric value depends on the TSS set and are not transferable.
+
+**SnapATAC2 flow (Python, >1M cells, backed AnnData).** `pp.import_data()` -> `metrics.tsse()` -> `pp.add_tile_matrix(bin_size=500, counting_strategy='paired-insertion')` (operationalizes the anti-binarization evidence) -> `pp.select_features()` -> `tl.spectral()` (graph-Laplacian, SD-weighted, sidesteps the LSI "drop component 1" step) -> `pp.knn()` -> `tl.leiden()` -> `tl.macs3()` + `tl.merge_peaks()`. Use `distance_metric='cosine'` for spectral; `'jaccard'` without subsampling is a memory trap. Runnable version: `examples/scatac_workflow.py`; Signac version: `examples/signac_workflow.R`.
 
 ## Matrix Type: Tile vs Peak vs Gene Activity
 
@@ -76,6 +94,8 @@ DepthCor(obj, n = 10)                      # per-component Pearson correlation w
 ```
 
 Component 1 captures depth ~90% of the time but the rule is symptom-based: compute each component's depth correlation (`DepthCor`, or ArchR `corCutOff = 0.75`) and drop whichever exceed the threshold. ArchR `addIterativeLSI()` recomputes LSI on variable features across clustering passes to reduce depth/batch artifacts. A reviewer flags blind `dims = 2:30` with no depth-correlation diagnostic.
+
+Alternative embeddings: SnapATAC2 spectral (SD-weighted, no manual component drop); cisTopic/LDA when interpretable cis-regulatory topics are wanted; PeakVI/PoissonVI for deep generative models with explicit depth modeling.
 
 ## Clustering on LSI
 
