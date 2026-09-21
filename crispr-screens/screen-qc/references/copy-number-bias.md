@@ -6,30 +6,11 @@
 
 **Approach:** Bin genes by copy number (if known from matched WGS/SNP-array) and check whether mean LFC correlates with CN. Alternatively, count off-target cut sites per sgRNA and check correlation with depletion -- amplified loci share many identical cut sites.
 
-```python
-def cn_bias_diagnostic(gene_lfc_df, cn_df):
-    '''cn_df: per-gene copy number (from WGS/SNP-array/matched ASCAT).
-    Tests whether amplified genes show systematically lower LFC.'''
-    merged = gene_lfc_df.merge(cn_df, on='gene')
-    bins = pd.qcut(merged['copy_number'], q=5, duplicates='drop')
-    bin_lfc = merged.groupby(bins, observed=True)['lfc'].agg(['mean', 'median', 'std', 'count'])
-    from scipy.stats import spearmanr, mannwhitneyu
-    rho, p = spearmanr(merged['copy_number'], merged['lfc'])
-    amplified = merged[merged['copy_number'] > 4]['lfc']
-    diploid = merged[merged['copy_number'].between(1.5, 2.5)]['lfc']
-    gap, p_gap = np.nan, np.nan
-    if len(amplified) >= 3 and len(diploid) >= 3:
-        gap = amplified.mean() - diploid.mean()
-        p_gap = mannwhitneyu(amplified, diploid, alternative='less').pvalue
-    return {'cn_vs_lfc_rho': rho, 'cn_vs_lfc_p': p,
-            'n_amplified_genes': len(amplified),
-            'amplified_mean_lfc': amplified.mean(),
-            'diploid_mean_lfc': diploid.mean(),
-            'amplified_vs_diploid_gap': gap,        # negative = amplified genes more depleted
-            'p_amplified_more_depleted': p_gap,
-            'cn_bias_present': bool((rho < -0.1 and p < 0.01) or (gap < -0.5 and p_gap < 0.01)),
-            'per_bin': bin_lfc}
+```bash
+python scripts/cn_bias.py gene_lfc.tsv copy_number.tsv   # columns: gene,lfc and gene,copy_number
 ```
+
+`scripts/cn_bias.py` (also importable: `cn_bias_diagnostic(gene_lfc_df, cn_df)`) merges the two tables, bins genes by copy number into quintiles, and returns the Spearman ρ of LFC vs copy number, the amplified (CN >4) vs diploid (CN 1.5-2.5) mean LFC and one-sided Mann-Whitney gap, `cn_bias_present` (either rule fires) and the per-bin table.
 
 **Interpretation: two rules, not one.**
 

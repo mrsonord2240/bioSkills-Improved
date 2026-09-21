@@ -13,9 +13,9 @@ stage_map = {'Plasmid': 'plasmid', 'Day0_r1': 'day_0', 'Day0_r2': 'day_0',
              'Endpoint_r1': 'endpoint', 'Endpoint_r2': 'endpoint'}
 condition_map = {'day_0': ['Day0_r1', 'Day0_r2'], 'endpoint': ['Endpoint_r1', 'Endpoint_r2']}
 
-# Hand-copied from SKILL.md: pct_zero_max from "Library Representation Metrics" (stage_specific_thresholds()),
-# gini_pass/gini_fail from the "Gini Coefficient" stage table (Excellent bound / Failure bound).
-# If you change either table there, change this dict too.
+# Hand-copied from the Skill: pct_zero_max from stage_specific_thresholds() in scripts/library_representation.py
+# (SKILL.md "Library Representation Metrics"), gini_pass/gini_fail from the SKILL.md "Gini Coefficient"
+# stage table (Excellent bound / Failure bound). If you change either there, change this dict too.
 STAGE_THRESHOLDS = {
     'plasmid':  {'pct_zero_max': 0.5, 'gini_pass': 0.10, 'gini_fail': 0.20},
     'day_0':    {'pct_zero_max': 1.0, 'gini_pass': 0.12, 'gini_fail': 0.25},

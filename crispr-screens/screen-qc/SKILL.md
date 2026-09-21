@@ -58,31 +58,11 @@ Each metric below, and in the reference files, quantifies one of these stages.
 
 **Approach:** Compute per-sample zero-count fraction, low-count fraction (<30 reads, the CRISPRcleanR `ccr.NormfoldChanges` default), and percentile-based skew, then track how these change between plasmid -> Day-0 -> endpoint to localize the bottleneck.
 
-```python
-import pandas as pd
-import numpy as np
-
-def library_representation(counts_df):
-    '''Per-sample library coverage diagnostics.
-    counts_df: rows = sgRNAs, columns = samples (numeric counts).'''
-    out = pd.DataFrame(index=counts_df.columns)
-    out['n_sgrnas_detected'] = (counts_df > 0).sum()
-    out['pct_zero'] = (counts_df == 0).sum() / len(counts_df) * 100
-    out['pct_lowcount'] = (counts_df < 30).sum() / len(counts_df) * 100
-    out['median_count'] = counts_df.median()
-    out['p10_count'] = counts_df.quantile(0.10)
-    out['p90_count'] = counts_df.quantile(0.90)
-    out['skew_ratio'] = out['p90_count'] / out['p10_count'].replace(0, np.nan)
-    return out
-
-def stage_specific_thresholds():
-    '''Stage conventions: Joung 2017 (zero-count, skew) + MAGeCK-VISPR (Gini).'''
-    return {
-        'plasmid':  {'pct_zero_max': 0.5, 'skew_max': 2.0, 'gini_max': 0.10},   # skew 2.0 is a stricter modern convention; Joung 2017 states <10
-        'day_0':    {'pct_zero_max': 1.0, 'skew_max': 2.5, 'gini_max': 0.12},
-        'endpoint': {'pct_zero_max': 5.0, 'skew_max': 10.0, 'gini_max': 0.30},
-    }
+```bash
+python scripts/library_representation.py screen.count.txt --out library_representation.tsv
 ```
+
+`scripts/library_representation.py` prints one row per sample (`n_sgrnas_detected`, `pct_zero`, `pct_lowcount`, `median_count`, `p10_count`, `p90_count`, `skew_ratio`) and also exports `library_representation(counts_df)` and `stage_specific_thresholds()` for import. The stage limits it returns (pct_zero_max / skew_max / gini_max: plasmid 0.5 / 2.0 / 0.10, day_0 1.0 / 2.5 / 0.12, endpoint 5.0 / 10.0 / 0.30) follow Joung 2017 (zero-count, skew) and MAGeCK-VISPR (Gini); skew 2.0 is a stricter modern convention, Joung 2017 states <10.
 
 **Interpretation:** Plasmid pool failing Gini <0.1 indicates synthesis or amplification bias; the screen is unfit for use. Endpoint Gini drifting above 0.30 indicates either heavy biological selection (acceptable for strong-phenotype drug screens) or a bottleneck (must be diagnosed). The Day-0 vs plasmid delta isolates whether the issue arose during infection (cloning is unlikely to lose specific guides between extraction and infection -- the change happens in cells).
 
@@ -157,6 +137,8 @@ Read the one that matches the failing stage or the request; they hold the code a
 | [references/depth-and-moi.md](references/depth-and-moi.md) | Auditing reads per sgRNA, total-read CV, or verifying MOI and the Poisson multi-guide fraction |
 | [references/pca-and-composite-score.md](references/pca-and-composite-score.md) | Checking condition vs batch clustering, or building the single pipeline-gate score |
 | [references/failure-modes.md](references/failure-modes.md) | A metric fails and the cause is not obvious (PCR bias, Cas9 heterogeneity, amplicons, outlier replicate, high MOI, CRISPRi TSS) |
+
+Runnable code: `scripts/library_representation.py`, `scripts/essentialome_recovery.py`, `scripts/cn_bias.py` (each takes files as arguments and is importable), and the end-to-end `examples/screen_qc.py` (edit its `stage_map` / `condition_map`, run in the folder holding `screen.count.txt`).
 
 ## Interpretation Notes
 
