@@ -128,7 +128,8 @@ MAPQ scales differ by aligner; the same `-q 30` filter does different things. Se
 | Bowtie2 | `-q 2` (multi-mappers get MAPQ 0 **or 1**) | `-q 23` (Bowtie2 MAPQ maxes at 42 end-to-end; 23 is a community "uniquely mapped" convention derived from analysis of Bowtie2's MAPQ scoring, not stated in the official manual) |
 | **STAR** | `-q 255` | `-q 255` (STAR emits only MAPQ 0/1/3/255: 255 = unique, 3 = 2 loci, 1 = 3-4 loci, 0 = >4 loci; `-q 4` through `-q 255` are all equivalent, so `-q 60` is too) |
 | HISAT2 | `-q 2` (multi-mappers get MAPQ 0 **or 1**) | `-q 60` |
-| minimap2 (DNA, long-read) | `-q 1` | `-q 60` |
+| minimap2 long-read presets (`map-ont`, `map-hifi`) | `-q 1` | `-q 60` |
+| minimap2 short-read (`-x sr`) | `-q 1` | `-q 30`; `-q 60` is too strict (on real Illumina reads `-q 60` kept 58.5% of primary alignments, unique MAPQ mostly 48-59) |
 | pbmm2 (PacBio) | `-q 1` | `-q 60` |
 
 For Phred-scaled aligners (BWA, minimap2), MAPQ Q maps to ~10^(-Q/10) probability of wrong mapping. For STAR, the only emitted values are 0/1/3/255 (sentinels, not probabilities).
@@ -183,7 +184,7 @@ samtools view -F 3332 -q 30 -o filtered.bam input.bam
 | Assay / caller | Recommended filter | Why |
 |----------------|-------------------|-----|
 | Germline WGS short-variant (HaplotypeCaller, DeepVariant) | `-f 2 -F 3328 -q 20` | Primary, no dup, proper pair, MAPQ>=20 |
-| Somatic short-variant (Mutect2, Strelka2) | `-F 1280 -q 1` | Drop only MAPQ=0; somatic callers handle low MAPQ; supplementary (chimeric) reads are kept because they may carry real somatic SNVs |
+| Somatic short-variant (Mutect2, Strelka2) | `-F 1280 -q 1` | Light pre-filter only: Mutect2 applies its own MAPQ>=20, not-secondary, not-duplicate and non-chimeric-original filters (a real Mutect2 run, GATK 4.6.2.0, removed 120 of 5642 reads at MAPQ 0 and 10 through `MappingQualityReadFilter`); supplementary reads are kept by the pre-filter because they may carry real somatic SNVs |
 | Long-read short-variant (clair3, DeepVariant ONT) | `-F 3328 -q 5` | Long-read MAPQ scale is lower |
 | Long-read SV (Sniffles, cuteSV) | `-F 1024` only | **Keep supplementary** -- SA tag is the SV signal |
 | Short-read SV (Manta, GRIDSS, Delly, SvABA) | `-F 1024` only | Same -- supplementary required |
@@ -195,6 +196,8 @@ samtools view -F 3332 -q 30 -o filtered.bam input.bam
 | RNA-seq variant (after `SplitNCigarReads`) | `-F 3328 -q 20` | Standard germline after split-N-trim |
 | Panel / amplicon | After `samtools ampliconclip`; `-F 1024 -q 20` | Primer overlap makes proper-pair unreliable |
 | ctDNA / cfDNA (UMI) | After fgbio consensus; do not pre-filter raw | |
+
+The caller rationale in this table comes from caller documentation. Only the Mutect2 and HaplotypeCaller read filters were checked by running (GATK 4.6.2.0); Strelka2, DeepVariant, clair3, Sniffles, cuteSV, Manta, GRIDSS, Delly and SvABA were not run.
 
 **Reference (samtools 1.19+):**
 ```bash
@@ -218,6 +221,19 @@ Flag breakdowns:
 - 2308 = 4 + 256 + 2048 (unmapped + secondary + supplementary)
 - 3328 = 256 + 1024 + 2048 (secondary + duplicate + supplementary)
 - 3332 = 4 + 256 + 1024 + 2048 (unmapped + secondary + duplicate + supplementary)
+
+## Filter Pitfalls
+
+Checked on the 1000G test BAM (samtools 1.24).
+
+- **Read-level filters orphan mates.** `-q`, `-F` and `-e` judge each record alone, so one mate can go and the other stay (89 single-record templates after `-F 3332 -q 30`). `samtools fixmate` does not remove them. When the next tool needs complete pairs, keep only the names that still have two records:
+  ```bash
+  samtools view -F 3332 -q 30 -o filt.bam input.bam
+  samtools view filt.bam | cut -f1 | sort | uniq -d > both.txt   # valid while at most two records per name remain (no supplementary)
+  samtools view -N both.txt -o paired.bam filt.bam
+  ```
+- **Do not add `-f 2` for SV callers.** Proper-pair discards the discordant pairs they use (109 mapped records lost here); the SV rows keep `-F 1024` only.
+- **`tlen` is signed.** The two mates carry `+N` and `-N`, so `-e 'tlen>=100 && tlen<=500'` keeps one mate of each pair (4677 records instead of 9346). `abs()` is not available in `-e`; test both signs: `-e '(tlen>=100 && tlen<=500) || (tlen<=-100 && tlen>=-500)'`.
 
 ## Subsample Reads (Deterministic, Pair-Consistent)
 
@@ -283,7 +299,7 @@ samtools view -e '[RG]=="SRR702039"' in.bam    # strictly that read group
 samtools view -R rg_list.txt in.bam            # multiple IDs via file (one ID per line)
 samtools view -l LIBRARY in.bam                # by library (@RG LB: field)
 ```
-Samtools 1.24 adds `-n` (`--exclude-no-read-group`) to drop untagged reads when `-r`/`-R` is used.
+Samtools 1.23 adds `-n` (`--exclude-no-read-group`) to drop untagged reads when `-r`/`-R` is used (the 1.24 `--help` spells the long option `--exclude-no-read_group`; the hyphenated form also works on 1.24).
 
 ## pysam Python Alternative
 
@@ -331,7 +347,7 @@ with pysam.AlignmentFile('input.bam', 'rb') as infile:
 
 ### Filter from BED File
 
-**Goal:** Extract only reads overlapping target regions defined in a BED file, each read once, in coordinate order (same records as `samtools view -L`).
+**Goal:** Extract only reads overlapping target regions defined in a BED file, each read once, in coordinate order (same records as `samtools view -L` for tab- or space-delimited rows with start < end; `-L` reads a zero-width row, start == end, as "reads spanning that position strictly inside", which `fetch` cannot express, so drop or widen such rows).
 
 **Approach:** Parse BED (skipping header lines), sort and merge the intervals, fetch each merged interval, and skip reads already written through the previous interval: such a read starts before the previous interval's end. A plain loop over BED rows writes a read once per overlapped row (802 duplicated records out of 3410 on the test BAM).
 
@@ -345,7 +361,7 @@ def read_bed(bed_path):
         for line in f:
             if not line.strip() or line.startswith(('#', 'track', 'browser')):
                 continue
-            parts = line.split('\t')
+            parts = line.split()
             regions.append((parts[0], int(parts[1]), int(parts[2])))
     return regions
 
