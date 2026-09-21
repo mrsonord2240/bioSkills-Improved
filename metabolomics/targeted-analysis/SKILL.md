@@ -148,32 +148,18 @@ within-day variance = MSwithin (mean square error from `aov(conc ~ factor(day))`
 variance = max(0, (MSbetween - MSwithin) / replicates_per_day), total variance = within +
 between, inter-day CV% = sqrt(total variance) / grand mean * 100.
 
-```r
-# LLOQ-level QC, 2 days x 3 replicates, nominal 2 ng/mL -- planted a low rep-3
-# outlier both days (real within-day imprecision, not a day-to-day shift).
-qc <- data.frame(
-  day = rep(1:2, each = 3),
-  measured_conc = c(2.35, 2.30, 1.55, 2.40, 2.28, 1.60)
-)
-
-intra <- aggregate(measured_conc ~ day, qc, function(x) sd(x) / mean(x) * 100)
-# day 1: 21.7% | day 2: 20.6% -- both FAIL the 20% LLOQ tolerance
-
-naive_pooled_cv <- sd(qc$measured_conc) / mean(qc$measured_conc) * 100
-# 18.9% -- WRONG for inter-day: ignores the day structure and PASSES, masking the failure
-
-fit <- aov(measured_conc ~ factor(day), data = qc)
-ms <- summary(fit)[[1]][["Mean Sq"]]
-n_per_day <- nrow(qc) / length(unique(qc$day))
-var_within <- ms[2]
-var_between <- max(0, (ms[1] - ms[2]) / n_per_day)
-inter_day_cv <- sqrt(var_within + var_between) / mean(qc$measured_conc) * 100
-# 21.1% -- correct nested-ANOVA inter-day (total) precision, correctly FAILS
+```bash
+Rscript scripts/precision_nested_anova.R file=qc.csv            # cols: qc_level, day, measured_conc (one row per replicate)
+Rscript scripts/precision_nested_anova.R file=qc.csv level=LLOQ # one level; tolerance 20% at LLOQ, else tol= (default 15)
 ```
 
+The script prints intra-day CV per day, the naive pooled CV (for contrast only) and the nested-ANOVA inter-day CV per level, and exits 1 if any exceeds its tolerance.
+
 Both tiers must independently pass. A naive pooled-SD "inter-day" number is not a validated
-inter-day precision estimate -- on this synthetic LLOQ data it reads 18.9% (PASS) against a true
-nested-ANOVA inter-day CV of 21.1% (FAIL), because pooling raw replicates across days into one
+inter-day precision estimate. Worked case: LLOQ QCs at nominal 2 ng/mL, 2 days x 3 replicates
+(2.35, 2.30, 1.55 and 2.40, 2.28, 1.60) with a low rep-3 outlier each day give intra-day CV 21.7% and
+20.6% (both FAIL the 20% LLOQ tolerance), a naive pooled CV of 18.9% (PASS, wrong) and a nested-ANOVA
+inter-day CV of 21.1% (FAIL), because pooling raw replicates across days into one
 SD/mean uses the wrong degrees of freedom and can dilute a real within-day outlier's leverage.
 
 ### Matrix Factor, Recovery, and Carryover
