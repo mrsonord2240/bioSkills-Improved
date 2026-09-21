@@ -60,7 +60,8 @@ def is_nucleotide(alignment, min_fraction=0.9):
 
 def normalize_alignment(alignment, upper=True, u_to_t=False):
     '''Copy of `alignment` with '.' and '~' gaps turned into '-', letters upper-cased (upper=True)
-    and, for RNA (u_to_t=True), U turned into T.'''
+    and, for RNA (u_to_t=True), U turned into T. upper=False keeps case (A2M/A3M: lower case marks insert
+    columns; hmmalign A2M is ragged and cannot be loaded by AlignIO, see alignment/alignment-io).'''
     records = []
     for record in alignment:
         seq = str(record.seq).replace('.', '-').replace('~', '-')

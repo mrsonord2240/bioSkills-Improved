@@ -35,32 +35,15 @@ import sys
 from collections import Counter
 
 import numpy as np
-from Bio import AlignIO
-from Bio.Align import MultipleSeqAlignment, substitution_matrices
-from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
 
-def normalize_alignment(alignment, upper=True, u_to_t=False):
-    # '.' and '~' -> '-', upper-case; u_to_t=True for RNA. upper=False keeps case (A2M/A3M: lower case marks insert columns). hmmalign A2M is ragged and cannot be loaded by AlignIO: see `alignment/alignment-io`.
-    records = []
-    for record in alignment:
-        seq = str(record.seq).replace('.', '-').replace('~', '-')
-        seq = seq.upper() if upper else seq
-        seq = seq.replace('U', 'T').replace('u', 't') if u_to_t else seq
-        records.append(SeqRecord(Seq(seq), id=record.id, name=record.name, description=record.description))
-    return MultipleSeqAlignment(records)
+sys.path.insert(0, 'examples')   # this Skill's examples/ directory (run from the Skill directory, or use its absolute path)
+from msa_utils import check_alphabet, load_alignment, normalize_alignment
 
-def check_alphabet(alignment, alphabet):
-    outside = Counter(c for r in alignment for c in str(r.seq) if c != '-' and c not in alphabet)
-    if outside:
-        print(f'WARNING: letters outside the alphabet: {dict(outside)}', file=sys.stderr)
-    return outside
-
-alignment = normalize_alignment(AlignIO.read('alignment.fasta', 'fasta'))
+alignment = load_alignment('alignment.fasta')   # AlignIO.read + normalize_alignment (U -> T for RNA); format guessed from the extension
 check_alphabet(alignment, 'ACDEFGHIKLMNPQRSTVWY')  # 'ACGT' for DNA
 ```
 
-`examples/msa_utils.py` holds these helpers (plus `load_alignment`, `is_nucleotide`, the backgrounds); `load_alignment` guesses the format from the extension (`.sto`/`.stk` Stockholm, `.aln`/`.clw` Clustal, `.phy` PHYLIP, `.nex` Nexus, otherwise FASTA) and takes `fmt=` to override, and the examples that read a file take that path as `argv[1]`. `is_nucleotide` calls an alignment DNA/RNA when at least 90% of its residues are A/C/G/T/U/N, or at least 50% are and the rest are IUPAC ambiguity codes (a DNA alignment with 12% R/Y/S/W/K/M is still DNA; protein sits near 30% A/C/G/T/N); every example imports it and runs without arguments on the tiny alignments in `examples/data/`. `python examples/selftest.py` checks all statistics against values worked out by hand.
+`examples/msa_utils.py` holds `normalize_alignment` (`.`/`~` to `-`, upper-case, `u_to_t=True` for RNA; `upper=False` keeps case for A2M/A3M, where lower case marks insert columns; hmmalign A2M is ragged and cannot be loaded by AlignIO: see `alignment/alignment-io`), `check_alphabet` (prints the letters an alphabet-bound statistic will drop), `load_alignment`, `is_nucleotide`, `pick_background` and the backgrounds. `load_alignment` guesses the format from the extension (`.sto`/`.stk` Stockholm, `.aln`/`.clw` Clustal, `.phy` PHYLIP, `.nex` Nexus, otherwise FASTA) and takes `fmt=` to override, and the examples that read a file take that path as `argv[1]`. `is_nucleotide` calls an alignment DNA/RNA when at least 90% of its residues are A/C/G/T/U/N, or at least 50% are and the rest are IUPAC ambiguity codes (a DNA alignment with 12% R/Y/S/W/K/M is still DNA; protein sits near 30% A/C/G/T/N). Every example imports it and runs without arguments on the tiny alignments in `examples/data/`. `python examples/selftest.py` checks all statistics against values worked out by hand.
 
 ## Pairwise Identity
 
@@ -91,24 +74,7 @@ For ortholog identification at the protein level (full-length, similar size), PI
 
 ### Calculate Identity Between Two Sequences
 ```python
-def pairwise_identity(seq1, seq2, method='pid4'):
-    # seq1, seq2: normalised aligned rows; NaN when undefined (all-gap sequence, no aligned pair for pid1/pid2)
-    if not seq1.replace('-', '') or not seq2.replace('-', ''):
-        return float('nan')
-    both = [i for i, (a, b) in enumerate(zip(seq1, seq2)) if a != '-' and b != '-']
-    matches = sum(seq1[i] == seq2[i] for i in both)
-    if method == 'pid1':
-        span = range(both[0], both[-1] + 1) if both else range(0)   # first to last aligned column
-        denom = sum(seq1[i] != '-' or seq2[i] != '-' for i in span)
-    elif method == 'pid2':
-        denom = len(both)
-    elif method == 'pid3':
-        denom = min(len(seq1.replace('-', '')), len(seq2.replace('-', '')))
-    elif method == 'pid4':
-        denom = (len(seq1.replace('-', '')) + len(seq2.replace('-', ''))) / 2
-    else:
-        raise ValueError(method)
-    return matches / denom if denom > 0 else float('nan')
+from identity_matrix import pairwise_identity   # examples/identity_matrix.py; NaN when undefined (all-gap sequence, no aligned pair for pid1/pid2)
 
 seq1, seq2 = str(alignment[0].seq), str(alignment[1].seq)
 for method in ['pid1', 'pid2', 'pid3', 'pid4']:
@@ -168,13 +134,7 @@ top10 = sorted((i for i, s in enumerate(scores) if not math.isnan(s)), key=lambd
 
 ### Average Conservation Across Alignment
 ```python
-def average_conservation(alignment, ignore_gaps=True, min_occupancy=0.5):
-    scores = [column_conservation(alignment, i, ignore_gaps, min_occupancy)
-              for i in range(alignment.get_alignment_length())]
-    used = [x for x in scores if not math.isnan(x)]
-    if not used:
-        return float('nan'), 0                    # fragments / sparse supermatrix: no column reaches min_occupancy
-    return sum(used) / len(used), len(used)       # mean and the number of columns it is based on
+from conservation_profile import average_conservation   # examples/conservation_profile.py; (nan, 0) when no column reaches min_occupancy
 
 avg_cons, n_used = average_conservation(alignment)
 if n_used:
@@ -209,7 +169,7 @@ Raw pairwise substitution counts and Ti/Tv from an alignment, `PairwiseAligner.s
 
 ## Information Content, PSSM, Neff, MI-APC
 
-Per-column Shannon entropy, information content as KL divergence against the Robinson (protein) or uniform (DNA) background, pseudocount PSSM, Neff and MI-APC: `references/information-content-pssm.md`. Implementations: `examples/entropy_analysis.py`, `examples/pssm.py`. `ROBINSON_BACKGROUND` is defined in that file and in `examples/msa_utils.py`.
+Per-column Shannon entropy, information content as KL divergence against the Robinson (protein) or uniform (DNA) background, pseudocount PSSM, Neff and MI-APC: `references/information-content-pssm.md`. Implementations: `examples/entropy_analysis.py`, `examples/pssm.py`. `ROBINSON_BACKGROUND` and `DNA_UNIFORM` are defined in `examples/msa_utils.py`.
 
 ## Gap Statistics
 
