@@ -47,14 +47,24 @@ Every ligand-receptor output is a co-expression PROXY, not proof of signaling. C
 | Method | Tests what / null | Use when | Fails when |
 |--------|-------------------|----------|------------|
 | LIANA `rank_aggregate` | Consensus rank over many scoring functions; reports magnitude AND specificity ranks | Robust default; hedge against discordance; vary resource to test sensitivity | Treated as ground truth; top-N read as stable (tail of ranks is flat, membership is unstable to subsampling/re-clustering) |
-| CellPhoneDB v5 | Expression SPECIFICITY; permutes cluster labels, asks if mean L+R expression exceeds random labelling | Permutation p-values, rigorous multi-subunit complexes (limiting subunit), human, spatial microenvironments / CellSign TF add-on | Mouse data (human-only DB, ortholog mapping errors); abundance drives the null so dominant clusters over-call; magnitude ignored |
-| CellChat v2 | Communication PROBABILITY; law-of-mass-action + Hill saturation, cofactor terms, trimean expression | Pathway-level summaries, sender/receiver/mediator roles, cofactor modeling, cross-condition comparison, fewer high-confidence calls | Sparse/lowly expressed genes dropped by conservative trimean; interaction COUNTS compared across datasets without normalization |
+| CellPhoneDB v5 (`references/cellphonedb.md`) | Expression SPECIFICITY; permutes cluster labels, asks if mean L+R expression exceeds random labelling | Permutation p-values, rigorous multi-subunit complexes (limiting subunit), human, spatial microenvironments / CellSign TF add-on | Mouse data (human-only DB, ortholog mapping errors); abundance drives the null so dominant clusters over-call; magnitude ignored |
+| CellChat v2 (`references/cellchat.md`) | Communication PROBABILITY; law-of-mass-action + Hill saturation, cofactor terms, trimean expression | Pathway-level summaries, sender/receiver/mediator roles, cofactor modeling, cross-condition comparison, fewer high-confidence calls | Sparse/lowly expressed genes dropped by conservative trimean; interaction COUNTS compared across datasets without normalization |
 | NATMI / Connectome | MAGNITUDE; expression product (NATMI adds a specificity edge weight) | A simple, fast magnitude score; component of LIANA consensus | Used alone as "communication" - pure magnitude rewards ubiquitous high genes |
-| NicheNet | Downstream LIGAND-ACTIVITY; ranks ligands by AUPR between predicted regulatory targets and the receiver's observed DE genes | The question is mechanism: which ligand best explains THIS receiver response | Receiver gene set is noisy/batch-confounded; prior network is static and cell-type-agnostic so context-specific wiring is missed; not a de-novo who-talks-to-whom tool |
+| NicheNet (`references/nichenet.md`) | Downstream LIGAND-ACTIVITY; ranks ligands by AUPR between predicted regulatory targets and the receiver's observed DE genes | The question is mechanism: which ligand best explains THIS receiver response | Receiver gene set is noisy/batch-confounded; prior network is static and cell-type-agnostic so context-specific wiring is missed; not a de-novo who-talks-to-whom tool |
 
 Methods evolve; before committing, verify current best practice and the default resource against the installed package docs (LIANA NEWS, CellChatDB version, cellphonedb-data release).
 
 For communication PROGRAMS varying across many samples/conditions/time, decompose with Tensor-cell2cell (commonly run as LIANA -> Tensor-cell2cell) rather than comparing raw counts; for comparison at single-cell resolution without cluster averaging, use Scriabin, which recovers edges lost to agglomeration.
+
+## Reference Files
+
+Read the file for the method chosen in the decision table; the LIANA consensus, resource-sensitivity and condition-comparison code stays below.
+
+| File | Read when |
+|------|-----------|
+| `references/cellphonedb.md` | Permutation specificity p-values and rigorous complex handling (human); includes the Windows `__main__` guard and `debug_seed` / `threads=1` reproducibility settings |
+| `references/cellchat.md` | Pathway-level probabilities, sender/receiver/mediator roles (R) |
+| `references/nichenet.md` | Which sender ligand explains the receiver's DE response (R) |
 
 ## Spatial-Aware Methods (proximity != interaction)
 
@@ -113,88 +123,6 @@ for resource in ['consensus', 'cellphonedb', 'cellchatdb']:
 # Compare top pairs across adata.uns['cpdb_consensus'] / 'cpdb_cellphonedb' / 'cpdb_cellchatdb'
 ```
 
-## Specificity Test (CellPhoneDB v5)
-
-**Goal:** Get permutation specificity p-values with rigorous multi-subunit complex handling (human).
-
-**Approach:** Run the statistical method on log-normalized counts plus a cell-type meta table; the permutation null shuffles cluster labels, and complexes require all subunits via the limiting (minimum) subunit.
-
-```python
-from cellphonedb.src.core.methods import cpdb_statistical_analysis_method
-
-# threshold=0.1: a gene must be expressed in >=10% of a cluster's cells to count
-# iterations=1000: label-permutation null; pvalue=0.05 reports per-pair significance
-# debug_seed fixes the permutation RNG for reproducible p-values (default -1 is unseeded)
-# score_interactions=True uses multiprocessing.Pool internally, so the __main__ guard below
-# is required on Windows -- without it the call crashes with RuntimeError
-def main():
-    results = cpdb_statistical_analysis_method.call(
-        cpdb_file_path='cellphonedb.zip',          # cellphonedb-data v5 release
-        meta_file_path='meta.tsv',                  # barcode -> cell_type
-        counts_file_path='counts_normalized.h5ad',  # normalized, NOT scaled
-        counts_data='hgnc_symbol',
-        threshold=0.1, iterations=1000, pvalue=0.05, debug_seed=1337,
-        score_interactions=True, threads=4, output_path='cpdb_out')
-    return results
-    # DEG-driven escape from one-vs-rest: cpdb_degs_analysis_method.call(..., degs_file_path=...)
-
-if __name__ == '__main__':
-    results = main()
-```
-
-## Pathway Probability (CellChat v2)
-
-**Goal:** Summarize communication at the signaling-pathway level with sender/receiver roles.
-
-**Approach:** Build the object, pick a database subset, identify over-expressed interactions, compute the mass-action probability with trimean, filter tiny populations, aggregate to pathways, then compute centrality for role analysis. Order matters.
-
-```r
-library(CellChat)
-
-cellchat <- createCellChat(object = seurat_obj, group.by = 'cell_type')
-cellchat@DB <- CellChatDB.human   # or CellChatDB.mouse; subsetDB(..., search='Secreted Signaling') to restrict
-cellchat <- subsetData(cellchat)
-cellchat <- identifyOverExpressedGenes(cellchat)
-cellchat <- identifyOverExpressedInteractions(cellchat)
-cellchat <- computeCommunProb(cellchat, type = 'triMean')   # trimean ~25% truncated mean: conservative
-cellchat <- filterCommunication(cellchat, min.cells = 10)   # drop populations under 10 cells
-cellchat <- computeCommunProbPathway(cellchat)
-cellchat <- aggregateNet(cellchat)
-cellchat <- netAnalysis_computeCentrality(cellchat, slot.name = 'netP')   # sender/receiver/mediator roles
-# Viz: netVisual_aggregate(signaling='WNT'), netVisual_bubble(), netAnalysis_signalingRole_heatmap()
-```
-
-## Downstream Ligand-Activity (NicheNet)
-
-**Goal:** Identify which sender ligand best explains the receiver's observed transcriptional response - the distinct, better-grounded question.
-
-**Approach:** Define a receiver gene set of interest (DE genes from a condition contrast), restrict to ligands expressed in senders with receptors expressed in the receiver, and rank ligands by how well their predicted regulatory targets recover that gene set (AUPR).
-
-```r
-library(nichenetr)
-library(Seurat)
-library(tidyverse)
-
-ligand_target_matrix <- readRDS('ligand_target_matrix.rds')
-lr_network <- readRDS('lr_network.rds')
-
-# Receiver gene set: garbage in -> garbage out; a noisy/batch-confounded DE list invalidates the ranking
-geneset_oi <- FindMarkers(seurat_obj, ident.1 = 'activated_T', ident.2 = 'naive_T') %>%
-    filter(p_val_adj < 0.05, avg_log2FC > 0.5) %>% rownames()
-background <- get_expressed_genes('T_cell', seurat_obj, pct = 0.10)
-
-expressed_ligands <- intersect(unique(lr_network$from), get_expressed_genes(c('Macrophage', 'Dendritic'), seurat_obj, 0.10))
-expressed_receptors <- intersect(unique(lr_network$to), background)
-potential_ligands <- lr_network %>% filter(from %in% expressed_ligands, to %in% expressed_receptors) %>% pull(from) %>% unique()
-
-ligand_activities <- predict_ligand_activities(
-    geneset = geneset_oi, background_expressed_genes = background,
-    ligand_target_matrix = ligand_target_matrix, potential_ligands = potential_ligands)
-
-# Current model ranks by aupr_corrected (AUPR is the headline metric; v1 used pearson)
-best_ligands <- ligand_activities %>% top_n(30, aupr_corrected) %>% arrange(-aupr_corrected) %>% pull(test_ligand)
-```
-
 ## Condition Comparison
 
 **Goal:** Identify which ligand-receptor pairs are gained or lost between two conditions without comparing raw, abundance/depth-confounded interaction counts (see Confounds table).
@@ -219,13 +147,49 @@ gained = robust['stimulated'] - robust['control']   # robust only in stimulated
 lost = robust['control'] - robust['stimulated']     # robust only in control
 ```
 
+**Stability check (required before reporting gained/lost):** each condition has fewer cells than the pooled data, so
+sampling noise alone flags pairs. A stratified random split of one PBMC dataset (no biology by construction) still called
+27.6% of the robust-pair union gained or lost. Calibrate against a null: permute the condition labels WITHIN each cell type
+(same cell numbers and composition), repeat the comparison, and report the real gained/lost count against the null
+distribution. Treat pairs that are also gained/lost in >=50% of null splits as noise.
+
+```python
+import numpy as np
+from collections import Counter
+
+def robust_set(ad):
+    li.mt.rank_aggregate(ad, groupby='cell_type', resource_name='consensus',
+                         expr_prop=0.1, use_raw=False, n_perms=1000, verbose=False)
+    res = ad.uns['liana_res']
+    sig = res[(res['specificity_rank'] < 0.05) & (res['magnitude_rank'] < 0.05)]
+    return set(zip(sig['source'], sig['target'], sig['ligand_complex'], sig['receptor_complex']))
+
+def gained_lost(ad):
+    a, b = (robust_set(ad[ad.obs['condition'] == c].copy()) for c in ('control', 'stimulated'))
+    return b - a, a - b
+
+rng = np.random.default_rng(1337)
+n_null, null_counts, pair_freq = 10, [], Counter()
+for _ in range(n_null):
+    null = adata.copy()
+    null.obs['condition'] = null.obs.groupby('cell_type', observed=True)['condition']         .transform(lambda s: rng.permutation(s.values)).values
+    g, l = gained_lost(null)
+    null_counts.append(len(g) + len(l))
+    pair_freq.update(g | l)
+
+print('real gained+lost:', len(gained) + len(lost), '| null median:', np.median(null_counts), 'range:', min(null_counts), max(null_counts))
+noise_prone = {p for p in gained | lost if pair_freq[p] / n_null >= 0.5}
+```
+
+A real gained+lost count inside the null range is not evidence of a condition effect. Report only gained/lost pairs outside `noise_prone`.
+
 ## Threshold and Permutation Rationale
 
 | Parameter | Default | Rationale |
 |-----------|---------|-----------|
 | `expr_prop` / `threshold` | 0.10 | A gene expressed in <10% of a cluster is mostly dropout; below this, scores are noise - but real low-abundance signaling is also discarded (the "not necessary" side of the proxy) |
 | `n_perms` / `iterations` | 1000 | Stable label-permutation p-values; 100 is fine for exploration, 1000 for reporting; the p-value is about label shuffling, not binding |
-| `debug_seed` (CellPhoneDB) | 1337 | Default (`-1`) is unseeded: two identical runs flipped 252/120,375 (p<0.05) significance flags on marginal calls; set it explicitly for reproducible reporting, mirroring LIANA's own fixed `seed=1337` default |
+| `debug_seed` (CellPhoneDB) | 1337 | Default (`-1`) is unseeded: two identical runs flipped 252/120,375 (p<0.05) significance flags on marginal calls; set it explicitly, mirroring LIANA's own fixed `seed=1337` default. Bit-reproducible only with `threads=1`; at `threads=4` two seeded runs still flipped 82/120,375 flags, so use `threads>1` only for exploration |
 | `min.cells` (CellChat) | 10 | Populations under ~10 cells give unstable mean expression and inflated probabilities |
 | trimean (CellChat) | type='triMean' | 25% truncated mean is conservative, yielding fewer, higher-confidence calls than CellPhoneDB's mean |
 | `aupr_corrected` top-N | 30 | NicheNet ligand cutoff is a display choice, not a significance threshold; inspect the activity-score elbow |
