@@ -10,6 +10,9 @@ author: GPTomics
 ## Version Compatibility
 
 Reference examples tested with: DESeq2 1.42+, apeglm 1.28+, ashr 2.2+, IHW 1.34+, tximport 1.30+, edgeR 4.0+ (for cross-comparison), PyDESeq2 0.5+
+Re-checked 2026-09-21 on DESeq2 1.46.0, apeglm 1.28.0, ashr 2.2.63, PyDESeq2 0.5.4 (R 4.4.3).
+
+Install: `BiocManager::install(c('DESeq2', 'apeglm', 'ashr', 'IHW', 'tximport'))` (`BiocManager` from CRAN first if absent); Python: `pip install pydeseq2`.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - R: `packageVersion('<pkg>')` then `?function_name` to verify parameters
@@ -24,7 +27,9 @@ package and adapt the example to match the actual API rather than retrying.
 
 ## The Single Most Important Modern Insight -- Shrunken LFC and the Wald p-value come from different models
 
-`lfcShrink()` returns LFCs from a Bayesian posterior with apeglm/ashr/normal priors, BUT the p-value column it carries forward is still the **unshrunken Wald p-value** from `results()`. This is a deliberate design choice (Zhu, Ibrahim, Love 2019 *Bioinformatics* 35:2084) -- the shrunken estimate is for ranking and visualization; the p-value is for inference. Reporting "shrunken LFC = 0.4, padj = 1e-8" mixes two models, which is fine because both are correct for their stated purpose. What is NOT fine: using the shrunken LFC in a downstream filter and then claiming FDR control on that filter (it has none). For threshold-based FDR claims, use `lfcThreshold=` or TREAT (`glmTreat` in edgeR).
+`lfcShrink()` returns LFCs from a Bayesian posterior with apeglm/ashr/normal priors, BUT its `pvalue` column is still the **unshrunken Wald p-value** from `results()`. This is a deliberate design choice (Zhu, Ibrahim, Love 2019 *Bioinformatics* 35:2084) -- the shrunken estimate is for ranking and visualization; the p-value is for inference. Reporting "shrunken LFC = 0.4, padj = 1e-8" mixes two models, which is fine because both are correct for their stated purpose. What is NOT fine: using the shrunken LFC in a downstream filter and then claiming FDR control on that filter (it has none). For threshold-based FDR claims, use `lfcThreshold=` or TREAT (`glmTreat` in edgeR).
+
+`padj` is the exception: `lfcShrink()` recomputes it by re-running independent filtering at its own default `alpha=0.1`, so it differs from `results(alpha = 0.05)` (measured: 1,669 of 1,669 non-NA genes differed, max |diff| 0.154; `metadata(shrunk)$alpha` is 0.1). Pass `res = res` to `lfcShrink()` to carry the `padj` from `results()` through unchanged (verified: identical), or take `padj` from `results()` and the LFC from `lfcShrink()`.
 
 A second consequence: `results(dds)` with no `name=` or `contrast=` argument silently returns the **last coefficient in `resultsNames(dds)`** -- which depends on factor level order and design formula order. Always specify the contrast explicitly. Tutorials that hard-code `results(dds)` are setting an example that breaks the moment another factor is added.
 
@@ -36,7 +41,7 @@ A second consequence: `results(dds)` with no `name=` or `contrast=` argument sil
 | LRT (`test='LRT'`, `reduced=`) | Joint effect of dropped terms (>=1 df) | Multi-level factor, omnibus, interaction with >1 df | Reports LFC of the LAST coefficient, not omnibus -- read p-value but never report the LFC as "the effect" |
 | `lfcShrink(type='apeglm')` (Zhu 2019) | Posterior LFC under heavy-tailed Cauchy prior | DEFAULT for ranking and visualization | Requires `coef=`; cannot use `contrast=` or numeric vectors |
 | `lfcShrink(type='ashr')` (Stephens 2017) | Posterior LFC under unimodal prior; reports `lfsr`/`svalue` with `svalue=TRUE` | Arbitrary contrasts via `contrast=` | Slightly different inferential frame (sign-error rather than null-FDR) |
-| `lfcShrink(type='normal')` | Posterior LFC under zero-centered normal; accepts `coef=` or `contrast=` (with `res=`) | Quasi-deprecated since v1.16; only path to get shrunken p-values | Cannot be used with formulas containing interaction terms |
+| `lfcShrink(type='normal')` | Posterior LFC under zero-centered normal; accepts `coef=` or `contrast=` (pass `res=` for numeric/list contrasts) | Quasi-deprecated since v1.16; the `pvalue` it returns is still the unshrunken Wald p-value (shrunken p-values need `DESeq(betaPrior = TRUE)`) | Errors on formulas containing interaction terms ("not implemented for designs with interactions") |
 | TREAT / `lfcThreshold=` (McCarthy & Smyth 2009) | LFC magnitude exceeds threshold tau | Want FDR control for "|LFC| > 1.5x" claims | Conservative; use only when threshold is biologically pre-specified |
 
 ## Decision Tree by Scenario
@@ -74,13 +79,15 @@ dds <- DESeq(dds)
 resultsNames(dds)
 
 res <- results(dds, name = 'condition_treated_vs_control', alpha = 0.05)
-res_shrunk <- lfcShrink(dds, coef = 'condition_treated_vs_control', type = 'apeglm')
+res_shrunk <- lfcShrink(dds, coef = 'condition_treated_vs_control', res = res, type = 'apeglm')  # res= keeps padj from results()
 
 summary(res)
 sig <- subset(res, padj < 0.05)
 ```
 
 The reference level fix is non-cosmetic: DESeq2 picks alphabetically if not told otherwise, so `c('Treated','Untreated')` makes 'Treated' the reference and the LFC reads inverted. Set it BEFORE `DESeq()`.
+
+`rownames(coldata)` must equal `colnames(counts)` in the same order, or `DESeqDataSetFromMatrix()` errors.
 
 ## Tximport (Salmon / kallisto / RSEM)
 
@@ -162,18 +169,19 @@ res_ashr   <- lfcShrink(dds, contrast = c('condition','treated','control'), type
 |--------|-------|---------|----------|
 | apeglm | Cauchy (heavy-tailed) | `coef=` only | Default; preserves large effects, suppresses low-count noise |
 | ashr | Unimodal scale-mixture | `coef=` or `contrast=` (incl. numeric) | Need contrast= for interaction sums or pairwise from `~ 0 + group` |
-| normal | Zero-centered normal | `coef=` only; not interaction designs | Only when the old shrunken p-value is required (legacy) |
+| normal | Zero-centered normal | `coef=` or `contrast=`; not interaction designs | Legacy only, to reproduce pre-1.16 shrunken LFCs (its p-values are still the unshrunken Wald ones) |
 
 The apeglm-cannot-use-contrast footgun: if the question is "drug effect in KO" from `~ genotype * treatment`, apeglm cannot directly shrink that contrast. Workarounds: (a) rebuild as combined factor `~ 0 + group` and relevel so the desired comparison is a coefficient; (b) use ashr; (c) accept the unshrunken LFC for that one comparison.
 
-p-values do NOT change when shrinking. `lfcShrink()` preserves the Wald p-value from `results()`. See the Single Most Important Insight at the top.
+`pvalue` does NOT change when shrinking (`lfcShrink()` preserves the Wald p-value from `results()`); `padj` does unless `res = res` is passed. See the Single Most Important Insight at the top.
 
 ## Independent Filtering, Cook's Outliers, padj=NA
 
-`padj = NA` has three distinct causes (independent filtering, Cook's outlier, all-zero in a group), each with a different remediation -- see `de-results` for the full diagnostic table, IHW alternative, and recovery code.
+`padj = NA` has three distinct causes (independent filtering, Cook's outlier, all-zero across every sample), each with a different remediation -- see `de-results` for the full diagnostic table, IHW alternative, and recovery code.
 
 Two DESeq2-specific points worth knowing at this layer:
 
+- A gene that is all-zero in ONE group but expressed in the other is testable and does NOT get `padj = NA`: 0,0,0,0,300,300,300,300 gave LFC 10.88, padj 5e-22 (DESeq2 1.46.0). Only `baseMean = 0` (all-zero across every sample) is NA; expect huge LFCs and check such genes by eye.
 - Cook's distance filtering is NOT computed for continuous covariates -- a continuous-covariate analysis has effectively no automatic outlier filtering. Disable Cook's only when the outlier IS the signal (`results(dds, cooksCutoff = FALSE)`). At n>=7 per group, `DESeq()` REPLACES outliers via `replaceOutliers()` and refits (`minReplicatesForReplace = 7`).
 - Pre-filtering (`rowSums(counts(dds)) >= 10`) is for memory and speed ONLY. It does NOT replace independent filtering, which operates downstream at `results()` time. Independent filtering can be swapped for IHW via `results(dds, filterFun = ihw)`.
 
@@ -190,7 +198,7 @@ rld <- rlog(dds, blind = FALSE)
 
 The `vst()` function default is `blind=TRUE`, but the current DESeq2 vignette recommends `blind=FALSE` for any downstream visualization AFTER the model is fit (it uses the design when fitting dispersions; appropriate when the design is already settled). Reserve `blind=TRUE` for unsupervised QC where the design should not influence the transformation (e.g., "is this sample consistent with its group?"). The vignette has flip-flopped over the years on which to recommend by default -- pass `blind=` explicitly.
 
-`vst()` uses 1000 most-variable genes to fit the dispersion trend by default. With <1000 genes after filtering, set `nsub` lower.
+`vst()` fits the dispersion trend on `nsub = 1000` genes chosen deterministically to span the range of mean normalized counts (not the most variable genes). With fewer than 1000 genes it errors ("less than 'nsub' rows"): set `nsub` lower or call `varianceStabilizingTransformation()` directly.
 
 ## betaPrior Deprecation Timeline
 
@@ -306,7 +314,7 @@ PyDESeq2 0.5+ supports Wald, multi-factor designs, and apeglm shrinkage. No LRT 
 | Wrong sign of LFC vs expected | Reference level set alphabetically | `relevel()` BEFORE `DESeq()` |
 | `padj = NA` for biologically meaningful gene | Independent filtering or Cook's outlier | See padj=NA section |
 | LRT LFC doesn't match Wald LFC for the same comparison | LRT reports last coefficient; Wald reports the named coefficient | Extract specific Wald per level for the effect size |
-| `summary(res)` shows fewer DE genes than expected | `summary()` default `alpha=0.1`, NOT the alpha passed to `results()` | `summary(res, alpha = 0.05)` |
+| `summary()` shows a different DE count than the `results(alpha = 0.05)` you ran | `summary(res)` uses the alpha stored by `results()`, but an `lfcShrink()` object stores the default `alpha=0.1` unless `res = res` was passed | Pass `res = res` to `lfcShrink()`, or `summary(x, alpha = 0.05)` |
 
 ## References
 
