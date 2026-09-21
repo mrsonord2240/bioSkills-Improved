@@ -193,7 +193,7 @@ BAGEL.py pr \
 
 | File | Read when |
 |------|-----------|
-| `references/interpret-calls.md` | Turning `bayes_factor.txt` into essential / neutral / tumor-suppressor calls (`interpret_bagel`, `screen_type` gate, assay-control exclusion) |
+| `references/interpret-calls.md` | Turning `bayes_factor.txt` into essential / neutral / tumor-suppressor calls (`scripts/interpret_bagel.py`, `screen_type` gate, assay-control exclusion) |
 | `references/per-sgrna-contributions.md` | A known essential has a low BF, or one guide seems to dominate: `bf -r` per-sgRNA output |
 | `references/method-comparison.md` | Choosing between BAGEL2, MAGeCK, drugZ or Chronos, or reconciling their hit lists |
 
@@ -213,7 +213,7 @@ BAGEL.py pr \
 **Trigger:** Heavy dropout screen where many genes drop out; the dropout signal is captured as positive BF but the *enriched* genes (negative BF) are noise.
 **Mechanism:** BAGEL2's symmetric distribution treats deeply enriched genes as significant; in a dropout-only screen, the enrichment signal is purely noise.
 **Symptom:** Many genes with negative BF; these don't validate as tumor suppressors.
-**Fix:** `interpret_bagel(..., screen_type='dropout')` (the default; `references/interpret-calls.md`) makes no tumor-suppressor calls; use `'enrichment'` only for screens expecting positive selection (drug-resistance, GoF); in dropout screens interpret only positive BF.
+**Fix:** `scripts/interpret_bagel.py --screen-type dropout` (the default; `references/interpret-calls.md`) makes no tumor-suppressor calls; use `'enrichment'` only for screens expecting positive selection (drug-resistance, GoF); in dropout screens interpret only positive BF.
 
 ### Thin per-gene coverage; BF estimates unstable
 
