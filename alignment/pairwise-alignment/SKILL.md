@@ -1,6 +1,6 @@
 ---
 name: bio-alignment-pairwise
-description: Perform pairwise sequence alignment using Biopython Bio.Align.PairwiseAligner. Use when comparing two sequences, finding optimal alignments, scoring similarity, and identifying local or global matches between DNA, RNA, or protein sequences.
+description: Perform pairwise sequence alignment using Biopython Bio.Align.PairwiseAligner (Needleman-Wunsch global, Smith-Waterman local, semiglobal). Use when comparing two sequences, finding optimal alignments, scoring similarity, computing percent identity, checking the reverse-complement strand, reproducing EMBOSS needle/water or BLAST scores, and identifying local or global matches between DNA, RNA, or protein sequences.
 tool_type: python
 primary_tool: Bio.Align
 license: MIT
@@ -54,7 +54,7 @@ from Bio import SeqIO
 
 Speed numbers for parasail and edlib were measured (Windows, score only, 5% divergence for 300 nt pairs, 3% for 20 kb; timings vary run to run); the rest are literature figures. Benchmark on representative inputs before committing. Critical caveats:
 - **WFA / BiWFA**: 10-100x faster than Gotoh below 5% divergence; above ~10% it converges to Gotoh complexity. Right tool for PacBio HiFi self-similarity or assembly-vs-reference; not for distant homologs.
-- **edlib**: measured 15x vs Biopython Levenshtein and 26x vs affine scoring on 1000 pairs of 300 nt, 400x+ on a 20 kb pair; the speedup shrinks as divergence grows (literature: ~64x above ~50% divergence). It returns edit distance only, so for high-divergence DNA (<70% nucleotide identity) prefer parasail's SIMD score-only mode.
+- **edlib**: measured 15x vs Biopython Levenshtein and 26x vs affine scoring on 1000 pairs of 300 nt, 400x+ on a 20 kb pair; the speedup shrinks as divergence grows (literature: ~64x above ~50% divergence). Its scoring is unit-cost edit distance only (no matrix, no affine gaps; `task='path'` still returns the alignment and CIGAR), so for high-divergence DNA (<70% nucleotide identity) prefer parasail's SIMD score-only mode.
 - **parasail**: SIMD only realises its advantage on long sequences in amortised batch loops. **Fixed-width variants silently saturate**: `nw_striped_16` on a 20 kb pair returned score 0 with `.saturated == True` (true score 35565). Use the `*_sat` variants (they widen 8 -> 16 -> 32 bit) and check `.saturated`.
 
 Verified snippets (parasail's open/extend use the Biopython convention, so `10, 1` = `open_gap_score=-10, extend_gap_score=-1`):
@@ -111,6 +111,15 @@ When uncertain which algorithm Biopython's aligner selected internally, inspect 
 | Coding sequences for dN/dS analysis | Protein first, then back-translate codons (PAL2NAL) | Preserves reading frame for selection analysis |
 
 When in doubt, align at the protein level. It captures functional constraint better because 20 amino acids provide richer signal than 4 nucleotides.
+
+Back-translating a protein alignment onto its CDS (PAL2NAL v14, MAFFT 7.526):
+
+```bash
+mafft --auto prot.fa > prot_aln.fa                                # any protein aligner; record IDs must match nuc.fa
+pal2nal.pl prot_aln.fa nuc.fa -output fasta > codon_aln.fa        # 3 nucleotide columns per protein column
+```
+
+`pal2nal.pl` prints `#--- ERROR: inconsistency between the following pep and nuc seqs ---#` and **exits 0 with an empty output file** when a CDS does not translate to its protein (internal stop, wrong frame). Check the output size, not the exit code: human vs cow HBB CDS gave 441 codon columns (3 x 147); rabbit NM_001314043.1 gave 0 bytes.
 
 ## Creating an Aligner
 
@@ -218,6 +227,13 @@ Tools disagree on what "open" means, so the same numbers give different scores:
 Conversion: Biopython `open_gap_score = -(BLAST gapopen + gapextend)`, `extend_gap_score = -gapextend`. So **BLASTP defaults (BLOSUM62, 11/1) are `open_gap_score=-12, extend_gap_score=-1`**, and `-11/-1` is EMBOSS 11/1 (pwalign `gapOpening=10, gapExtension=1`). EMBOSS defaults 10/0.5 are `-10/-0.5`.
 
 Verified on HBA_HUMAN vs HBB_HUMAN, BLOSUM62, local: Biopython -12/-1 = 285 = `blastp -comp_based_stats 0` raw score (same HSP, query 3-141) = pwalign `gapOpening=11, gapExtension=1`; Biopython -11/-1 = 288 = EMBOSS `water -gapopen 11 -gapextend 1` = pwalign `gapOpening=10, gapExtension=1`. Global: -11/-1 = 286 = `needle` 11/1. BLASTP's own default composition-based statistics change the reported score (286 here); use `-comp_based_stats 0` to compare raw scores.
+
+EMBOSS command lines for the same numbers (6.6.0, one sequence per FASTA file; `-auto` suppresses prompts; the matrix file is `EBLOSUM62`, not `BLOSUM62`; DNA uses the default `EDNAFULL`, gaps 10/0.5):
+
+```bash
+needle -auto -asequence a.fa -bsequence b.fa -gapopen 11 -gapextend 1 -datafile EBLOSUM62 -outfile needle.txt   # global; "# Score:" line
+water  -auto -asequence a.fa -bsequence b.fa -gapopen 11 -gapextend 1 -datafile EBLOSUM62 -outfile water.txt    # local
+```
 
 ### DNA/RNA Alignment
 ```python
@@ -361,7 +377,7 @@ Verified on Biopython 1.88 with BLOSUM62 / NUC.4.4 aligners:
 - **Case and whitespace**: lowercase, a trailing newline, or `J`/`U` residues raise `ValueError` with a substitution matrix (NUC.4.4 also rejects `U`). Use `str(seq).strip().upper()`. Match/mismatch aligners do not raise: `'acgt'` vs `'ACGT'` scores as four mismatches, and `U` vs `T` as a mismatch (convert RNA to DNA first).
 - **Empty sequences** raise `ValueError: sequence has zero length`. Check lengths before aligning.
 - **Accepted silently**: `*` (stop), `X`/`B`/`Z`, and a `SeqRecord` (scores identically to its `.seq`; pass `.seq` explicitly).
-- **Strand**: alignment is strand-specific. A reverse-complemented query scores near zero (a 30-nt exact match scored 60, reverse complement 0). For DNA of unknown orientation, score both `seq` and `seq.reverse_complement()` and keep the higher.
+- **Strand**: alignment is strand-specific. A reverse-complemented query scores far lower (a random 30-nt exact match scored 60 in local mode; its reverse complement scored a median 18, never above 29, over 300 random pairs; palindromic or low-complexity queries score higher). For DNA of unknown orientation, score both `seq` and `seq.reverse_complement()` and keep the higher.
 - **Coding sequences**: check for internal stops (`'*' in str(seq.translate()).rstrip('*')`) before aligning or back-translating; a CDS with an internal stop (e.g. RefSeq NM_001314043.1, rabbit HBB2) breaks codon-aware tools such as PAL2NAL.
 
 ## Common Errors
@@ -388,7 +404,7 @@ There are four common ways to calculate percent identity from the same alignment
 
 ## Statistical Significance: Karlin-Altschul
 
-Use bit score (database-size-independent) and E-value (expected chance hits) to interpret raw alignment scores; never compare raw scores across scoring schemes. For non-default gap penalties or non-protein/DNA alphabets, generate empirical p-values via sequence shuffling instead of trusting the formula (`examples/empirical_pvalue.py`; for DNA, use the dinucleotide shuffle of Altschul & Erickson 1985 via `ushuffle`).
+Use bit score (database-size-independent) and E-value (expected chance hits) to interpret raw alignment scores; never compare raw scores across scoring schemes. For non-default gap penalties or non-protein/DNA alphabets, generate empirical p-values via sequence shuffling instead of trusting the formula (`examples/empirical_pvalue.py`; for DNA pass `preserve='di'`, the dinucleotide shuffle of Altschul & Erickson 1985, pure Python, no `ushuffle` build).
 
 | Bit score | E-value (typical 1e6 db) | Interpretation |
 |-----------|--------------------------|----------------|
@@ -420,6 +436,15 @@ Length amplifies the signal: 30% identity over 200 residues is far more reliable
 - MMseqs2-GPU (Kallenborn et al 2025 Nat Methods 22:2024; Mirdita co-author) -- GPU-accelerated; ~177x faster than `jackhmmer` for single queries on one NVIDIA L40S; use when GPU is available and the dataset is sensitivity-bound
 - jackhmmer (HMMER) -- gold standard for distant homology when run to convergence; slow but the most sensitive non-structural method
 - Foldseek -- escape to structural search when both query and database have predicted structures (see `alignment/structural-alignment`)
+
+```bash
+# one query vs a target FASTA (or MMseqs2 DB); --num-iterations 3 = profile-iterated, PSI-BLAST-like (MMseqs2 18.8cc5c)
+mmseqs easy-search query.fa targets.fa hits.tsv tmp --num-iterations 3 -s 7.5 --format-output "query,target,pident,alnlen,evalue,bits"
+jackhmmer -N 3 --tblout hits.tbl query.fa targets.fa                # HMMER 3.4; hit table columns: target, ..., full-sequence E-value, score
+hhsearch -i query.a3m -d /path/to/hhsuite_db -o query.hhr            # HH-suite 3.3.0 profile-profile; needs a downloaded HH-suite database (checked against --help only, not run)
+```
+
+HBA_HUMAN against 8 UniProt globins: MMseqs2 ranks HBB_HUMAN at 115 bits, E 3e-34; jackhmmer returns all 8 with E < 1e-63.
 
 Other failure modes:
 - **Non-homologous sequences**: All DP aligners return an alignment regardless of homology. E-value or bit score is the homology gate, not the existence of an alignment.
