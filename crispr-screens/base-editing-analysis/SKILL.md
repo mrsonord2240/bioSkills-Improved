@@ -12,7 +12,7 @@ author: GPTomics
 Reference examples checked against CRISPResso2 2.3.4 (2026-09-16, Docker `pinellolab/crispresso2:latest`) and BE-Hive git HEAD (maxwshen/be_predict_bystander, 2026-09-16) real output -- the parsers below assume that output schema, not the file layouts described in older CRISPResso2 docs. Also tested with pandas 2.2+, biopython 1.83+, numpy 1.26+, scipy 1.12+, scikit-learn 1.4+; Broad be-validation-pipeline notebooks (repo HEAD).
 
 Before using code patterns, verify installed versions match. If versions differ:
-- CLI: `CRISPResso --version`
+- CLI: `CRISPResso --version` (install: `conda install -c bioconda crispresso2`)
 - Python: `pip show CRISPResso2`; BE-Hive is a GitHub clone (maxwshen/be_predict_bystander), not a PyPI package
 
 If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
@@ -119,8 +119,10 @@ def find_be_spacers(cds_sequence, cds_protein_start, target_aa, target_base='C',
         target_base: 'C' (CBE) or 'A' (ABE)
         editor: 'BE3', 'BE4max', 'eA3A-BE3', 'ABE7.10', 'ABE8.20', 'ABE8e', 'evoCDA-BE'
 
-    Returns: DataFrame with spacer, position-in-cds, target-base-position-in-spacer,
-             bystander_positions, predicted_aa_changes
+    Returns: DataFrame (sorted by n_bystanders) with spacer, strand, spacer_start,
+             target_positions, bystander_positions, n_bystanders. Empty (same columns) if no
+             PAM-adjacent window holds target_base. Input is upper-cased before the
+             case-sensitive PAM search.
     '''
     # Editor-specific editing window (positions from PAM-distal end of spacer)
     window_by_editor = {
@@ -128,7 +130,10 @@ def find_be_spacers(cds_sequence, cds_protein_start, target_aa, target_base='C',
         'ABE7.10': (4, 7),   'ABE8.20': (4, 8),   'ABE8e': (4, 8),     # SpABE8e matches CBE window (Richter 2020)
         'evoCDA-BE': (1, 9),
     }
+    if editor not in window_by_editor:
+        raise ValueError(f"editor={editor!r} not recognized; valid editors: {sorted(window_by_editor)}")
     window_lo, window_hi = window_by_editor[editor]
+    cds_sequence = cds_sequence.upper()
     aa_index = target_aa - cds_protein_start  # 0-indexed in protein
     aa_start_nt = aa_index * 3                # nt offset in cds
     candidates = []
@@ -174,7 +179,10 @@ def find_be_spacers(cds_sequence, cds_protein_start, target_aa, target_base='C',
                 'bystander_positions': bystander_positions,
                 'n_bystanders': len(bystander_positions),
             })
-    return pd.DataFrame(candidates).sort_values('n_bystanders')
+    cols = ['spacer', 'strand', 'spacer_start', 'target_positions', 'bystander_positions', 'n_bystanders']
+    if not candidates:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(candidates, columns=cols).sort_values('n_bystanders')
 ```
 
 **Decision rule:** Select spacers with target_positions != empty AND n_bystanders minimized. For variant-by-variant scanning, accept up to 1-2 bystanders if biology of those positions is interpretable; flag for downstream variant attribution.
@@ -339,7 +347,17 @@ docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crispresso2 \
 # Outputs: allele-frequency tables, nucleotide-percentage plots, editing-efficiency heat maps
 ```
 
-The notebooks cover allele-frequency tabulation, nucleotide-level editing quantification and editing-efficiency summaries. Hit calling is NOT part of this toolkit -- score the screen separately with drugZ or MAGeCK.
+The notebooks cover allele-frequency tabulation, nucleotide-level editing quantification and editing-efficiency summaries. Hit calling is NOT part of this toolkit -- score the screen separately with drugZ or MAGeCK (drugZ is more sensitive than MAGeCK for drug-modifier chemogenomic screens like Hanna 2021 PARPi). Reuse the notebooks before writing custom BE amplicon parsers.
+
+Required inputs for a screen: amplicon FASTQ (per sgRNA or pool), a library file (per-sgRNA spacer, target base, target amino acid, predicted bystander pattern), the BE chemistry (CBE or ABE), and ClinVar/COSMIC annotation for variant attribution.
+
+## Validation Strategy
+
+| Tier | Validation requirement |
+|------|-------------------------|
+| Tier 1 (high confidence) | BE + PE concordant at same variant + arrayed confirmation (convergent BE + PE is the gold standard for pathogenicity calls) |
+| Tier 2 (medium) | BE alone, multiple sgRNAs converge despite bystander differences |
+| Tier 3 (exploratory) | Single sgRNA hit; bystander confounded; not interpretable |
 
 ## Failure Modes
 
@@ -389,6 +407,8 @@ The notebooks cover allele-frequency tabulation, nucleotide-level editing quanti
 | Bystander rate (target attribution) | <10% acceptable; <5% ideal for clean attribution | Application-dependent |
 | Cell-line BE activity (pilot) | >30% editing at validated target | Below = wrong cell line for BE |
 | Per-amino-acid sgRNA density | 10-15 (saturation designs); 5-8 (smaller screens) | Tradeoff with library size |
+| Plasmid pool evenness | Gini <0.1 | Verify by sequencing the pool before packaging |
+| Lentiviral MOI | 0.3 | One integrant per cell |
 
 ## Common Errors
 
