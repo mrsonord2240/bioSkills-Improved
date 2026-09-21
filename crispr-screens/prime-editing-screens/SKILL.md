@@ -177,9 +177,8 @@ def load_pridict2_predictions(prediction_dir):
 **Approach:** Build a CSV with one row per intended edit (sequence + edit notation), run PRIDICT2 in batch mode, parse the per-pegRNA efficiency summary, and filter to candidates above the chosen efficiency threshold.
 
 ```bash
-# Step 1: prepare batch input CSV -- real required header is "editseq", NOT "sequence"
-# (documenting it as "sequence" makes the CLI exit 0 while writing an empty summary file,
-# with no error beyond a "Missing editseq column" warning -- verified on real PRIDICT2 CLI)
+# Step 1: prepare batch input CSV -- required header is "editseq", NOT "sequence"
+# (see Failure Modes: a wrong header exits 0 with an empty summary file)
 # PRIDICT2's --input-dir defaults to ./input, NOT the current directory -- write the CSV there
 # (or pass --input-dir explicitly), and pre-create --output-dir (see Step 2).
 mkdir -p input predictions
@@ -199,8 +198,7 @@ python pridict2_pegRNA_design.py batch \
     --summarize K562
 ```
 
-**If the summary file exists but is empty (just `""`), the run "succeeded" with the wrong CSV
-column name** -- check for `editseq`, not `sequence`, before assuming a real failure.
+**If the summary file is empty (just `""`) the run still exited 0** -- see Failure Modes, "Batch run exits 0 with an empty summary file", for the three causes.
 
 ```python
 # Step 3: parse and filter
@@ -308,17 +306,21 @@ CRISPResso \
 **Fix:** Build the extension as RTT-revcomp + PBS-revcomp (see pegRNA Architecture above); if Prime-edited%
 comes back near-zero on a library-wide basis, check element order before assuming a biological failure.
 
-### Batch CLI argument or CSV column mismatch produces an empty summary file
+### Batch run exits 0 with an empty summary file
 
-**Trigger:** Using `--summarize` as a bare flag, or a CSV header of `sequence` instead of `editseq`.
-**Mechanism:** A bare `--summarize` crashes argparse outright; a wrong CSV header lets the run exit 0
-after printing "Missing editseq column" and writing a summary file containing only `""`.
-**Symptom:** Either a crash, or a "completed successfully" run whose output file is empty.
-**Fix:** Always pass `--summarize <K562|HEK>` and confirm the input CSV header is `sequence_name,editseq`;
-treat an empty-looking summary file as a column-name bug, not evidence PRIDICT2 found nothing. Also
-confirm the CSV lives under `./input/` (the CLI's own `--input-dir` default, verified against its
-`--help`) and that `--output-dir` already exists (`--summarize` lists `.csv` files there before the
-run starts) -- both raise `FileNotFoundError` rather than a helpful message.
+**Trigger:** Any batch run that produces zero successful pegRNA designs, or a bare `--summarize`.
+**Mechanism:** A bare `--summarize` crashes argparse outright. Otherwise `summarize_top_scoring()` writes an
+empty DataFrame whenever the output directory holds no per-sequence prediction CSVs, so three different
+causes yield the byte-identical summary file `""` and exit code 0 (checked on PRIDICT2 git HEAD 2026-09-16;
+none hangs or crashes): (1) wrong CSV header (`sequence` instead of `editseq`, prints
+`Missing "editseq" column`); (2) correct header but zero data rows (prints `Designing pegRNAs for 0 sequences`);
+(3) every variant lacks an NGG PAM within the search window (prints `No PAM (NGG) found in proximity of edit!`,
+nick at most 25 bases from the edit).
+**Symptom:** A "completed successfully" run whose summary file is 4 bytes, or a crash on `--summarize`.
+**Fix:** Always pass `--summarize <K562|HEK>` and a CSV headed `sequence_name,editseq` with at least one row.
+Read the stdout messages above, or check for per-sequence `predictions/<sequence_name>_pegRNA_Pridict_full.csv`
+files, to find which cause it is; an empty summary is not evidence that PRIDICT2 found nothing. Variants with
+no designable PAM cannot be PE-installed (see "Library missing intended variant").
 
 ## Cas9 vs BE vs PE for Variant Installation
 
@@ -362,7 +364,7 @@ run starts) -- both raise `FileNotFoundError` rather than a helpful message.
 | Library missing variants | No NGG PAM | SpRY-PE; BE alternative |
 | CRISPResso2 reports ~0% Prime-edited on a library that should edit | pegRNA extension built PBS-then-RTT instead of RTT-then-PBS | Rebuild extension as RTT-revcomp + PBS-revcomp |
 | PRIDICT2 batch: `--summarize: expected one argument` | Bare `--summarize` flag | Pass a value: `--summarize K562` (or `HEK`) |
-| PRIDICT2 batch: summary file is `""` | Input CSV header is `sequence`, not `editseq` | Rename the header column to `editseq` |
+| PRIDICT2 batch: summary file is `""` (exit 0) | Wrong header (`sequence` not `editseq`), zero data rows, or no NGG PAM near any edit | Read the run's stdout for the cause; see Failure Modes, "Batch run exits 0 with an empty summary file" |
 | PRIDICT2 batch: `FileNotFoundError` referencing `input/<file>` | CSV not placed in the CLI's default `./input` directory | `mkdir input` and move the CSV there, or pass `--input-dir` explicitly |
 | PRIDICT2 batch `--summarize`: `FileNotFoundError` on the output directory itself | `--output-dir` does not exist yet -- `--summarize` lists existing `.csv` files there before the run starts | `mkdir -p <output-dir>` before running with `--summarize` |
 | PE concordant with BE on transitions, disagrees on transversions | PE handles transversions BE doesn't | Expected; trust PE |
