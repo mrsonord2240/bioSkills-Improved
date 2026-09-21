@@ -8,27 +8,12 @@ Read when searching or filtering inside Python with pyOpenMS 3.5 instead of an e
 
 **Approach:** `SimpleSearchEngineAlgorithm` actually scores spectra (the hand-rolled `ProteaseDigestion` loop only digests, it never matches a spectrum). The FASTA must already contain target + decoy sequences concatenated for downstream FDR; decoys carry a recognizable prefix (or set `decoys` to `'true'` to let the engine generate them). Defaults are 10 ppm fragment tolerance and 1 missed cleavage, so set parameters explicitly. The search already annotates `target_decoy` on each hit.
 
-```python
-from pyopenms import SimpleSearchEngineAlgorithm, IdXMLFile, PeptideIdentificationList
-
-protein_ids = []
-peptide_ids = PeptideIdentificationList()   # pyOpenMS 3.5+: a plain [] raises TypeError
-search = SimpleSearchEngineAlgorithm()
-p = search.getParameters()
-p.setValue('precursor:mass_tolerance', 10.0)
-p.setValue('precursor:mass_tolerance_unit', 'ppm')
-p.setValue('fragment:mass_tolerance', 0.02)         # HCD Orbitrap; default is 10 ppm
-p.setValue('fragment:mass_tolerance_unit', 'Da')
-p.setValue('peptide:missed_cleavages', 2)           # default is 1
-p.setValue('modifications:fixed', [b'Carbamidomethyl (C)'])
-p.setValue('modifications:variable', [b'Oxidation (M)'])
-search.setParameters(p)
-# spectra are scored against in-silico fragment ions of every candidate peptide
-search.search('sample.mzML', 'human_target_decoy.fasta', protein_ids, peptide_ids)
-
-# protein_ids FIRST in load/store -- the OpenMS argument order is fixed
-IdXMLFile().store('search_results.idXML', protein_ids, peptide_ids)
+```bash
+python scripts/pyopenms_search.py sample.mzML human_target_decoy.fasta search_results.idXML \
+  --precursor-ppm 10 --fragment-da 0.02 --missed-cleavages 2   # writes protein_ids FIRST, then peptide_ids
 ```
+
+`scripts/pyopenms_search.py` builds the `PeptideIdentificationList` (a plain `[]` raises `TypeError` on pyOpenMS 3.5+), sets Carbamidomethyl (C) fixed and Oxidation (M) variable, and stores the idXML.
 
 ### Annotate Target/Decoy and Estimate FDR with pyOpenMS
 
@@ -36,19 +21,9 @@ IdXMLFile().store('search_results.idXML', protein_ids, peptide_ids)
 
 **Approach:** `PeptideIndexing` maps each PSM back to proteins and flags target vs decoy from the decoy prefix -- needed for idXML from other engines or after changing the FASTA; `SimpleSearchEngineAlgorithm` output above is already annotated and can go straight to `FalseDiscoveryRate`. `FalseDiscoveryRate.apply` runs the concatenated competition; `IDFilter` keeps q <= 0.01. This is the real pyOpenMS path -- not a hand-rolled decoy/target ratio of unknown provenance.
 
-```python
-from pyopenms import PeptideIndexing, FalseDiscoveryRate, IDFilter, FASTAFile
-
-fasta = []
-FASTAFile().load('human_target_decoy.fasta', fasta)
-indexer = PeptideIndexing()
-params = indexer.getParameters()
-params.setValue('decoy_string', 'DECOY_')      # must match the decoy prefix in the FASTA
-params.setValue('decoy_string_position', 'prefix')
-indexer.setParameters(params)
-indexer.run(fasta, protein_ids, peptide_ids)   # sets target/decoy flags on every hit
-
-FalseDiscoveryRate().apply(peptide_ids)         # concatenated competition -> per-PSM q-value as the new score
-IDFilter().filterHitsByScore(peptide_ids, 0.01) # 0.01 = 1% FDR, the community list-level standard
-IDFilter().removeDecoyHits(peptide_ids)
+```bash
+python scripts/pyopenms_fdr.py search_results.idXML human_target_decoy.fasta psms_1pct.idXML \
+  --decoy-string DECOY_ --fdr 0.01     # must match the decoy prefix in the FASTA
 ```
+
+`scripts/pyopenms_fdr.py` runs `PeptideIndexing` (flags target/decoy on every hit), `FalseDiscoveryRate().apply` (per-PSM q-value becomes the score), `IDFilter` at q <= 0.01, drops decoy hits and removes the spectra left with no hit (without that last step `peptide_ids.size()` still counts them: 381 instead of 311 on the synthetic run).

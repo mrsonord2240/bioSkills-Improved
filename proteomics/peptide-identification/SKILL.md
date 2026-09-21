@@ -120,10 +120,12 @@ Read the file that matches the task; `SKILL.md` keeps only what every request ne
 | `references/fdr_from_tables.md` | q-values from a PSM table of any engine, or from separate target and decoy searches (`examples/separate_search_fdr.py`) |
 | `references/citations.md` | the full citation list |
 
+Runnable code: `scripts/pyopenms_search.py`, `scripts/pyopenms_fdr.py`, `scripts/table_fdr.py` (each with `--help`); end-to-end examples in `examples/`.
+
 ## Per-Method Failure Modes
 
 ### Concatenated vs separate FDR formula mismatch
-**Trigger:** running the concatenated snippet on a merged table from separate searches without per-spectrum competition, or applying Elias-Gygi's 2*decoy/(target+decoy) to separate searches.
+**Trigger:** running the concatenated-search code (`scripts/table_fdr.py`) on a merged table from separate searches without per-spectrum competition, or applying Elias-Gygi's 2*decoy/(target+decoy) to separate searches.
 **Mechanism:** Elias-Gygi's factor 2 counts decoys in the combined target+decoy list of a concatenated search; in separate searches every spectrum gets both a target and a decoy hit, so the decoy count estimates false targets directly, scaled by pi0 (the fraction of target PSMs that are incorrect).
 **Symptom:** mis-estimated FDR; 2d/(t+d) on separate searches over-estimates it (synthetic test: 2.06% vs 0.62% true, about a quarter of IDs lost).
 **Fix:** confirm the search mode; concatenated -> (#decoy + 1)/#target; separate -> pi0 * #decoy/#target (Kall et al. 2008; code in `references/fdr_from_tables.md` and `examples/separate_search_fdr.py`) or the mix-max estimator (Keich, Kertesz-Farkas & Noble 2015). In Percolator, mix-max is the default for separate-search input and `-Y`/`--post-processing-tdc` selects target-decoy competition instead; concatenated input forces TDC automatically.
@@ -179,7 +181,7 @@ Read the file that matches the task; `SKILL.md` keeps only what every request ne
 | `TypeError: Argument 'pep_ids' has incorrect type (expected ...PeptideIdentificationList, got list)` or `can not handle type` | pyOpenMS 3.5+ needs a `PeptideIdentificationList` | `peptide_ids = PeptideIdentificationList()`; protein_ids FIRST: `IdXMLFile().load(path, protein_ids, peptide_ids)` |
 | `RuntimeError: Meta value 'target_decoy' does not exist` from `FalseDiscoveryRate` | decoys not annotated (e.g. idXML from another engine) | run `PeptideIndexing` with matching `decoy_string` first |
 | Every PSM passes 1% FDR, or `ValueError: no decoy PSMs recognised` | decoy prefix not matched (Sage and FragPipe write lowercase `rev_`) | compare prefixes lower-cased; check `psms['protein'].str[:6].value_counts()` |
-| Empty 1% list from a table snippet | lower-is-better score (E-value, SpecEValue) used as `score` | use `-log10(E-value)` |
+| Empty 1% list from `scripts/table_fdr.py` | lower-is-better score (E-value, SpecEValue) used as `score` | use `-log10(E-value)` |
 | All q-values 0 from a hand-rolled table | no +1 correction on a list with zero decoys | use (decoys + 1)/targets; a tiny list cannot reach 1% |
 | Percolator q-method mismatched to search mode | mix-max is the default for separate-search input | for separate searches, mix-max (default) or `-Y`/`--post-processing-tdc` for target-decoy competition; concatenated input forces TDC automatically; use `--picked-protein` for protein FDR |
 | Percolator's 1% list is far too big or too small when cut by column index | Percolator writes a `filename` column only when the pin has one (Sage yes, Comet no), shifting `q-value` between columns 3 and 4 | locate `q-value` by header name, never by a fixed index |

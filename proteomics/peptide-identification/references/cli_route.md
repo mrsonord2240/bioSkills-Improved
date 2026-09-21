@@ -18,7 +18,7 @@ Read when running Sage, Comet or MS-GF+ from the command line, rescoring the `.p
 #  "isotope_errors": [0, 1], "deisotope": true, "predict_rt": true, "report_psms": 1}
 sage search.json sample.mzML --write-pin     # -> results.sage.tsv + results.sage.pin
 
-# Comet 2026.02 -- searches the concatenated DB built above.
+# Comet 2026.02 -- searches the concatenated DB built in SKILL.md.
 comet -p                                     # writes comet.params.new to edit
 #   database_name = human_target_decoy.fasta   decoy_search = 0   decoy_prefix = DECOY_
 #   peptide_mass_tolerance_upper = 10.0   peptide_mass_tolerance_lower = -10.0
