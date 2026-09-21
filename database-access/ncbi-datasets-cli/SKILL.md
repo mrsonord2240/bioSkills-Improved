@@ -1,6 +1,6 @@
 ---
 name: bio-ncbi-datasets-cli
-description: Download genome assemblies, gene records, and ortholog data from NCBI using the modern Datasets v2 CLI (replaces assembly_summary.txt scraping and many EFetch workflows). Use when bulk-pulling genome assemblies, gene metadata across species, ortholog sets, or BLAST databases; when E-utilities are too slow for genome-scale work; or when automatic checksum verification, parallel download, and clean accession-driven retrieval are required. Encodes the JSON-lines output format, dataformat conversion, --dehydrated for cloud workflows, and when Datasets is/isn't the right tool.
+description: Download genome assemblies, gene records, and ortholog data from NCBI using the modern Datasets v2 CLI (replaces assembly_summary.txt scraping and many EFetch workflows). Use when bulk-pulling genome assemblies, gene metadata across species, ortholog sets, or BLAST databases; when E-utilities are too slow for genome-scale work; or when download-time zip checksum validation, parallel download, and clean accession-driven retrieval are required. Encodes the JSON-lines output format, dataformat conversion, --dehydrated for cloud workflows, and when Datasets is/isn't the right tool.
 tool_type: cli
 primary_tool: NCBI Datasets CLI
 license: MIT
@@ -117,13 +117,42 @@ The "dehydrated" mode separates data discovery from data transfer:
 
 1. **Discover**: `datasets download genome taxon human --reference --dehydrated --filename human.zip` (fast; ~MB).
 2. **Inspect**: `unzip -p human.zip ncbi_dataset/fetch.txt` -- a TSV of all URLs to pull.
-3. **Pull**: either `datasets rehydrate --directory ./human/` or use `aria2c --input-file=fetch.txt` for parallel pull.
+3. **Pull**: either `datasets rehydrate --directory ./human/`, or `aria2c` for parallel pull.
+   `fetch.txt` is 3 tab-separated columns (`<url>`, a `0` placeholder, `<path relative to
+   ncbi_dataset/>`), not aria2c's input format -- convert it first (see the bulk pattern below).
+   After an aria2c pull, size-check the files (see Checksum verification): `rehydrate` will not.
 
 This is essential for HPC / cloud pipelines where inspection of the pending transfer is needed before committing the I/O.
 
-## Checksum verification (automatic)
+## Checksum verification
 
-`datasets` verifies MD5 checksums for every downloaded file automatically. Rehydrate workflows also verify. If a file fails checksum, Datasets retries up to 3 times then errors. This replaces the `md5sum -c` step that was required with assembly_summary.txt-based scraping.
+`datasets download` validates the downloaded zip's checksum by default (`--fast-zip-validation`
+skips it). This replaces the `md5sum -c` step that assembly_summary.txt-based scraping needed.
+
+**`datasets rehydrate` does not verify anything already on disk** (checked on 18.37.0, 2026-09-21).
+It downloads only files missing from `ncbi_dataset/data/`; a file that exists at the expected path
+counts as "already rehydrated" whatever its content. After an `aria2c` pull that is the dangerous
+case: a throttled or blocked transfer can write an HTML error page (a few KB) at the correct path,
+`aria2c` reports success, and rehydrate says `All N files already rehydrated`. Reproduced by
+overwriting a rehydrated `.fna` with 4 bytes -- rehydrate left it untouched.
+
+Check sizes yourself against the byte lengths the CLI recorded in `dataset_catalog.json`
+(`uncompressedLengthBytes`), delete any
+mismatching file, and rehydrate again to re-fetch just those:
+
+```bash
+python3 - ncbi_dataset/data <<'PY'    # arg: the dehydrated package's ncbi_dataset/data dir
+import json, os, sys
+root = sys.argv[1]
+for asm in json.load(open(os.path.join(root, 'dataset_catalog.json')))['assemblies']:
+    for f in asm['files']:
+        p = root + '/' + f['filePath']
+        if not os.path.exists(p) or os.path.getsize(p) != int(f['uncompressedLengthBytes']):
+            print(p)                  # bad or missing: rm it, then `datasets rehydrate --directory <pkg>`
+PY
+```
+
+`examples/bulk_dehydrated.sh` runs this check and the delete-and-rehydrate retry automatically.
 
 ## Code patterns
 
@@ -164,11 +193,16 @@ datasets download genome taxon Bacteria \
 unzip -q bact_refs.zip -d bact_refs/
 wc -l bact_refs/ncbi_dataset/fetch.txt   # how many files will be pulled
 
-# Step 2: parallel pull via aria2 (or datasets rehydrate)
-aria2c --input-file=bact_refs/ncbi_dataset/fetch.txt \
-       --dir=bact_refs/ncbi_dataset/data/ \
+# Step 2: parallel pull via aria2 (or datasets rehydrate). aria2c input is "<url>\n  out=<path>";
+# the path is fetch.txt column 3 and already starts with data/, so --dir is ncbi_dataset/
+awk -F'\t' '{print $1"\n  out="$3}' bact_refs/ncbi_dataset/fetch.txt > bact_refs/aria2_input.txt
+aria2c --input-file=bact_refs/aria2_input.txt \
+       --dir=bact_refs/ncbi_dataset/ \
        --max-concurrent-downloads=8 \
        --retry-wait=5
+
+# Step 3: size-check, delete mismatches, rehydrate -- see Checksum verification, or use
+# examples/bulk_dehydrated.sh, which does all three steps.
 ```
 
 ### Gene metadata across species
@@ -218,7 +252,7 @@ datasets summary genome taxon "Salmonella enterica" \
   > sal_2024.tsv
 ```
 
-### Python wrapper with checksum + retry awareness
+### Python wrapper
 
 **Reference (NCBI Datasets CLI 18.37.0, checked 2026-09-19):**
 ```python
@@ -254,13 +288,30 @@ datasets_download('genome', 'accession', 'GCF_000005845.2',
                   include=['genome', 'gff3', 'protein'])
 ```
 
+### Virus genomes
+
+**Reference (NCBI Datasets CLI 18.37.0, checked 2026-09-21):**
+```bash
+# Metadata first (RefSeq only), then download; virus uses `genome taxon`, not `accession`
+datasets summary virus genome taxon "Zika virus" --refseq --as-json-lines   | dataformat tsv virus-genome --fields accession,virus-name,length,host-name,release-date
+
+datasets download virus genome taxon "Zika virus" --refseq     --include genome,cds,protein --filename zika.zip --no-progressbar
+unzip -q zika.zip -d zika/    # ncbi_dataset/data/{genomic.fna,cds.fna,protein.faa,data_report.jsonl}
+```
+
+Default package is `genomic.fna` + `data_report.jsonl`; `--include` adds `cds`, `protein` (and
+`annotation`, which yields `annotation_report.jsonl`). Filters: `--refseq`, `--complete-only`,
+`--host`, `--geo-location`, `--released-after`, `--lineage` (SARS-CoV-2 only). Field names come from
+`dataformat tsv virus-genome --help` (`--fields` accepts quoted `*` wildcards). Live run on
+2026-09-21: 2 RefSeq Zika genomes (NC_012532.1, NC_035889.1).
+
 ### Comparison vs E-utilities
 
 ```python
 # E-utilities path: ESearch in assembly db -> ESummary -> manual FTP pull
 #   ~30 API calls + manual md5 + serial download
 # Datasets path:
-#   datasets download genome accession GCF_...  # one command, automatic md5, parallel inside
+#   datasets download genome accession GCF_...  # one command, zip checksum validated
 ```
 
 For genome workflows, Datasets is 5-50x faster than the equivalent E-utilities pipeline and far more reliable.
@@ -323,7 +374,8 @@ For genome workflows, Datasets is 5-50x faster than the equivalent E-utilities p
 | "Unknown field" in dataformat | Wrong field name | Check `dataformat <type> --help` |
 | Throttled bulk pull | No API key | Pass `--api-key` |
 | `--reference` returns 1 per species | By design | Drop the flag or use `--assembly-level` |
-| MD5 mismatch retried | Network issue | Datasets retries automatically; persistent failure -> investigate network |
+| Zip checksum validation fails on `download` | Truncated or corrupt transfer | Re-run the download; persistent failure -> investigate network |
+| `rehydrate` says "All N files already rehydrated" but files are wrong/tiny | It only checks that files exist, not size or checksum (see Checksum verification) | Size-check against `dataset_catalog.json`, delete mismatches, rehydrate again |
 | `{"total_count": 0}`, exit code 0 | Accession doesn't exist, was withdrawn, or was superseded | Exit 0 alone is not success for `summary`/`download` -- check for a nonzero record/file count too; verify the accession at ncbi.nlm.nih.gov/datasets |
 | "gene requires an at-or-below-species-level taxon" | `--taxon` given a clade (e.g. Mammalia), not a species | Use `--ortholog <clade\|all>` for cross-species gene queries instead |
 | "The taxonomy name '--as-json-lines' is not exact" (unrelated taxa suggested) | Bare `--ortholog` flag swallowed the next flag as its value | Always give `--ortholog` an explicit value: `--ortholog all` or `--ortholog <taxon>` |
