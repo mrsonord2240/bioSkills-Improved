@@ -5,12 +5,11 @@
 **Approach:** Build coverage bedGraphs and a junction BEDPE from the BAMs, define tracks in an INI file (genes, bedGraph/BigWig, BED, links), then run `pyGenomeTracks --tracks tracks.ini --region ... -o figure.pdf`. pyGenomeTracks 3.9 cannot draw a BAM (`InputError ... can not identify file type`).
 
 ```bash
-# one merged BAM per group; -split is essential: without it introns are filled with coverage
-samtools merge -f ctrl_merged.bam ctrl1.bam ctrl2.bam ctrl3.bam && samtools index ctrl_merged.bam
-samtools merge -f trt_merged.bam trt1.bam trt2.bam trt3.bam && samtools index trt_merged.bam
-bedtools genomecov -ibam ctrl_merged.bam -split -bga > ctrl.bedgraph
-bedtools genomecov -ibam trt_merged.bam -split -bga > trt.bedgraph
+# writes ctrl.bedgraph, trt.bedgraph and junctions.bedpe into the output directory ("." here)
+scripts/pgt_tracks.sh . ctrl1.bam,ctrl2.bam,ctrl3.bam trt1.bam,trt2.bam,trt3.bam
 ```
+
+The script merges one BAM per group and runs `bedtools genomecov -split -bga` on each; `-split` is essential, without it introns are filled with coverage. The `junctions.bedpe` step is described below.
 
 ```ini
 [gene_models]
@@ -50,18 +49,7 @@ Arc height grows with the junction's span, so a short `[junctions]` track crops 
 
 Tracks are scaled independently: set the same `min_value`/`max_value` on both coverage tracks (pick `max_value` from the data) or the two groups are not comparable. A BigWig made from the same `-split` bedGraph works too (`file_type = bigwig`).
 
-The `junctions.bedpe` file must be in **BEDPE format** (6 columns: chr1 start1 end1 chr2 start2 end2 [+ optional score]). Convert from regtools .bed12 junctions (the score is the read count summed over the merged BAM; `-s XS` needs XS-tagged BAMs, otherwise the strand is `?`):
-
-```bash
-samtools merge -f all_merged.bam ctrl_merged.bam trt_merged.bam && samtools index all_merged.bam   # regtools needs an indexed BAM
-regtools junctions extract -s XS -o regtools_junctions.bed all_merged.bam
-# regtools BED12 column 11 is blockSizes (anchor_left, anchor_right);
-# column 12 is blockStarts (0, intron_length + anchor_left).
-# Intron start = chromStart + anchor_left = $2 + a[1]
-# Intron end   = chromStart + blockStarts[2] = $2 + b[2]
-awk 'BEGIN{OFS="\t"} {split($11,a,","); split($12,b,","); s=$2+a[1]; e=$2+b[2]; print $1, s, s+1, $1, e-1, e, $5}' \
-    regtools_junctions.bed > junctions.bedpe
-```
+The `junctions.bedpe` file must be in **BEDPE format** (6 columns: chr1 start1 end1 chr2 start2 end2 [+ optional score]). Convert from regtools .bed12 junctions (the score is the read count summed over the merged BAM; `-s XS` needs XS-tagged BAMs, otherwise the strand is `?`). `pgt_tracks.sh` does this conversion: it merges every BAM into `all_merged.bam` and indexes it (regtools needs an indexed BAM; on an unindexed BAM it wrote nothing), runs `regtools junctions extract -s XS`, and converts BED12 to BEDPE. In the regtools BED12, column 11 is blockSizes (anchor_left, anchor_right) and column 12 is blockStarts (0, intron_length + anchor_left), so intron start = `$2 + a[1]` and intron end = `$2 + b[2]`; the BEDPE rows are `chr s s+1 chr e-1 e score`.
 
 ```bash
 pyGenomeTracks --tracks tracks.ini --region chr17:43094000-43125000 -o figure.pdf

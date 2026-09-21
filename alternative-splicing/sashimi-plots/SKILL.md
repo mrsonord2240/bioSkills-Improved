@@ -64,46 +64,29 @@ Visualize RNA-seq coverage tracks with splice junction arcs labeled by read coun
 
 **Goal:** Generate publication-quality sashimi plot for a region with samples grouped by condition and per-sample tracks aggregated.
 
-**Approach:** Define samples + groups in a TSV (no header), a palette file, then call ggsashimi with coordinates, GTF, and visual flags. ggsashimi exits 0 on several failures (see Silent Failures), so check the inputs before and the figure after.
+**Approach:** Define samples + groups in a TSV (no header), a palette file, then call ggsashimi with coordinates, GTF, and visual flags. ggsashimi exits 0 on several failures (see Silent Failures): `plot_sashimi()` checks the inputs before and the figure after; on the bare command line, do it yourself.
 
 ```python
-import subprocess
-import pandas as pd
-from pathlib import Path
+# examples/plot_sashimi.py: create_grouping_file, write_palette, plot_sashimi (run from examples/, or put it on sys.path)
+from plot_sashimi import create_grouping_file, write_palette, plot_sashimi
 
-# ggsashimi input: col1 = sample id, col2 = BAM path, col3 = group (used by -O overlay and -C colour)
-groups = pd.DataFrame({
-    'sample_id': ['ctrl1', 'ctrl2', 'ctrl3', 'trt1', 'trt2', 'trt3'],
-    'bam': ['ctrl1.bam', 'ctrl2.bam', 'ctrl3.bam', 'trt1.bam', 'trt2.bam', 'trt3.bam'],
-    'group': ['Control', 'Control', 'Control', 'Treatment', 'Treatment', 'Treatment']
-})
-groups.to_csv('sashimi_groups.tsv', sep='\t', index=False, header=False)
-Path('palette.txt').write_text('#1f77b4\n#ff7f0e\n')  # one colour per group, in order of first appearance
-
-missing = [b for b in groups['bam'] if not Path(b).is_file()]
-assert not missing, f'ggsashimi would drop these BAMs silently: {missing}'
-
-subprocess.run([
-    'ggsashimi.py',
-    '-b', 'sashimi_groups.tsv',
-    '-c', 'chr17:43094000-43125000',   # contig spelled as in the BAM header
-    '-o', 'BRCA1_sashimi',
-    '--alpha', '0.25',
-    '--height', '3',
-    '--width', '10',
-    '--shrink',
-    '--fix-y-scale',
-    '--ann-height', '4',
-    '-g', 'gencode_v45.gtf',
-    '--base-size', '14',
-    '-O', '3', '-C', '3', '-P', 'palette.txt',
-    '-A', 'mean_j',
-    '-F', 'pdf'
-], check=True)
-assert Path('BRCA1_sashimi.pdf').is_file() and Path('BRCA1_sashimi.pdf').stat().st_size > 0, 'no figure written (R error above?)'
+bams = ['ctrl1.bam', 'ctrl2.bam', 'ctrl3.bam', 'trt1.bam', 'trt2.bam', 'trt3.bam']
+create_grouping_file(bams, ['Control'] * 3 + ['Treatment'] * 3, 'sashimi_groups.tsv')  # col1 sample id, col2 BAM, col3 group (-O overlay, -C colour)
+write_palette(['#1f77b4', '#ff7f0e'], 'palette.txt')   # one colour per group, in order of first appearance
+plot_sashimi('sashimi_groups.tsv', 'chr17:43094000-43125000', 'BRCA1_sashimi', 'gencode_v45.gtf',
+             options={'palette': 'palette.txt', 'width': 10})   # contig spelled as in the BAM header (or mapped for you)
 ```
 
-`examples/plot_sashimi.py` wraps this as `plot_sashimi()` and adds contig mapping (chrX vs X), an empty-region check and the `--shrink` guard below. Checked: ggsashimi's junction labels equal an independent pysam count (planted 3v3 set, real ENCODE 12-BAM locus, real chrX BAMs).
+The equivalent bare command line, which also reaches `--ann-height` and `--base-size` (not exposed by `plot_sashimi()`); the contig must be spelled as in the BAM header:
+
+```bash
+ggsashimi.py -b sashimi_groups.tsv -c chr17:43094000-43125000 -o BRCA1_sashimi -g gencode_v45.gtf \
+    --alpha 0.25 --height 3 --width 10 --ann-height 4 --base-size 14 --shrink --fix-y-scale \
+    -O 3 -C 3 -P palette.txt -A mean_j -F pdf
+test -s BRCA1_sashimi.pdf || echo 'no figure written (R error above?)' >&2
+```
+
+`plot_sashimi()` adds to the command line: a missing-BAM check, contig mapping (chrX vs X), an empty-region check, the `--shrink` guard below and a figure-exists check. Checked: ggsashimi's junction labels equal an independent pysam count (planted 3v3 set, real ENCODE 12-BAM locus, real chrX BAMs).
 
 Key ggsashimi flags (Garrido-Martin 2018 *PLoS Comput Biol*):
 - `-O 3`: column 3 of the TSV is the overlay level; samples of a group are drawn in one track. Required for `-A`
@@ -122,43 +105,15 @@ Key ggsashimi flags (Garrido-Martin 2018 *PLoS Comput Biol*):
 
 **Goal:** Auto-generate sashimi plots for all significant rMATS differential events.
 
-**Approach:** Continues the ggsashimi block above (it reuses `groups`, `sashimi_groups.tsv` and `palette.txt`). Parse SE.MATS.JC.txt, expand coordinates to flanking exons + 500nt context, map the contig name onto the BAM header, iterate ggsashimi and check every figure. rMATS writes `chrX`; an Ensembl-style BAM calls it `X` and ggsashimi dies with `ValueError: invalid contig`. Events near a contig start give a start < 1.
+**Approach:** `batch_plot_rmats_events()` parses SE.MATS.JC.txt, keeps the top events by significance and effect size, expands each to `upstreamES`-500 .. `downstreamEE`+500, maps the contig name onto the BAM header, clamps the start to 1, runs `plot_sashimi()` per event (file names sanitised, event ID included) and raises a `RuntimeError` listing every event that produced no figure. rMATS writes `chrX`; an Ensembl-style BAM calls it `X` and ggsashimi dies with `ValueError: invalid contig`. Events near a contig start give a start < 1 (handled).
 
 ```python
-import re
-import subprocess
-import pandas as pd
-import pysam
-from pathlib import Path
-
-contigs = set(pysam.AlignmentFile(groups['bam'][0]).references)  # groups = the TSV above
-
-def bam_contig(name):
-    for cand in (name, name.removeprefix('chr'), 'chr' + name.removeprefix('chr')):
-        if cand in contigs:
-            return cand
-    raise ValueError(f'contig {name} not in the BAM header')
-
-diff = pd.read_csv('rmats_output/SE.MATS.JC.txt', sep='\t')
-sig = diff[(diff['FDR'] < 0.05) & (diff['IncLevelDifference'].abs() > 0.10)]
-
-Path('sashimi_plots').mkdir(exist_ok=True)
-failed = []
-for _, ev in sig.head(25).iterrows():
-    region = f'{bam_contig(ev["chr"])}:{max(1, ev["upstreamES"] - 500)}-{ev["downstreamEE"] + 500}'
-    safe_name = re.sub(r'[^A-Za-z0-9._-]', '_', f'{ev["geneSymbol"]}_{ev["chr"]}_{ev["upstreamES"]}_{ev["ID"]}')
-    out = Path(f'sashimi_plots/{safe_name}.pdf')
-    subprocess.run([
-        'ggsashimi.py', '-b', 'sashimi_groups.tsv', '-c', region,
-        '-o', str(out.with_suffix('')), '-M', '1', '--shrink', '--fix-y-scale',
-        '-O', '3', '-C', '3', '-P', 'palette.txt', '-A', 'mean_j', '-g', 'annotation.gtf', '-F', 'pdf'
-    ])
-    if not (out.is_file() and out.stat().st_size > 0):
-        failed.append(region)
-assert not failed, f'no figure for {failed}'
+from plot_sashimi import batch_plot_rmats_events    # same import as above; reuses sashimi_groups.tsv and palette.txt
+batch_plot_rmats_events('rmats_output/SE.MATS.JC.txt', 'sashimi_groups.tsv', 'annotation.gtf', 'sashimi_plots/',
+                        n_top=25, fdr_cutoff=0.05, dpsi_cutoff=0.1, flank=500, palette='palette.txt')
 ```
 
-MXE files also carry `upstreamES`/`downstreamEE`, and that span already covers both alternative exons. `examples/plot_sashimi.py` `batch_plot_rmats_events()` is the same recipe with the `--shrink` guard and a `RuntimeError` listing every failed event.
+MXE files also carry `upstreamES`/`downstreamEE`, and that span already covers both alternative exons. `--shrink` is dropped with a warning for an event with no junction at `-M` (see the flag list).
 
 ## Reference Files
 
@@ -171,6 +126,8 @@ The ggsashimi recipes, interpretation guide, failure modes and Common Errors sta
 | `references/leafviz.md` | The leafcutter Shiny app: annotation codes, `prepare_results.R`, `run_leafviz.R`, the annotation-code mismatch |
 | `references/jutils.md` | Tool-agnostic heatmaps, sashimi and Venn from rMATS/leafcutter/MntJULiP/MAJIQ output |
 | `references/pygenometracks.md` | Multi-track figures: bedGraph/BigWig coverage, regtools junction arcs as BEDPE, tracks.ini |
+
+Runnable code: `examples/plot_sashimi.py` (ggsashimi wrappers, used above) and `scripts/` (`rmats2sashimiplot_events.sh`, `leafviz_run.sh`, `jutils_pipeline.sh`, `pgt_tracks.sh`; each is invoked from its reference file and prints its usage when called without arguments).
 
 ## Reading Sashimi Plots (Interpretation Guide)
 

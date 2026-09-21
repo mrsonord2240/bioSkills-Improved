@@ -169,7 +169,7 @@ def plot_sashimi(grouping_file, region, output_prefix, gtf_file, options=None):
 
 
 def batch_plot_rmats_events(rmats_file, grouping_file, gtf_file, output_dir,
-                            n_top=20, fdr_cutoff=0.05, dpsi_cutoff=0.1, flank=500, min_junc=1):
+                            n_top=20, fdr_cutoff=0.05, dpsi_cutoff=0.1, flank=500, min_junc=1, palette=None):
     '''
     Generate sashimi plots for top differential splicing events from rMATS.
 
@@ -183,6 +183,7 @@ def batch_plot_rmats_events(rmats_file, grouping_file, gtf_file, output_dir,
         dpsi_cutoff: Minimum |deltaPSI|
         flank: Bases of context added each side of upstreamES..downstreamEE
         min_junc: ggsashimi -M (per sample, before aggregation); 1 = draw every junction
+        palette: colour file from write_palette (without it -C 3 gives R's default red/green)
 
     Raises RuntimeError after the loop if any event failed to plot.
     '''
@@ -216,7 +217,7 @@ def batch_plot_rmats_events(rmats_file, grouping_file, gtf_file, output_dir,
         try:
             plot_sashimi(
                 grouping_file, region, output_prefix, gtf_file,
-                options={'shrink': True, 'fix_y_scale': True, 'min_junc': min_junc}
+                options={'shrink': True, 'fix_y_scale': True, 'min_junc': min_junc, 'palette': palette}
             )
         except (subprocess.CalledProcessError, ValueError, RuntimeError, FileNotFoundError) as e:
             print(f'Failed to plot {gene}: {e}')
