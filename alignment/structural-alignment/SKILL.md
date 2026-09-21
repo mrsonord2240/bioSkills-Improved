@@ -1,6 +1,6 @@
 ---
 name: bio-alignment-structural
-description: Align protein structures using Foldseek 3Di, TM-align, US-align, DALI, or Foldmason for structural MSA. Predict, score, and superpose backbone coordinates when sequence identity is below the twilight zone or remote-homology detection is required. Use when sequence MSA fails (<25% identity), when the dark proteome is the target, when AlphaFoldDB / ESM Atlas search is needed, or when structural superposition is the goal.
+description: Align protein structures using Foldseek 3Di, TM-align, US-align, DALI, or Foldmason for structural MSA. Score and superpose backbone coordinates when sequence identity is below the twilight zone or remote-homology detection is required. Use when sequence MSA fails (<25% identity), when the dark proteome is the target, when AlphaFoldDB / ESM Atlas search is needed, or when structural superposition is the goal.
 tool_type: mixed
 primary_tool: Foldseek
 license: MIT
@@ -52,7 +52,7 @@ For families with strong functional or structural constraint (ribosomal proteins
 |------|-----------|-------|----------|
 | TM-align | Zhang & Skolnick 2005 NAR | TM-score | Single-chain pairwise; standard fold-similarity benchmark |
 | US-align | Zhang et al 2022 Nat Methods | TM-score | Multi-chain protein, RNA, DNA, complexes; original successor to TM-align |
-| Foldseek-Multimer | Kim et al 2025 Nat Methods | TM-score | Database-scale multi-chain complex search; 10-100x faster than US-align in pairwise mode, 1000-10000x in DB search; preferred at AFDB-multimer scale |
+| Foldseek-Multimer | Kim et al 2025 Nat Methods | TM-score | Multi-chain complex search over thousands of complexes and up (the paper reports 3-4 orders of magnitude faster than US-align at database scale); no gain to expect for a single pair |
 | CE | Shindyalov & Bourne 1998 Prot Eng | CE score | Combinatorial extension of fragments; PDB legacy; run as PyMOL `cealign` (Visualisation) |
 | DALI | Holm 2022 NAR | Z-score | Distance-matrix alignment; superior at TM 0.3-0.5 (twilight fold); operates on AFDB at scale; local DaliLite in "Foldseek vs DALI" |
 | Bio.PDB.Superimposer | Cock et al 2009 Bioinf | RMSD | Pure-Python superposition with known atom correspondence |
@@ -130,7 +130,7 @@ Without `-seq`, TMscore pairs residues by residue number: an AlphaFold myoglobin
 
 ### Foldseek-Multimer for Database-Scale Complex Search
 
-For multi-chain complex search at AFDB-multimer scale (~214k entries) or against PDB complexes, US-align is too slow; Foldseek-Multimer (Kim et al 2025 Nat Methods) is the modern default. Two modes share the chain-pairing prefilter:
+For multi-chain complex search over thousands of complexes or more (a folder of complexes, or a `foldseek createdb` of PDB entries), US-align is too slow; Foldseek-Multimer (Kim et al 2025 Nat Methods) is the modern default. `foldseek databases` lists no multimer database, so the target is a folder or a database you build. Two modes share the chain-pairing prefilter:
 
 | Mode | Algorithm | Use when |
 |------|-----------|----------|
@@ -138,8 +138,8 @@ For multi-chain complex search at AFDB-multimer scale (~214k entries) or against
 | `Foldseek-MM-TM` | TM-align per chain pair after prefilter (`--alignment-type 1`) | Top-hit refinement with full TM-score |
 
 ```bash
-foldseek easy-multimersearch query_complex.pdb afdb_multimer_or_pdb_dir result tmp/
-foldseek easy-multimersearch query_complex.pdb afdb_multimer_or_pdb_dir result tmp/ --alignment-type 1   # Foldseek-MM-TM
+foldseek easy-multimersearch query_complex.pdb complexes_dir/ result tmp/
+foldseek easy-multimersearch query_complex.pdb complexes_dir/ result tmp/ --alignment-type 1   # Foldseek-MM-TM
 
 # Cluster: pass ONE DIRECTORY of complexes. A file list or *.pdb clusters only the last file and still exits 0.
 foldseek easy-multimercluster complexes_dir/ cluster_result tmp/ --multimer-tm-threshold 0.65
@@ -147,7 +147,7 @@ foldseek easy-multimercluster complexes_dir/ cluster_result tmp/ --multimer-tm-t
 
 `result` holds chain-level hits. The complex-level scores are in `result_report` (tab-separated: query complex, target complex, query chains, target chains, qTM, tTM, rotation `u`, translation `t`, assembly id); rank and filter on columns 5-6, since `easy-multimersearch` rejects `--multimer-tm-threshold` (that flag exists only on `easy-multimercluster`) and its `--tmscore-threshold` filters chain alignments only. As under `--alignment-type 1` elsewhere, E-values in `result` are not meaningful there. Check: searching 1IRD (dimer) against a directory holding the 1A3N tetramer gives qTM 0.981 / tTM 0.492 for chains A,B vs A,B, matching US-align (0.977 / 0.494).
 
-Decision guide: pairwise complex pair on a few hundred targets -> US-align with `-mm 1 -ter 0`. Database search across thousands to millions of complex entries -> Foldseek-Multimer. For AFDB-Multimer or PDB100-Multimer scale, US-align is computationally infeasible; Foldseek-Multimer matches US-align chain-pairing in >99% of cases at 10-100x speedup pairwise and 10^3-10^4x in database mode (Kim et al 2025 benchmark).
+Decision guide: pairwise complex pair on a few hundred targets -> US-align with `-mm 1 -ter 0`. Database search across thousands to millions of complex entries -> Foldseek-Multimer: the paper reports 3-4 orders of magnitude over US-align at that scale. It is not faster by that factor on small sets: in one audit run on 62 small oligomers it was 1.7x (folder, including `createdb`) to 5.8x (prebuilt database) faster than US-align, and its prefilter reported only 22 of the 62 targets, though no pair with TM > 0.5 was missing.
 
 **Reporting convention:** Always quote BOTH the multimer TM-score (whole-complex) AND the worst per-chain TM-score; high multimer TM with one low per-chain score signals topology-matched but locally divergent chains (often promiscuous binders or paralog swaps), which is biologically distinct from a uniformly-conserved complex.
 
@@ -165,19 +165,21 @@ mobile = parser.get_structure('mobile', 'mobile.pdb')
 reference = parser.get_structure('ref', 'reference.pdb')
 
 def ca_by_residue(structure):
-    return {(c.id, r.id[1], r.id[2]): r['CA'] for c in structure[0] for r in c
+    return {(c.id, r.id[1], r.id[2]): (r.get_resname(), r['CA']) for c in structure[0] for r in c
             if r.id[0] == ' ' and 'CA' in r}     # ' ' = standard residue: no waters, ions, ligands
 
 ca_m, ca_r = ca_by_residue(mobile), ca_by_residue(reference)
 keys = sorted(set(ca_m) & set(ca_r))
 assert keys, 'no shared (chain, number, icode): not co-numbered; use TMalign / USalign'
+n_diff = sum(ca_m[k][0] != ca_r[k][0] for k in keys)
+assert n_diff <= 0.2 * len(keys), f'{n_diff}/{len(keys)} paired residues differ in name: offset numbering; use TMalign / USalign'
 sup = Superimposer()
-sup.set_atoms([ca_r[k] for k in keys], [ca_m[k] for k in keys])
+sup.set_atoms([ca_r[k][1] for k in keys], [ca_m[k][1] for k in keys])
 sup.apply(list(mobile.get_atoms()))
 print(f'RMSD: {sup.rms:.3f} A over {len(keys)} CA pairs')
 ```
 
-`examples/biopython_superimposer.py` adds the refusals: fewer than half the shorter chain paired, or more than 20% of paired residue names differing (offset numbering).
+Modified residues written as HETATM (selenomethionine `MSE`, phosphorylated residues; 1-4% of residues in the six real entries checked) are skipped by `r.id[0] == ' '`; they are missing from the pairing, not mis-paired. `examples/biopython_superimposer.py` adds the second refusal: fewer than half the shorter chain paired.
 
 ## Structural Search at Scale: Foldseek
 
@@ -236,7 +238,7 @@ foldmason easy-msa structures/*.pdb result tmp/ \
 # Outputs: result_aa.fa (amino-acid MSA), result_3di.fa (3Di MSA), result.nw (guide tree), result.html (LDDT report)
 ```
 
-`--refine-iters` controls iterative MSA refinement (default 0, which is deterministic). Refinement is random unless `--refine-seed` is set: three unseeded `--refine-iters 100` runs gave three different MSAs (377-378 columns, only 74% of aligned pairs shared; homologous pairs 88%), while `--refine-seed 42` gave byte-identical FASTA on repeat. Set a seed or use `--refine-iters 0` for any result you compare or report. `--report-mode 1` produces an HTML report with per-column LDDT confidence. The 3Di MSA can be used directly for evolutionary analyses where structure rather than sequence is the appropriate signal. Foldmason writes one row per chain, named `<file>_<chain>` (a single-chain file keeps its bare stem): 11 files gave 18 rows, so count rows as chains, not structures.
+`--refine-iters` controls iterative MSA refinement (default 0, which is deterministic). Refinement is random unless `--refine-seed` is set: unseeded `--refine-iters 100` runs give different MSAs (how different depends on the set: from under 1% to about 40% of aligned pairs differing between runs), while `--refine-seed 42` gave byte-identical FASTA on repeat. Set a seed or use `--refine-iters 0` for any result you compare or report. `--report-mode 1` produces an HTML report with per-column LDDT confidence. The 3Di MSA can be used directly for evolutionary analyses where structure rather than sequence is the appropriate signal. Foldmason writes one row per chain, named `<file>_<chain>` (a single-chain file keeps its bare stem): 11 files gave 18 rows, so count rows as chains, not structures.
 
 **Per-column LDDT extraction:** Run with `--report-mode 2` to produce machine-readable JSON output:
 
@@ -327,5 +329,4 @@ PyMOL `super` performs cycle-fitting for distantly related structures (better th
 - Holm L. 2022. Dali server: structural unification of protein families. NAR 50:W210-W215.
 - Gilchrist CLM et al. 2026. Foldmason: multiple protein structure alignment at scale with 3Di. Science 391(6784):485-488.
 - Barrio-Hernandez I et al. 2023. Clustering predicted structures at the scale of the known protein universe. Nature 622:637-645.
-- Hamamsy T et al. 2024. Protein remote homology detection and structural alignment using deep learning. Nat Biotech 42:975-985.
 - Xu J, Zhang Y. 2010. How significant is a protein structure similarity with TM-score = 0.5? Bioinf 26:889-895.
