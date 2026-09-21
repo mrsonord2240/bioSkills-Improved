@@ -30,7 +30,10 @@ Generate consensus sequences and manage reference files using samtools.
 
 **"Build a consensus from BAM"** -> Derive the most-supported base at each position from aligned reads.
 - CLI: `samtools consensus input.bam -o consensus.fa`
-- Python: iterate pileup columns and take majority base (pysam)
+- Python: iterate pileup columns and take majority base (pysam), `references/python-consensus.md`
+- IUPAC codes, `--het-fract`, platform `--config`, `-T`, viral consensus, `bcftools consensus`: `references/consensus-modes.md`
+
+**"BAM says `chr22`, reference says `22`" / "which GRCh38 is this?"** -> rename contigs with `samtools reheader` (no re-alignment), or identify the reference flavour: `references/contig-naming.md`.
 
 ## samtools faidx - Index Reference FASTA
 
@@ -113,59 +116,6 @@ samtools dict -a GRCh38 -s "Homo sapiens" reference.fa -o reference.dict
 
 The `M5:` (MD5) tag is the only definitive reference-identity check -- two references named "GRCh38" with different decoy/alt content have different M5s. CRAM enforces M5 match on read-back. See alignment-validation for BAM-vs-reference M5 cross-check.
 
-### GRCh38 Is Not One Reference
-
-Contig sets checked 2026-09-20 from the `.fai` / `chrom.sizes` files and NCBI's `README_analysis_sets.txt` (`ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/`).
-
-| Reference flavor | ALT | Decoy | EBV | HLA | Use case |
-|------------------|-----|-------|-----|-----|----------|
-| UCSC `hg38.fa` (455 contigs) | yes (261 `_alt`) | no | no | no | UCSC browser tracks |
-| NCBI `no_alt_analysis_set` | no | no | yes (`chrEBV`) | no | Aligners that are not ALT-aware |
-| NCBI `no_alt_plus_hs38d1_analysis_set` | no | yes | yes | no | Same, with decoys |
-| NCBI `full_analysis_set` | yes | no | yes | no | ALT-aware BWA-MEM |
-| NCBI `full_plus_hs38d1_analysis_set` | yes | yes | yes | no | ALT-aware BWA-MEM with decoys |
-| 1000G `GRCh38_full_analysis_set_plus_decoy_hla` = bwakit hs38DH; Broad `Homo_sapiens_assembly38.fasta` has the same 3,366 contigs | yes (261) | yes (2,385) | yes | yes (525 `HLA-*`) | GATK Best Practices, 1000G BAMs |
-| T2T-CHM13 v2.0 | n/a | n/a | n/a | n/a | Distinct coordinates -- NOT interchangeable |
-
-Mixing no-alt and ALT-aware BAMs in one cohort produces inconsistent multi-mapping behavior at HLA, KIR, and segmental-duplication regions. Standardize before joint calling.
-
-### Contig Naming: The Silent Killer
-
-| Convention | Source | chr1 | mitochondrion |
-|-----------|--------|------|---------------|
-| UCSC hg38 | UCSC Genome Browser | chr1 | chrM (16,569 bp, same sequence as Ensembl `MT`) |
-| UCSC hg19 | UCSC Genome Browser | chr1 | chrM (16,571 bp, NC_001807 -- NOT the sequence of GRCh37 `MT`, 16,569 bp) |
-| Ensembl (GRCh37, GRCh38) | Ensembl | 1 | MT |
-| NCBI RefSeq FASTA (`GCF_*_genomic.fna`) | NCBI | NC_000001.11 (GRCh38), NC_000001.10 (GRCh37) | NC_012920.1 |
-| NCBI analysis sets, 1000G GRCh38 analysis set, Broad hg38 | NCBI, 1000G, Broad | chr1 | chrM |
-| 1000G phase 3 GRCh37 (`hs37d5`) | 1000G | 1 | MT (plus `GL*`, `NC_007605` EBV, `hs37d5` decoy) |
-
-The RefSeq FASTA has no `chr1`; the `_assembly_report.txt` beside it maps every name (tab-separated, CRLF line ends): column 1 Sequence-Name (`1`, `X`, `MT` = Ensembl names for the chromosomes only; scaffolds get GRC names there, Ensembl uses their GenBank accession, e.g. `KI270706.1`), 5 GenBank (`CM000663.2`), 7 RefSeq (`NC_000001.11`), 10 UCSC-style-name (`chr1`). Use it as the rename map for `_alt`, `_random` and `chrUn` contigs; stripping `chr` only covers chr1-22, X, Y, M.
-
-A BAM with `@SQ SN:chr1` cannot be analyzed against a `1`-named reference (and vice versa). Detect:
-```bash
-samtools view -H sample.bam | grep '^@SQ' | head -3
-samtools dict ref.fa | head -3
-```
-
-### Rename Contigs Without Re-aligning
-
-Renaming is a header-only change: BAM records store a contig index, so `samtools reheader` gives records identical to the input except the name. Only do it when the sequences are the same (compare `LN`, and `M5` where the BAM header has it -- a UCSC hg19 `chrM` is not GRCh37 `MT`).
-```bash
-# map.tsv: old<TAB>new, one contig per line (e.g. chr22<TAB>22, chrM<TAB>MT), or UCSC -> RefSeq from the assembly report:
-grep -v '^#' GCF_000001405.40_GRCh38.p14_assembly_report.txt | tr -d '\r' | awk -F'\t' '$10!="na" && $7!="na"{print $10 "\t" $7}' > map.tsv   # a few UCSC contigs (chrUn_KI270752v1) have no RefSeq accession ("na"): reheader stops with "Duplicate entry na" if they stay
-samtools view -H sample.bam | awk -F'\t' -v OFS='\t' 'NR==FNR{m[$1]=$2; next}
-    /^@SQ/{for(i=2;i<=NF;i++) if($i~/^SN:/){n=substr($i,4); if(n in m) $i="SN:" m[n]}} {print}' map.tsv - > renamed.hdr
-samtools reheader renamed.hdr sample.bam > renamed.bam.tmp && mv renamed.bam.tmp renamed.bam && samtools index renamed.bam   # a failed reheader leaves no renamed.bam
-
-# UCSC -> Ensembl for the primary chromosomes only (hg38/GRCh38, not hg19); chr1_KI..._alt, chrUn_... etc. keep their names
-samtools view -H sample.bam | sed -E -e 's/^(@SQ\tSN:)chrM\t/\1MT\t/' -e 's/^(@SQ\tSN:)chr([0-9]+|X|Y)\t/\1\2\t/' > renamed.hdr
-
-# Check: contig names and lengths now equal the reference's
-diff <(samtools view -H renamed.bam | awk '/^@SQ/{print $2, $3}') <(awk '{print "SN:"$1, "LN:"$2}' ref.fa.fai) && echo OK
-```
-`SA:Z:`, `XA:Z:` and `OA:Z:` tags hold contig names as text and keep the old names; drop them with `samtools view -b -x SA -x XA renamed.bam` if a downstream tool reads them. `samtools reheader` also accepts a CRAM (checked on 1.24: exit 0, header `M5` kept, records decode identically with `-T` the renamed reference; decoding without `-T` needs a `REF_PATH`/cache entry for that `M5`). For VCF use `bcftools annotate --rename-chrs map.tsv`.
-
 ## samtools consensus - Generate Consensus
 
 Create consensus sequence from alignments.
@@ -201,62 +151,6 @@ samtools consensus -a input.bam -o consensus.fa
 Columns inside the covered span are always emitted (N where nothing is called), so `-a` changes only the ends: `-a` pads contigs that have reads, `-aa` also emits contigs with no reads (all N). Calls inside the span are identical with or without it. For exactly one character per reference position (coordinates line up with the reference) use `-a --show-del yes --show-ins no`; deleted columns become `*`.
 
 Option list: run `samtools help consensus` (exit 0; `samtools consensus --help` prints the usage after an "unrecognized option" error and exits 1) or `man samtools-consensus`.
-
-### IUPAC Ambiguity for Heterozygotes
-```bash
-# Default Bayesian mode. --ambig is REQUIRED for IUPAC codes (R, Y, S, W, K, M, B, D, H, V);
-# without it an ambiguous column is N, even when one base is 80% of the reads
-samtools consensus --ambig input.bam -o consensus.fa
-
-# Tune Bayesian het calling with --het-scale (< 1 fewer IUPAC calls, > 1 more)
-samtools consensus --ambig --het-scale 0.1 input.bam -o consensus.fa
-
-# Fixed fractional thresholds exist only in -m simple
-samtools consensus -m simple --ambig --het-fract 0.2 --call-fract 0.5 input.bam -o consensus.fa
-```
-
-`--het-fract` and `--call-fract` are ignored in the default Bayesian mode (byte-identical output for 0.05, 0.9 and 0.2/0.5) and act only with `-m simple`:
-- `--het-fract F`: minimum ratio of the second-most to the most common base for an IUPAC call (needs `--ambig`). Always pass it explicitly: with the flag omitted, a column with 15% minor allele stays a plain base although the help prints a default of 0.15.
-- `--call-fract F`: fraction of reads that must agree on the top base, otherwise `N` (default 0.75).
-
-`--show-ins` / `--show-del` control insertion / deletion display, not ambiguity.
-
-### Platform-Aware Consensus
-```bash
-# The default Bayesian algorithm needs no --config; platform-specific profiles (samtools 1.17+; list them with `samtools help consensus`)
-samtools consensus --config hifi       input.bam -o consensus.fa   # PacBio HiFi
-samtools consensus --config r10.4_sup  input.bam -o consensus.fa   # ONT R10.4+ (r10.4_dup for duplex)
-samtools consensus --config ultima     input.bam -o consensus.fa   # Ultima Genomics
-samtools consensus --config hiseq      input.bam -o consensus.fa   # Illumina
-
-# Report the ref base at columns with no reads (depth 0; -T added in samtools 1.22; bases keep the FASTA's case)
-samtools consensus -T ref.fa input.bam -o consensus.fa
-```
-`-T` fills only depth-0 columns: columns below `-d` and ambiguous columns stay `N` (planted 450-`N` result at `-d 3`: 300 zero-depth columns filled, 150 below `-d` stay `N`).
-
-### samtools consensus vs bcftools consensus
-
-Different operations -- conflating them produces nonsense:
-
-| Tool | Input | Output | Use case |
-|------|-------|--------|----------|
-| `samtools consensus` | BAM | Consensus FASTA derived from reads (Bayesian) | Viral, de novo / amplicon, low-coverage species |
-| `bcftools consensus` | reference + VCF | Reference with VCF variants applied | Apply called variants (haplotype reconstruction, custom ref for re-mapping) |
-
-For viral consensus from BAM:
-```bash
-# Modern: samtools consensus
-# (--show-del yes would write '*' into the FASTA, so the default no is kept)
-samtools consensus --config hiseq -d 10 --ambig -a input.bam -o consensus.fa
-
-# Apply called variants to reference (different question)
-bcftools consensus -f reference.fa variants.vcf.gz -o sample_consensus.fa
-bcftools consensus -f reference.fa -H 1 phased.vcf.gz -o haplotype1.fa   # phased haplotype 1
-```
-
-With a genotyped (FORMAT/GT) VCF and no `-H`, bcftools 1.24 writes heterozygous SNPs as IUPAC codes; use `-H 1` / `-H 2` for one haplotype, or `-H A` (or `-s -`) to apply every ALT allele.
-
-`samtools consensus` is not iterative and is not an assembly-polishing tool.
 
 ## pysam Python Alternative
 
@@ -301,90 +195,6 @@ with pysam.FastaFile('reference.fa') as ref:
         print(f'>{chrom}:{start + 1}-{end}')
         for i in range(0, len(seq), 60):
             print(seq[i:i + 60])
-```
-
-### Generate Simple Consensus
-```python
-import pysam
-from collections import Counter
-
-def consensus_at_position(bam, chrom, pos):
-    bases = Counter()
-    for pileup in bam.pileup(chrom, pos, pos + 1, truncate=True):
-        if pileup.pos == pos:
-            for read in pileup.pileups:
-                if not read.is_del and not read.is_refskip:
-                    bases[read.alignment.query_sequence[read.query_position]] += 1
-    if bases:
-        return bases.most_common(1)[0][0]
-    return 'N'
-
-with pysam.AlignmentFile('input.bam', 'rb') as bam:
-    consensus = consensus_at_position(bam, 'chr1', 1000000)   # 0-based position
-    print(f'Consensus at chr1:{1000000 + 1} = {consensus}')
-```
-
-### Build Consensus Sequence (Pedagogical Only)
-
-The Python majority-vote consensus below is illustrative, NOT production. `samtools consensus` is Bayesian, quality-aware, and platform-aware; majority vote weights every base equally and produces wrong calls on low-coverage / low-quality regions. Use for teaching pileup iteration mechanics; use `samtools consensus` for any real consensus.
-
-`pileup()` filters before the vote (pysam 0.24.1 defaults): bases with quality < 13, unmapped / secondary / QC-fail / duplicate reads, and orphan reads are dropped, and overlapping mates are counted once. `max_depth` defaults to 8000 (deeper columns are subsampled), so raise it.
-
-`build_consensus` returns exactly `end - start` characters, so index `i` is reference position `start + i`. `pileup()` skips uncovered columns; the function starts from all-`N` and fills only the columns it sees. Building the string by appending per pileup column shifts everything after the first coverage gap (581 false differences vs 1 true on the real chr22 slice). A column deleted in every read counts no base, so it is `N`; insertions are ignored.
-
-```python
-import pysam
-from collections import Counter
-
-def build_consensus(bam_path, chrom, start, end, min_depth=3):
-    """Majority vote over [start, end), 0-based half-open; N where depth < min_depth."""
-    consensus = ['N'] * (end - start)
-
-    with pysam.AlignmentFile(bam_path, 'rb') as bam:
-        for pileup in bam.pileup(chrom, start, end, truncate=True, max_depth=1_000_000):
-            bases = Counter()
-            for read in pileup.pileups:
-                if not read.is_del and not read.is_refskip:
-                    base = read.alignment.query_sequence[read.query_position]
-                    bases[base.upper()] += 1
-
-            if sum(bases.values()) >= min_depth:
-                consensus[pileup.reference_pos - start] = bases.most_common(1)[0][0]
-
-    return ''.join(consensus)
-```
-
-### Compare Consensus to Reference (Python)
-```python
-def compare_to_ref(bam_path, ref_path, chrom, start, end, min_depth=3):
-    """[(1-based position, ref base, consensus base)] for called bases that differ from the reference."""
-    consensus = build_consensus(bam_path, chrom, start, end, min_depth)
-    with pysam.FastaFile(ref_path) as ref:
-        reference = ref.fetch(chrom, start, end).upper()   # soft-masked FASTA is lowercase
-    return [(start + i + 1, r, c)
-            for i, (c, r) in enumerate(zip(consensus, reference))
-            if c != 'N' and c != r]
-```
-A reference `N` or IUPAC code never equals a called base, so those positions are listed as differences (a 30-base `N` run gave 30 entries). Ties (50/50 columns) go to the first base counted; `samtools consensus` calls them `N` (or an IUPAC code with `--ambig`) and weights bases by quality, so expect a few different calls at het columns and at shallow, low-quality columns (chr22 slice 1952-4617 at `-d 3`: 1 difference by majority vote and by `-m simple --call-fract 0.5 --min-BQ 13`, 2 by the default Bayesian mode; at the default `-d 1`: 5 and 4).
-
-### Header Dict for Writing a BAM (not a .dict file)
-`pysam.AlignmentFile(..., 'wb', header=header)` takes this dict. It has no `M5`, so it is not a sequence dictionary: use `samtools dict` for that.
-```python
-import pysam
-
-def create_dict_header(fasta_path):
-    header = {'HD': {'VN': '1.6', 'SO': 'unsorted'}, 'SQ': []}
-
-    with pysam.FastaFile(fasta_path) as ref:
-        for name in ref.references:
-            length = ref.get_reference_length(name)
-            header['SQ'].append({'SN': name, 'LN': length})
-
-    return header
-
-header = create_dict_header('reference.fa')
-for sq in header['SQ'][:5]:
-    print(f'{sq["SN"]}: {sq["LN"]:,} bp')
 ```
 
 ## Reference Preparation Workflow
@@ -447,7 +257,15 @@ samtools consensus input.bam -o consensus.fa
 # Align consensus back to reference
 minimap2 -a reference.fa consensus.fa > comparison.sam
 ```
-For a per-position list of differences, use `compare_to_ref` above.
+For a per-position list of differences, use `compare_to_ref` in `references/python-consensus.md`.
+
+## Reference Files
+
+| File | Read when |
+|------|-----------|
+| `references/contig-naming.md` | BAM and reference disagree on contig names, "which GRCh38 is this", renaming contigs with `samtools reheader`, UCSC / Ensembl / RefSeq name maps |
+| `references/consensus-modes.md` | IUPAC codes (`--ambig`, `--het-fract`, `--call-fract`, `--het-scale`), platform `--config` profiles, `-T`, viral consensus, `samtools consensus` vs `bcftools consensus` |
+| `references/python-consensus.md` | pysam majority-vote consensus, `compare_to_ref`, the header dict for writing a BAM |
 
 ## Related Skills
 
