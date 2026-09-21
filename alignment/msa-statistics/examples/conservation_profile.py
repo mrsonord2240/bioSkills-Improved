@@ -43,6 +43,8 @@ if __name__ == '__main__':
         print(f'  {i:3d}: {score*100:5.1f}% {bar}')
 
     used = [s for s in conservation_scores if not np.isnan(s)]
+    if not used:
+        raise SystemExit('No column has >= min_occupancy (50%) residues: lower min_occupancy or trim the alignment first')
     print(f'\nAverage conservation: {np.mean(used)*100:.1f}% over {len(used)} of {len(conservation_scores)} columns')
 
     fully_conserved = sum(1 for s in used if s == 1.0)

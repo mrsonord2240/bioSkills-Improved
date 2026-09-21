@@ -41,7 +41,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 def normalize_alignment(alignment, upper=True, u_to_t=False):
-    # '.' and '~' -> '-', upper-case; u_to_t=True for RNA. upper=False keeps case (A2M/A3M: lower case marks insert columns).
+    # '.' and '~' -> '-', upper-case; u_to_t=True for RNA. upper=False keeps case (A2M/A3M: lower case marks insert columns). hmmalign A2M is ragged and cannot be loaded by AlignIO: see `alignment/alignment-io`.
     records = []
     for record in alignment:
         seq = str(record.seq).replace('.', '-').replace('~', '-')
@@ -60,7 +60,7 @@ alignment = normalize_alignment(AlignIO.read('alignment.fasta', 'fasta'))
 check_alphabet(alignment, 'ACDEFGHIKLMNPQRSTVWY')  # 'ACGT' for DNA
 ```
 
-`examples/msa_utils.py` holds these helpers (plus `load_alignment`, `is_nucleotide`, the backgrounds); every example imports it and runs without arguments on the tiny alignments in `examples/data/`. `python examples/selftest.py` checks all statistics against values worked out by hand.
+`examples/msa_utils.py` holds these helpers (plus `load_alignment`, `is_nucleotide`, the backgrounds); `load_alignment` guesses the format from the extension (`.sto`/`.stk` Stockholm, `.aln`/`.clw` Clustal, `.phy` PHYLIP, `.nex` Nexus, otherwise FASTA) and takes `fmt=` to override, and the examples that read a file take that path as `argv[1]`. `is_nucleotide` calls an alignment DNA/RNA when at least 90% of its residues are A/C/G/T/U/N, or at least 50% are and the rest are IUPAC ambiguity codes (a DNA alignment with 12% R/Y/S/W/K/M is still DNA; protein sits near 30% A/C/G/T/N); every example imports it and runs without arguments on the tiny alignments in `examples/data/`. `python examples/selftest.py` checks all statistics against values worked out by hand.
 
 ## Pairwise Identity
 
@@ -159,16 +159,28 @@ for i in range(min(20, alignment.get_alignment_length())):
     print(f'Column {i}: {cons*100:.0f}% conserved')
 ```
 
+**Ranking columns:** NaN columns make `sorted(..., key=lambda i: -scores[i])` and `max()` silently misorder (NaN compares False with everything; measured on the Pfam globin seed, the "top 10" then holds values as low as 0.37 instead of 0.63-1.0). Filter NaN first:
+
+```python
+scores = [column_conservation(alignment, i) for i in range(alignment.get_alignment_length())]
+top10 = sorted((i for i, s in enumerate(scores) if not math.isnan(s)), key=lambda i: -scores[i])[:10]
+```
+
 ### Average Conservation Across Alignment
 ```python
 def average_conservation(alignment, ignore_gaps=True, min_occupancy=0.5):
     scores = [column_conservation(alignment, i, ignore_gaps, min_occupancy)
               for i in range(alignment.get_alignment_length())]
     used = [x for x in scores if not math.isnan(x)]
-    return sum(used) / len(used), len(used)   # mean and the number of columns it is based on
+    if not used:
+        return float('nan'), 0                    # fragments / sparse supermatrix: no column reaches min_occupancy
+    return sum(used) / len(used), len(used)       # mean and the number of columns it is based on
 
 avg_cons, n_used = average_conservation(alignment)
-print(f'Average conservation: {avg_cons*100:.1f}% over {n_used} columns')
+if n_used:
+    print(f'Average conservation: {avg_cons*100:.1f}% over {n_used} columns')
+else:
+    print('No column has >= min_occupancy residues: lower min_occupancy or trim the alignment first')
 ```
 
 ### Conservation Profile
@@ -313,13 +325,15 @@ def gap_statistics(alignment):
     ...
 ```
 
-Full implementation: `examples/gap_statistics.py`.
+Full implementation: `examples/gap_statistics.py` (`gap_statistics(alignment)` returns a dict).
 
 ## Alignment Quality Metrics
 
 **Goal:** Score alignment quality using sum-of-pairs or simple match/mismatch/gap scoring across all columns.
 
 **Approach:** For each column, score all pairwise residue comparisons and sum across the alignment. Two conventions, both giving a gap/gap pair score 0 (it is not a comparison, and an all-gap column must not change the score): `alignment_score` charges residue/gap pairs a flat `gap` penalty; `sum_of_pairs` skips them. For proteins use the BLOSUM62 form; for DNA, simple match/mismatch.
+
+`examples/alignment_scores.py` ships both functions below unchanged (importable; `selftest.py` checks them).
 
 ### Overall Alignment Score
 ```python
