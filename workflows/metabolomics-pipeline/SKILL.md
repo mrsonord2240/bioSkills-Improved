@@ -64,11 +64,11 @@ This skill is an orchestrator: it sequences the five component skills and enforc
 
 | Stage | The decision it owns | The trap it must not paper over | Defers to |
 |---|---|---|---|
-| 1. Feature extraction | centWave/grouping/alignment parameters that set the detection floor | A feature table is a parameterized hypothesis; `fillChromPeaks` fabricates intensities; 1 compound = 5-15 features | metabolomics/xcms-preprocessing |
+| 1. Feature extraction | centWave/grouping/alignment parameters that set the detection floor | A feature table is a parameterized hypothesis; `fillChromPeaks` fabricates intensities; 1 compound = 5-15 features | metabolomics/xcms-preprocessing (code: `references/stage1-xcms-extraction.md`) |
 | 2. QC + normalization | drift correction, RSD/D-ratio filtering, dilution normalization, mechanism-aware imputation | Over-correction is invisible to QC RSD; half-min-impute-then-test inflates significance; confounded design is unrescuable | metabolomics/normalization-qc |
 | 3. Annotation | the MSI/Schymanski confidence level of every name | A database hit is Level 4-5, not an identification; ambiguous m/z inflates downstream pathways | metabolomics/metabolite-annotation |
 | 4. Statistics | univariate FDR + permutation-validated multivariate, reconciled | A clean PLS-DA score plot is the generic output of p>>n; R2 is no evidence; scaling changes conclusions | metabolomics/statistical-analysis |
-| 5. Pathway mapping | ORA on IDs vs mummichog on m/z, with an explicit background | The background IS the null; enrichment launders annotation uncertainty into confident biology | metabolomics/pathway-mapping |
+| 5. Pathway mapping | ORA on IDs vs mummichog on m/z, with an explicit background | The background IS the null; enrichment launders annotation uncertainty into confident biology | metabolomics/pathway-mapping (code: `references/stage5-pathway-mapping.md`) |
 
 ## Required Inputs
 
@@ -110,31 +110,7 @@ Stable-isotope tracing (flux) is a SEPARATE branch off labeled raw data, not a s
 
 ## Stage 1 -- Feature Extraction (modern xcms 4.x)
 
-**Goal:** Turn centroided mzML into a features-by-samples table, carrying the parameters as part of the result.
-
-**Approach:** Use the `MsExperiment`/`XcmsExperiment` containers with `*Param` objects; align to pooled QC, group AFTER alignment (obiwarp aligns the raw profile directly, so no pre-grouping is needed; the PeakGroups method instead needs group -> align -> regroup because it uses grouped anchor peaks), and treat filled values as imputations. Full parameter rationale (ppm, peakwidth, bw, prefilter) lives in metabolomics/xcms-preprocessing.
-
-```r
-library(xcms)
-# pd: data.frame, one row per file, with a sample_group column ('QC'/'Control'/'Treatment')
-# ionization_mode: 'positive' or 'negative', set from the acquisition method -- carried through
-# to Stage 3/5 as defs$mode below (commitment #1, the mode-lock). A mixed-mode study runs this
-# whole stage twice, once per mode, and merges the resulting feature tables afterward.
-raw <- readMsExperiment(spectraFiles = mzml_files, sampleData = pd)
-
-cwp <- CentWaveParam(ppm = 10, peakwidth = c(2, 20), snthresh = 10,
-                     prefilter = c(3, 1000), noise = 1000)   # set from instrument; see xcms-preprocessing
-xdata <- findChromPeaks(raw, param = cwp)
-xdata <- adjustRtime(xdata, param = ObiwarpParam(binSize = 0.6,
-    subset = which(sampleData(xdata)$sample_group == 'QC'), subsetAdjust = 'average'))   # anchor RT alignment on pooled QCs
-pdp <- PeakDensityParam(sampleGroups = sampleData(xdata)$sample_group,
-                        bw = 5, minFraction = 0.5, binSize = 0.025)
-xdata <- groupChromPeaks(xdata, param = pdp)        # group on corrected RT (obiwarp needs no pre-grouping)
-xdata <- fillChromPeaks(xdata, param = ChromPeakAreaParam())
-
-feat <- featureValues(xdata, value = 'into')        # features x samples; filled cells are imputations
-defs <- featureDefinitions(xdata)                   # mzmed / rtmed per feature, for annotation + mummichog
-```
+Read `references/stage1-xcms-extraction.md` for the xcms 4.x extraction block (`readMsExperiment` -> `findChromPeaks` -> `adjustRtime` -> `groupChromPeaks` -> `fillChromPeaks` -> `featureValues`) that produces `feat` and `defs`.
 
 ## Stage 2 -- QC, Drift, Normalization (not naive median + half-min)
 
@@ -234,66 +210,19 @@ Univariate Welch + BH (`p.adjust(method='BH')` in R, `multipletests(method='fdr_
 
 ## Stage 5 -- Pathway Mapping (the background is the null)
 
-**Goal:** Interpret the differential result in pathway context without laundering annotation uncertainty into confident biology.
-
-**Approach:** Two disjoint entry points. Confidently identified compounds -> ORA/MSEA with an assay-coverage background (NOT all of KEGG). Raw m/z with no IDs -> mummichog/PSEA whose permutation null is sampled from the FULL feature table. Either way, report mapping coverage and the MSI levels of the driving compounds; downgrade claims to "consistent with perturbation." Full method choice and background construction in metabolomics/pathway-mapping.
-
-```r
-# MSI/Schymanski gate (commitment #2): only Level 1-2 (1, 2a, 2b) may enter identified-ORA as an
-# "identification" -- Level 3-5 is a database-name hypothesis, not a name (see
-# metabolite-annotation). This filter is the one place the principle is enforced as code, not
-# just stated in a QC-checkpoint row.
-# annotated: Stage 3's per-feature output (feature_id, name, msi_level -- msi_level values like
-# 1, '2a', '2b', 3, 4, 5 per metabolite-annotation's assign_level()), joined to feature_id.
-identified_compounds <- unique(annotated$name[grepl('^[12]', as.character(annotated$msi_level))])
-stopifnot(length(identified_compounds) > 0)   # all Level 3-5? use Path B (mummichog) instead, not a forced ORA
-
-current.msg <- character(0); err.vec <- character(0)  # required outside the Shiny app; see pathway-mapping
-library(MetaboAnalystR)
-# Path A: identified compounds (MSI level 1-2) -> ORA
-mSet <- InitDataObjects('conc', 'pathora', FALSE)
-mSet <- SetOrganism(mSet, 'hsa')
-mSet <- Setup.MapData(mSet, identified_compounds)
-mSet <- CrossReferencing(mSet, 'name')
-mSet <- CreateMappingResultTable(mSet)              # inspect coverage before trusting any p-value
-mSet <- SetKEGG.PathLib(mSet, 'hsa', 'current')
-mSet <- SetMetabolomeFilter(mSet, TRUE)             # TRUE alone does not restrict the background --
-mSet <- Setup.KEGGReferenceMetabolome(mSet, 'reference_metabolome.txt')  # this call does (see pathway-mapping)
-mSet <- CalculateOraScore(mSet, 'rbc', 'hyperg')
-# Sends the mapped compound list to xialab.ca and can reject a filtered request outright on this
-# version; if so, use pathway-mapping's Local-Only ORA (KEGGREST + local phyper, no remote call).
-
-# Path B: no IDs -> mummichog on the FULL peak table (m/z + p-value + t-score)
-# mSet <- InitDataObjects('mass_all', 'mummichog', FALSE)
-# mSet <- UpdateInstrumentParameters(mSet, 5.0, 'negative')   # ppm + ionization mode are mandatory
-# mSet <- Read.PeakListData(mSet, 'peaks_full.txt')           # ENTIRE table, not significant-only
-# mSet <- PerformPSEA(mSet, 'hsa_mfn', 'current', permNum = 1000)
-```
+Two disjoint entry points: confidently identified compounds (MSI Level 1-2 only) -> ORA/MSEA with an assay-coverage background; raw m/z with no IDs -> mummichog/PSEA on the FULL feature table. Read `references/stage5-pathway-mapping.md` for the MSI gate and the MetaboAnalystR code for both paths.
 
 ## Alternative Front End -- MS-DIAL
 
-When peak detection happens in the MS-DIAL GUI/console (MS2Dec deconvolution, GC-EI, DIA/SWATH), import the alignment-result table and enter the pipeline at Stage 2. The framing is unchanged: the imported table is still a parameterized hypothesis. See metabolomics/msdial-preprocessing for the export-parsing details, then continue with normalization-qc onward.
+When peak detection happens in MS-DIAL (MS2Dec deconvolution, GC-EI, DIA/SWATH), enter the pipeline at Stage 2 with the imported alignment table; read `references/msdial-front-end.md` for the import block that builds `feat`, `defs`, `sample_class`, `injection_order` and `batch_id`.
 
-The block below turns the export into the objects Stage 2 expects (`feat`, `defs`, `sample_class`, `injection_order`, `batch_id`); run Stage 2 from `fm <- feat` on. Checked on a real MSDIALCUI 5.5.260820 export, whose 4 header rows (`Class`, `File type`, `Injection order`, `Batch ID`) precede the column header and whose `Class` cell marks where the per-sample columns start.
+## Reference Files
 
-```r
-export_file <- Sys.glob('AlignResult-*.mdalign')[1]
-hdr <- strsplit(readLines(export_file, n = 4), '\t', fixed = TRUE)   # class / file type / order / batch
-msdial <- read.csv(export_file, sep = '\t', skip = 4, check.names = FALSE)
-s_idx <- (which(hdr[[1]] == 'Class') + 1):length(hdr[[1]])          # sample columns follow the "Class" cell
-file_type <- hdr[[2]][s_idx]
-use <- file_type %in% c('Sample', 'QC')      # Blank/Standard injections leave the matrix (blank filter: normalization-qc)
-
-feat <- as.matrix(msdial[, colnames(msdial)[s_idx][use]]); storage.mode(feat) <- 'numeric'
-feat[feat == 0] <- NA                        # MS-DIAL writes not-detected as 0; Stage 2's detection filter counts NA
-rownames(feat) <- paste0('FT', msdial[['Alignment ID']])
-defs <- data.frame(mzmed = msdial[['Average Mz']], rtmed = msdial[['Average Rt(min)']] * 60,  # seconds, as xcms
-                   row.names = rownames(feat))
-sample_class <- ifelse(file_type[use] == 'QC', 'QC', hdr[[1]][s_idx][use])   # pooled QCs must be labelled 'QC'
-injection_order <- as.integer(hdr[[3]][s_idx][use])
-batch_id <- as.integer(hdr[[4]][s_idx][use])
-stopifnot(ncol(feat) == length(sample_class), !anyNA(injection_order), !anyNA(batch_id))
-```
+| File | Read it when |
+|---|---|
+| `references/stage1-xcms-extraction.md` | Starting from raw centroided mzML: the xcms 4.x extraction block (Stage 1) |
+| `references/stage5-pathway-mapping.md` | Reaching Stage 5: the Level 1-2 gate, MetaboAnalystR ORA (identified compounds) and mummichog (no IDs) |
+| `references/msdial-front-end.md` | Peak detection was done in MS-DIAL: importing its alignment export and entering at Stage 2 |
 
 ## QC Checkpoints
 
