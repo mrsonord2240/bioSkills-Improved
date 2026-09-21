@@ -86,17 +86,7 @@ Both target structural homolog search, but with different strengths:
 
 Practical workflow for remote homology: (1) Foldseek `easy-search` to retrieve same-fold candidates fast, (2) for hits with TM < 0.5 or with structural-indel rich alignments, re-align with DALI for higher-quality residue equivalences. The two tools are complementary; Foldseek-only misses some twilight-fold relationships, DALI-only misses the AFDB-scale opportunity.
 
-Local DALI with DaliLite v5 (the DALI web server is the alternative). PDB ids for `import.pl` must be 4 characters; chains become `1mbnA`, `1a3nA`, ...:
-
-```bash
-import.pl --pdbfile 1mbn.pdb --pdbid 1mbn --dat DAT/
-import.pl --pdbfile 1a3n.pdb --pdbid 1a3n --dat DAT/
-dali.pl --cd1 1mbnA --cd2 1a3nA --dat1 DAT/ --dat2 DAT/ --title mb_hb --outfmt summary
-# results: ./1mbnA.txt  ->  "1:  1a3n-A  20.3  1.6  141  141  26  MOLECULE: HEMOGLOBIN (ALPHA CHAIN)"
-#                                          Z   rmsd lali nres %id
-```
-
-The result is written to `<cd1>.txt` in the working directory (`--title` only names the job) and the next job with the same query chain overwrites it, so run each job in its own directory. An empty table means no significant similarity. Checked: myoglobin vs hemoglobin alpha Z 20.3 (26% id); PKA (1ATP chain E) vs CDK2 (1HCK) Z 24.1; myoglobin vs PKA empty.
+Local DALI with DaliLite v5 (`import.pl`, `dali.pl`, the result-file trap and checked Z-scores) is in `references/dalilite.md`; the DALI web server is the alternative.
 
 ### TM-score Threshold Caveats
 
@@ -130,26 +120,7 @@ Without `-seq`, TMscore pairs residues by residue number: an AlphaFold myoglobin
 
 ### Foldseek-Multimer for Database-Scale Complex Search
 
-For multi-chain complex search over thousands of complexes or more (a folder of complexes, or a `foldseek createdb` of PDB entries), US-align is too slow; Foldseek-Multimer (Kim et al 2025 Nat Methods) is the modern default. `foldseek databases` lists no multimer database, so the target is a folder or a database you build. Two modes share the chain-pairing prefilter:
-
-| Mode | Algorithm | Use when |
-|------|-----------|----------|
-| `Foldseek-MM` (default) | 3Di+AA Gotoh per chain pair | Fast database search; default speed-sensitivity tradeoff |
-| `Foldseek-MM-TM` | TM-align per chain pair after prefilter (`--alignment-type 1`) | Top-hit refinement with full TM-score |
-
-```bash
-foldseek easy-multimersearch query_complex.pdb complexes_dir/ result tmp/
-foldseek easy-multimersearch query_complex.pdb complexes_dir/ result tmp/ --alignment-type 1   # Foldseek-MM-TM
-
-# Cluster: pass ONE DIRECTORY of complexes. A file list or *.pdb clusters only the last file and still exits 0.
-foldseek easy-multimercluster complexes_dir/ cluster_result tmp/ --multimer-tm-threshold 0.65
-```
-
-`result` holds chain-level hits. The complex-level scores are in `result_report` (tab-separated: query complex, target complex, query chains, target chains, qTM, tTM, rotation `u`, translation `t`, assembly id); rank and filter on columns 5-6, since `easy-multimersearch` rejects `--multimer-tm-threshold` (that flag exists only on `easy-multimercluster`) and its `--tmscore-threshold` filters chain alignments only. As under `--alignment-type 1` elsewhere, E-values in `result` are not meaningful there. Check: searching 1IRD (dimer) against a directory holding the 1A3N tetramer gives qTM 0.981 / tTM 0.492 for chains A,B vs A,B, matching US-align (0.977 / 0.494).
-
-Decision guide: pairwise complex pair on a few hundred targets -> US-align with `-mm 1 -ter 0`. Database search across thousands to millions of complex entries -> Foldseek-Multimer: the paper reports 3-4 orders of magnitude over US-align at that scale. It is not faster by that factor on small sets: in one audit run on 62 small oligomers it was 1.7x (folder, including `createdb`) to 5.8x (prebuilt database) faster than US-align, and its prefilter reported only 22 of the 62 targets, though no pair with TM > 0.5 was missing.
-
-**Reporting convention:** Always quote BOTH the multimer TM-score (whole-complex) AND the worst per-chain TM-score; high multimer TM with one low per-chain score signals topology-matched but locally divergent chains (often promiscuous binders or paralog swaps), which is biologically distinct from a uniformly-conserved complex.
+For multi-chain complex search over thousands of complexes or more, US-align is too slow and Foldseek-Multimer (`foldseek easy-multimersearch`, `easy-multimercluster`) is the default. Commands, the `_report` columns, the clustering trap and the speed evidence are in `references/foldseek-multimer.md`. Pairwise complex pair on a few hundred targets: stay with US-align `-mm 1 -ter 0`.
 
 ### Bio.PDB.Superimposer
 
@@ -230,32 +201,7 @@ Not covered, because no runnable path could be verified: T-Coffee Expresso and 3
 
 ### Foldmason easy-msa
 
-```bash
-foldmason easy-msa structures/*.pdb result tmp/ \
-    --refine-iters 100 --refine-seed 42 \
-    --report-mode 1
-
-# Outputs: result_aa.fa (amino-acid MSA), result_3di.fa (3Di MSA), result.nw (guide tree), result.html (LDDT report)
-```
-
-`--refine-iters` controls iterative MSA refinement (default 0, which is deterministic). Refinement is random unless `--refine-seed` is set: unseeded `--refine-iters 100` runs give different MSAs (how different depends on the set: from under 1% to about 40% of aligned pairs differing between runs), while `--refine-seed 42` gave byte-identical FASTA on repeat. Set a seed or use `--refine-iters 0` for any result you compare or report. `--report-mode 1` produces an HTML report with per-column LDDT confidence. The 3Di MSA can be used directly for evolutionary analyses where structure rather than sequence is the appropriate signal. Foldmason writes one row per chain, named `<file>_<chain>` (a single-chain file keeps its bare stem): 11 files gave 18 rows, so count rows as chains, not structures.
-
-**Per-column LDDT extraction:** Run with `--report-mode 2` to produce machine-readable JSON output:
-
-```bash
-foldmason easy-msa structures/*.pdb result tmp/ --report-mode 2
-# Produces result.json: keys entries (rows: name, aa, ss, ca), scores, tree, statistics
-```
-
-```python
-import json
-with open('result.json') as f:
-    report = json.load(f)
-lddt_per_column = report['scores']          # NOT 'per_column_lddt' (that key does not exist; .get returns None)
-assert len(lddt_per_column) == len(report['entries'][0]['aa'])   # one value per MSA column
-```
-
-`-1` marks a column with no LDDT (113 of 486 columns in an 11-structure globin/kinase run). Checked on Foldmason 4.dd3c235; inspect a sample `result.json` if the version differs.
+`foldmason easy-msa structures/*.pdb result tmp/ --refine-iters 100 --refine-seed 42 --report-mode 1` writes `result_aa.fa`, `result_3di.fa`, `result.nw` and `result.html`. Always set `--refine-seed` (or `--refine-iters 0`): unseeded refinement is random. Rows are chains, not files. Per-column LDDT is under the JSON key `scores` (`--report-mode 2`), not `per_column_lddt`. Details and the extraction snippet: `references/foldmason.md`.
 
 ## AlphaFold Integration
 
@@ -287,11 +233,11 @@ PyMOL `super` performs cycle-fitting for distantly related structures (better th
 | Two structures, known correspondence | `Bio.PDB.Superimposer` |
 | Two structures, unknown correspondence | TMalign or USalign |
 | Multi-chain complex, pairwise | USalign with `-mm 1 -ter 0` |
-| Multi-chain complex, database search | `foldseek easy-multimersearch` (Foldseek-Multimer) |
-| Twilight-fold homology (TM 0.3-0.5) | DALI via DaliLite `dali.pl` (Z-score ranks low-similarity hits better than Foldseek) |
+| Multi-chain complex, database search | `foldseek easy-multimersearch` (Foldseek-Multimer; `references/foldseek-multimer.md`) |
+| Twilight-fold homology (TM 0.3-0.5) | DALI via DaliLite `dali.pl` (Z-score ranks low-similarity hits better than Foldseek; `references/dalilite.md`) |
 | Structural homolog search at AFDB scale (single chain) | `foldseek easy-search` |
 | All-vs-all clustering of structures | `foldseek easy-cluster --tmscore-threshold 0.5` |
-| Multiple structure alignment, < 100 chains | MUSTANG or Foldmason `easy-msa` |
+| Multiple structure alignment, < 100 chains | MUSTANG or Foldmason `easy-msa` (`references/foldmason.md`) |
 | Multiple structure alignment, > 1000 chains | Foldmason `easy-msa` |
 | Distant homology with no structures | Predict with ColabFold/ESMFold first, then Foldseek |
 
@@ -305,6 +251,14 @@ PyMOL `super` performs cycle-fitting for distantly related structures (better th
 | Bio.PDB `Fixed and moving atom lists differ in size` | Unequal atom lists | Pair CA atoms by (chain, number, icode) with `residue.id[0] == ' '` (see Bio.PDB.Superimposer) |
 | TM-score normalised by a fixed length | `-L N` was passed | Drop `-L`; the default normalises by each chain length |
 | Foldmason `structuremsa died`, exit 1 | Only one input structure | Give at least two structures |
+
+## Reference Files
+
+| File | Read when |
+|------|-----------|
+| `references/foldseek-multimer.md` | Searching or clustering multi-chain complexes with Foldseek-Multimer (commands, `_report` columns, speed evidence, reporting convention) |
+| `references/dalilite.md` | Running DALI locally with DaliLite v5 (`import.pl`, `dali.pl`, result-file trap) |
+| `references/foldmason.md` | Building a structural MSA with Foldmason (seeding, output files, per-column LDDT JSON) |
 
 ## Related Skills
 
