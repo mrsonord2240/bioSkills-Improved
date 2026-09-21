@@ -9,7 +9,7 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: coloc 5.2.3+, susieR 0.12.35+, hyprcoloc 1.0+ (GitHub jrs95/hyprcoloc), SMR 1.3.1+ (CLI, cnsgenomics.com), eCAVIAR 2.2+ (compiled from caviar/eCAVIAR repo), PWCoCo 1.0+ (jwr-git/pwcoco), moloc 0.1+ (clagiamba/moloc), SharePro_coloc 7.0+ (zhwm/SharePro_coloc), R >= 4.1.
+Reference examples tested with: coloc 5.2.3+, susieR 0.12.35+, hyprcoloc 0.0.2 (GitHub jrs95/hyprcoloc; the GitHub DESCRIPTION version, checked 2026-09-21), SMR 1.3.1+ (CLI, cnsgenomics.com), eCAVIAR 2.2+ (compiled from caviar/eCAVIAR repo), PWCoCo 1.0+ (jwr-git/pwcoco), moloc 0.1+ (clagiamba/moloc), SharePro_coloc 7.0+ (zhwm/SharePro_coloc), R >= 4.1.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - R: `packageVersion('coloc')`; check `?coloc.abf`, `?coloc.susie`, `?runsusie`
@@ -64,11 +64,11 @@ Methodology evolves; verify the current Open Targets Genetics, eQTL Catalogue, a
 
 ### coloc.abf -- PP.H3 inflation under multiple causal variants
 
-**Trigger:** Locus has 2+ independent causal signals in moderate LD (r2 ~ 0.3-0.6) **AND** comparable effect sizes / limited power at the two signals. r2 in that range is necessary but not sufficient: verified by direct simulation, a well-powered, clean two-causal-variant locus at r2=0.51-0.53 resolved decisively to PP.H4=1.0 (when the two causal SNPs happened to include the true shared one) or PP.H3=1.0 (when they were genuinely distinct) with no ambiguity -- coloc.abf did not exhibit spurious PP.H3 inflation from r2 alone. The ambiguous symptom below needs the additional condition of comparable/underpowered per-SNP evidence at the two signals, not just moderate LD.
+**Trigger:** Locus has 2+ independent causal signals in moderate LD (r2 ~ 0.3-0.6), one shared with the eQTL and one GWAS-only, **and both datasets are powered to see the signals** (eQTL N >= ~400 at a per-SD effect >= ~0.3, or N ~ 5000 at effect ~ 0.12; GWAS N = 6000). Verified 2026-09-21 by simulation (r2 = 0.52, GWAS causal at SNP A + SNP B, eQTL causal at A, 20 replicates): coloc.abf did not blur to a middling PP.H3; it flipped per replicate between PP.H4 ~ 1 and PP.H3 ~ 1 (about 40% of replicates returned PP.H3 > 0.8 for a truly shared signal), depending on which of the two SNPs led in each dataset. Limited power does **not** trigger it: eQTL N <= 200, or small effects (0.05-0.12 at N <= 1000), gave PP.H1/PP.H0 dominance with PP.H3 <= 0.05. A well-powered single-causal locus at r2 0.5 is also decisive (PP.H4 = 1.0 shared, PP.H3 = 1.0 distinct), so r2 alone is not the trigger.
 
-**Mechanism:** The single-causal-variant assumption forces the model to allocate posterior mass to H3 (distinct causal variants) whenever the per-SNP Bayes factors for the two top SNPs do not align **and neither SNP's evidence clearly dominates the other**.
+**Mechanism:** The single-causal-variant assumption forces each dataset onto one SNP. When the lead SNP differs between the GWAS (B) and the eQTL (A) because two nearby signals compete, the per-SNP Bayes factors of the two datasets peak at different SNPs and the posterior goes to H3 (distinct causal variants).
 
-**Symptom:** Visual co-localization in LocusZoom looks convincing, but `result$summary['PP.H3.abf']` dominates over PP.H4; sensitivity() shows PP.H4 stays low across the entire p12 grid. If PP.H3/PP.H4 instead resolve decisively (near 0 or 1) at moderate LD, the locus is well-powered and the call can be trusted without escalating to coloc.susie.
+**Symptom:** LocusZoom looks convincing, but `result$summary['PP.H3.abf']` is high while PP.H4 is low, and the answer is unstable under resampling or a different eQTL panel. Because the outcome is near-binary (not intermediate), a decisive PP.H3 at moderate LD in a locus with 2+ GWAS signals is not proof of distinct causal variants: check with coloc.susie. Low PP.H4 with PP.H1 dominating is a power problem, not this failure.
 
 **Fix:** Run coloc.susie (or eCAVIAR or PWCoCo) to allow multiple causal variants. If coloc.susie returns multiple credible sets with one pair showing PP.H4 > 0.75, this is real allelic heterogeneity not failure.
 
@@ -415,18 +415,25 @@ Interpretation: significant `p_SMR` (Bonferroni-corrected across probes tested, 
 Mismatched effect alleles silently invert signs of betas, collapsing PP.H4 into PP.H3. Required steps before coloc:
 
 1. Merge GWAS and eQTL summary stats by SNP ID (rsID or chr:pos:ref:alt).
-2. Mark SNP-pairs as `same` (A1/A2 match) or `flip` (A1/A2 swap); drop SNPs that match neither.
+2. Mark SNP-pairs as `same` (A1/A2 match) or `flip` (A1/A2 swap); for non-palindromic pairs reported on opposite strands (e.g. A/G vs T/C), complement dataset 2's alleles first, then classify; drop SNPs that match neither.
 3. For `flip` rows, negate the second dataset's beta (and swap A1/A2).
 4. Drop palindromic SNPs (A/T or C/G) at MAF > 0.42; their strand cannot be inferred from coding alone (TwoSampleMR `harmonise_data` standard cutoff).
 5. Verify genome build alignment (hg19 vs hg38 must match; lift over if not).
 
 ```r
 harmonise <- function(df1, df2) {
+    comp <- function(a) c(A='T', T='A', C='G', G='C')[a]
     m <- merge(df1, df2, by='SNP', suffixes=c('.1','.2'))
-    same <- m$A1.1 == m$A1.2 & m$A2.1 == m$A2.2
-    flip <- m$A1.1 == m$A2.2 & m$A2.1 == m$A1.2
     palindromic <- (m$A1.1 %in% c('A','T') & m$A2.1 %in% c('A','T')) |
                    (m$A1.1 %in% c('C','G') & m$A2.1 %in% c('C','G'))
+    # Non-palindromic strand mismatch: complement dataset 2's alleles, then treat as same/flip
+    strand <- !palindromic & m$A1.1 == comp(m$A1.2) & m$A2.1 == comp(m$A2.2) |
+              !palindromic & m$A1.1 == comp(m$A2.2) & m$A2.1 == comp(m$A1.2)
+    strand[is.na(strand)] <- FALSE
+    a1 <- ifelse(strand, comp(m$A1.2), m$A1.2); a2 <- ifelse(strand, comp(m$A2.2), m$A2.2)
+    m$A1.2 <- unname(a1); m$A2.2 <- unname(a2)
+    same <- m$A1.1 == m$A1.2 & m$A2.1 == m$A2.2
+    flip <- m$A1.1 == m$A2.2 & m$A2.1 == m$A1.2
     m$BETA.2[flip] <- -m$BETA.2[flip]
     m$MAF.2[flip] <- 1 - m$MAF.2[flip]
     keep <- (same | flip) & !(palindromic & m$MAF.1 > 0.42)
@@ -438,6 +445,7 @@ Harmonisation pitfalls to watch for:
 
 - **Allele coding mismatch.** GWAS may report effect allele as A1 while eQTL reports it as A2. Always check both and flip betas where needed.
 - **Build mismatch.** hg19 GWAS coords + hg38 eQTL coords silently merge on rsID but break on chr:pos. Lift over with `rtracklayer::liftOver` or CrossMap before merging.
+- **Strand mismatch.** Non-palindromic SNPs coded on opposite strands (A/G vs T/C) are resolved by the complement step in `harmonise()`. Palindromic SNPs cannot be resolved this way (next bullet).
 - **Palindromic SNPs at high MAF.** A/T and C/G SNPs at MAF > 0.42 cannot be unambiguously strand-resolved; drop them or resolve with reference-panel MAF.
 - **Multi-allelic SNPs.** Many summary stats collapse multi-allelic loci by keeping only the most-frequent alt; if datasets pick different alts, harmonisation drops the SNP. Split on chr:pos:ref:alt as a unique key.
 - **rsID dependence.** rsID can be remapped across dbSNP builds (e.g. merge of two rsIDs into one). Prefer chr:pos:ref:alt keys for cross-study merges.
@@ -473,7 +481,7 @@ Harmonisation pitfalls to watch for:
 
 - **coloc**: CRAN. `install.packages('coloc')`. Bundles susieR dependency for >= 5.1.
 - **susieR**: CRAN. `install.packages('susieR')`. >= 0.12.35 for `estimate_s_rss` and `kriging_rss`.
-- **HyPrColoc**: GitHub only (never CRAN). `remotes::install_github('jrs95/hyprcoloc')`. Requires R >= 3.5.
+- **HyPrColoc**: GitHub only (never CRAN). `remotes::install_github('jrs95/hyprcoloc')`. Requires R >= 3.6. Its C++ (`align2.cpp`) fails to compile against RcppEigen 0.3.4.x (Eigen 3.4 `IndexedView` change: "cannot convert ... IndexedView ... to Scalar"); install `RcppEigen` 0.3.3.9.4 (Eigen 3.3.9) from the CRAN archive first. Built and run on Linux (R 4.4.1, g++ 15.2) that way; `knitr`/`rmarkdown` are listed in Imports but never used by the code.
 - **SMR**: Pre-compiled binary from cnsgenomics.com/software/smr. Linux/Mac/Windows binaries; no R package.
 - **eCAVIAR**: Compile from GitHub fhormoz/caviar; C++ source. CLI `eCAVIAR`. PAINTOR is the related multi-trait fine-mapping toolkit.
 - **PWCoCo**: GitHub jwr-git/pwcoco. Compiled C++ CLI; can also be invoked from R via wrapper scripts.
