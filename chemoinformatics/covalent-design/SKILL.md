@@ -9,7 +9,7 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: RDKit 2024.09+, OpenEye / AutoDock Vina 1.2+ (for covalent extensions), GOLD (commercial), DOCKovalent (web service), HCovDock 1.0+.
+Reference examples tested with: RDKit 2024.09+, OpenEye / AutoDock Vina 1.2+ (for covalent extensions), GOLD (commercial), DOCKovalent (web service, covalent.docking.org), HCovDock 1.0+ (standalone installation). Install RDKit with `pip install rdkit`.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show rdkit` then `help(rdkit.Chem)` to check signatures
