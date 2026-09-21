@@ -4,6 +4,7 @@ description: Corrects fluorophore spillover (conventional compensation) or spect
 tool_type: r
 primary_tool: flowCore
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Detects m6A modifications from Oxford Nanopore direct-RNA-seq (DRS)
 tool_type: python
 primary_tool: m6Anet
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

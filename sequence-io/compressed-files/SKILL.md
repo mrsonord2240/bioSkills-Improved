@@ -4,6 +4,7 @@ description: Read, write, and index compressed sequence files (gzip, bzip2, xz, 
 tool_type: mixed
 primary_tool: Bio.bgzf
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

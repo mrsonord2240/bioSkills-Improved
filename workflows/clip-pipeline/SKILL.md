@@ -7,6 +7,7 @@ description: End-to-end CLIP-seq pipeline from FASTQ to ENCODE-compliant binding
 tool_type: mixed
 primary_tool: CLIPper
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

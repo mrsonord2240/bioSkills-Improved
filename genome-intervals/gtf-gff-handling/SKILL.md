@@ -4,6 +4,7 @@ description: Parses, queries, converts, and extracts from GTF and GFF3 gene-mode
 tool_type: mixed
 primary_tool: gffutils
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

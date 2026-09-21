@@ -4,6 +4,7 @@ description: Loads, converts, and manipulates Hi-C contact matrices in cooler fo
 tool_type: mixed
 primary_tool: cooler
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

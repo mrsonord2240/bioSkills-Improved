@@ -4,6 +4,7 @@ description: "Manages PLINK genotype filesets - format conversion (VCF, BED/BIM/
 tool_type: cli
 primary_tool: plink
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

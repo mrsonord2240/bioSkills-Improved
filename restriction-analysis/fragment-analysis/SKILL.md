@@ -4,6 +4,7 @@ description: Predict restriction digest fragment sizes and gel patterns using Bi
 tool_type: python
 primary_tool: Bio.Restriction
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

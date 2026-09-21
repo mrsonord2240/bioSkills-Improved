@@ -4,6 +4,7 @@ description: Segments the genome into chromatin states from combinatorial histon
 tool_type: cli
 primary_tool: ChromHMM
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

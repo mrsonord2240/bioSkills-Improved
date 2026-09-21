@@ -4,6 +4,7 @@ description: Identifies differentially bound ChIP-seq regions between conditions
 tool_type: mixed
 primary_tool: DiffBind
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

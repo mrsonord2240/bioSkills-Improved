@@ -17,6 +17,7 @@ qc_checkpoints:
   - after_integration: "Per-(factor,view) R2 balanced; drop factors <1-2% R2 in ALL views; no single view dominates every factor"
   - after_validation: "Held-out cohort (not in-cohort CV, biased at n<<p); batch correlated with every factor; batch corrected ONCE"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

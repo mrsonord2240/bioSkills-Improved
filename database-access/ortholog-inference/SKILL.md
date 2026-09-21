@@ -4,6 +4,7 @@ description: Pull pre-computed ortholog calls from public databases (OrthoDB, En
 tool_type: python
 primary_tool: requests
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

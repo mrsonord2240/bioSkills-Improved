@@ -4,6 +4,7 @@ description: Identify differentially accessible chromatin regions across conditi
 tool_type: r
 primary_tool: DiffBind
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

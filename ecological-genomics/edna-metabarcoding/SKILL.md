@@ -4,6 +4,7 @@ description: Processes eDNA metabarcoding from raw paired-end reads to species t
 tool_type: mixed
 primary_tool: dada2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

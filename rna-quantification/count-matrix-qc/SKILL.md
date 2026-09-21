@@ -4,6 +4,7 @@ description: Quality control and exploration of RNA-seq count matrices before di
 tool_type: mixed
 primary_tool: DESeq2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

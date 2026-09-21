@@ -4,6 +4,7 @@ description: Trains and applies base-resolution deep learning models on ChIP-seq
 tool_type: python
 primary_tool: chrombpnet
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

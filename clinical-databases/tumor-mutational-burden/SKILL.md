@@ -4,6 +4,7 @@ description: Calculates tumor mutational burden from WES/WGS/panel data with Fri
 tool_type: python
 primary_tool: cyvcf2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

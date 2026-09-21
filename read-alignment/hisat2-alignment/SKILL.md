@@ -4,6 +4,7 @@ description: Aligns RNA-seq reads to a genome with HISAT2, the splice-aware alig
 tool_type: cli
 primary_tool: HISAT2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

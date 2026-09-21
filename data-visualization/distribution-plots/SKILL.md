@@ -4,6 +4,7 @@ description: Plot per-group distributions of continuous data using boxplots, vio
 tool_type: mixed
 primary_tool: ggplot2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

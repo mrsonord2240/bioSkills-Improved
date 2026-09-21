@@ -4,6 +4,7 @@ description: Performs proximity operations on genomic intervals with bedtools (c
 tool_type: mixed
 primary_tool: bedtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

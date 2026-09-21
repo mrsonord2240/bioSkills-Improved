@@ -4,6 +4,7 @@ description: Analyzes CUT&RUN (Skene Henikoff 2017) and CUT&Tag (Kaya-Okur 2019)
 tool_type: mixed
 primary_tool: SEACR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

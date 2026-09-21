@@ -4,6 +4,7 @@ description: Identify tumor neoantigens from somatic variants with pVACtools (pV
 tool_type: mixed
 primary_tool: pVACtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

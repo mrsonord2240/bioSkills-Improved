@@ -4,6 +4,7 @@ description: Processes experimental RNA structure probing data (SHAPE-MaP, DMS-M
 tool_type: cli
 primary_tool: ShapeMapper2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

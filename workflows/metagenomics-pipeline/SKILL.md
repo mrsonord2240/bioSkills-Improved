@@ -17,6 +17,7 @@ qc_checkpoints:
   - after_classification: "Classification rate >60%, known taxa dominant"
   - after_functional: "Pathway coverage reasonable, unmapped <50%"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

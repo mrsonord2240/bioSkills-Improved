@@ -4,6 +4,7 @@ description: Assesses Oxford Nanopore and PacBio long-read quality with NanoPlot
 tool_type: cli
 primary_tool: nanoplot
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

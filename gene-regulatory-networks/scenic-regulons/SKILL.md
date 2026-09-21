@@ -4,6 +4,7 @@ description: Infer transcription factor regulons from single-cell RNA-seq with p
 tool_type: python
 primary_tool: pySCENIC
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

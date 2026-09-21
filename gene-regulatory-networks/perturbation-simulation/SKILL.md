@@ -4,6 +4,7 @@ description: Simulate transcription factor perturbation effects on cell state in
 tool_type: python
 primary_tool: CellOracle
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

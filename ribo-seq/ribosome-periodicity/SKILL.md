@@ -4,6 +4,7 @@ description: Validate Ribo-seq library quality by measuring 3-nucleotide periodi
 tool_type: mixed
 primary_tool: riboWaltz
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

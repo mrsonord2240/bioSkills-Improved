@@ -4,6 +4,7 @@ description: Basecalls raw Oxford Nanopore signal (POD5/FAST5) into reads with D
 tool_type: cli
 primary_tool: dorado
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

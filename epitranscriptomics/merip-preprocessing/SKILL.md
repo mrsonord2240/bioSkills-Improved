@@ -4,6 +4,7 @@ description: Aligns and QCs methylated-RNA-immunoprecipitation (MeRIP / m6A-seq)
 tool_type: cli
 primary_tool: STAR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

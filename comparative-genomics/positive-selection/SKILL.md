@@ -4,6 +4,7 @@ description: Detect positive (diversifying / episodic / pervasive) selection usi
 tool_type: mixed
 primary_tool: PAML
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

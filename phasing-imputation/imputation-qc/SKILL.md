@@ -4,6 +4,7 @@ description: Assesses and filters phasing/imputation output - the quality metric
 tool_type: mixed
 primary_tool: bcftools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Predict enhancer-gene regulatory connections from ATAC-seq using AB
 tool_type: mixed
 primary_tool: ABC-Enhancer-Gene-Prediction
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

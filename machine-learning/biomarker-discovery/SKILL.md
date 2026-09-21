@@ -4,6 +4,7 @@ description: Selects biomarker features from high-dimensional omics data using B
 tool_type: python
 primary_tool: boruta
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

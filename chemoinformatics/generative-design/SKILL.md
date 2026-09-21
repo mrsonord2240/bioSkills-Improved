@@ -4,6 +4,7 @@ description: Designs novel molecules using REINVENT 4 (de novo, scaffold decorat
 tool_type: python
 primary_tool: REINVENT
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

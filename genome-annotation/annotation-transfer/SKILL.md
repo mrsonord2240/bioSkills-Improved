@@ -4,6 +4,7 @@ description: Transfers gene annotations between genome assemblies via coordinate
 tool_type: cli
 primary_tool: Liftoff
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Computes and interprets sequencing read depth and coverage over a g
 tool_type: mixed
 primary_tool: bedtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

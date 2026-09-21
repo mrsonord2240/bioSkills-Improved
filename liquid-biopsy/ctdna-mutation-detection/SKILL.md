@@ -4,6 +4,7 @@ description: Detects somatic mutations in circulating tumor DNA, treating low-VA
 tool_type: mixed
 primary_tool: VarDict
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Infers person-to-person transmission from pathogen genomes using ou
 tool_type: mixed
 primary_tool: TransPhylo
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

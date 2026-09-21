@@ -4,6 +4,7 @@ description: Prioritizes rare-disease variants from trio/quad WES/WGS with de no
 tool_type: python
 primary_tool: pandas
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Co-designs qPCR/RT-qPCR primers and hydrolysis (TaqMan) or molecula
 tool_type: python
 primary_tool: primer3-py
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

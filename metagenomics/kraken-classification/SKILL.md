@@ -4,6 +4,7 @@ description: Classifies shotgun metagenomic reads to taxa with Kraken2's minimiz
 tool_type: cli
 primary_tool: Kraken2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

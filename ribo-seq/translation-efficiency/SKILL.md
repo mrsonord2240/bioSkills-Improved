@@ -4,6 +4,7 @@ description: Quantify translation efficiency (TE) as ribosome occupancy relative
 tool_type: mixed
 primary_tool: riborex
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

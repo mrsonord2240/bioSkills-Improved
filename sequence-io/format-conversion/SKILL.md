@@ -4,6 +4,7 @@ description: Convert between sequence file formats (FASTA, FASTQ, GenBank, EMBL,
 tool_type: python
 primary_tool: Bio.SeqIO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

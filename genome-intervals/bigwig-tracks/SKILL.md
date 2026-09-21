@@ -4,6 +4,7 @@ description: Reads, queries, and writes bigWig indexed binary signal tracks (cov
 tool_type: mixed
 primary_tool: pyBigWig
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

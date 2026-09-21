@@ -4,6 +4,7 @@ description: Stores and operates on sparse expression matrices for single-cell a
 tool_type: python
 primary_tool: scipy.sparse
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

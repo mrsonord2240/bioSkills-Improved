@@ -4,6 +4,7 @@ description: Turns raw Illumina Infinium methylation BeadChip IDATs (450K, EPIC,
 tool_type: r
 primary_tool: sesame
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

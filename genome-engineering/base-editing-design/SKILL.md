@@ -4,6 +4,7 @@ description: Designs cytosine (CBE, C-to-T) and adenine (ABE, A-to-G) base-edito
 tool_type: python
 primary_tool: BioPython
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

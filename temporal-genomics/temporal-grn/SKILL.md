@@ -4,6 +4,7 @@ description: Infers directed, time-delayed gene regulatory edges from BULK time-
 tool_type: mixed
 primary_tool: statsmodels
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

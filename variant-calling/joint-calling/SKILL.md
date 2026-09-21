@@ -4,6 +4,7 @@ description: Joint genotype a cohort of per-sample gVCFs with GATK (HaplotypeCal
 tool_type: cli
 primary_tool: GATK
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

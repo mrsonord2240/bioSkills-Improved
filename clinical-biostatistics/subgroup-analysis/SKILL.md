@@ -4,6 +4,7 @@ description: Performs subgroup and heterogeneous treatment effect (HTE) analyses
 tool_type: python
 primary_tool: statsmodels
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

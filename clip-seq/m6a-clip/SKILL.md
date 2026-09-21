@@ -4,6 +4,7 @@ description: Map N6-methyladenosine (m6A) RNA modifications at single-nucleotide
 tool_type: mixed
 primary_tool: miCLIP2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

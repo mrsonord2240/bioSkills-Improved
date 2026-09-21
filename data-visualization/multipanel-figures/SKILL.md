@@ -4,6 +4,7 @@ description: Compose multi-panel publication figures with patchwork, cowplot, gr
 tool_type: mixed
 primary_tool: patchwork
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: "Imports Bismark coverage or cytosine-report files into the methylK
 tool_type: r
 primary_tool: methylKit
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Tests miRNAs for differential expression with DESeq2 or edgeR using
 tool_type: r
 primary_tool: DESeq2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

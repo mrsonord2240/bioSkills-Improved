@@ -4,6 +4,7 @@ description: Tests whether two genomic interval sets overlap (colocalize) more t
 tool_type: mixed
 primary_tool: regioneR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

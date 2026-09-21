@@ -4,6 +4,7 @@ description: Reconcile gene trees against a species tree under probabilistic mod
 tool_type: cli
 primary_tool: ALE
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

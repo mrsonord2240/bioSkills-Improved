@@ -4,6 +4,7 @@ description: Tests whether a proposed or predicted RNA secondary structure is su
 tool_type: cli
 primary_tool: R-scape
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

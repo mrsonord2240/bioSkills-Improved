@@ -4,6 +4,7 @@ description: Quantifies biodiversity from species abundance/incidence tables usi
 tool_type: r
 primary_tool: iNEXT
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

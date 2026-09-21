@@ -4,6 +4,7 @@ description: Integrates single-cell paired TCR/BCR (10x VDJ, AIRR, dandelion, BD
 tool_type: python
 primary_tool: scirpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

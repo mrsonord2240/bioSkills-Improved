@@ -4,6 +4,7 @@ description: Build interactive HTML/web visualizations with plotly (Python/R), b
 tool_type: mixed
 primary_tool: plotly
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

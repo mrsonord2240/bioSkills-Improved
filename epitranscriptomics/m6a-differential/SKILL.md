@@ -4,6 +4,7 @@ description: Identifies differential m6A methylation between conditions from MeR
 tool_type: r
 primary_tool: exomePeak2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

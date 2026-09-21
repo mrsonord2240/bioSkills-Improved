@@ -4,6 +4,7 @@ description: Compare cell-type composition and spatial features across condition
 tool_type: mixed
 primary_tool: diffcyt
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

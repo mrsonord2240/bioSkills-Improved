@@ -4,6 +4,7 @@ description: Turns Hi-C/Micro-C FASTQ into a deduplicated, filtered .pairs file 
 tool_type: cli
 primary_tool: pairtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

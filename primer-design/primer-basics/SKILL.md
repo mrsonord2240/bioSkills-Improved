@@ -4,6 +4,7 @@ description: Designs and ranks PCR primer pairs for a target template with prime
 tool_type: python
 primary_tool: primer3-py
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

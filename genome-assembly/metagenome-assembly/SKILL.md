@@ -4,6 +4,7 @@ description: Assembles microbial-community sequencing into metagenome-assembled 
 tool_type: cli
 primary_tool: metaFlye
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

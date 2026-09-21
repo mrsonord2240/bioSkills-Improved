@@ -4,6 +4,7 @@ description: Infer orthologous genes and gene families across species using Orth
 tool_type: mixed
 primary_tool: OrthoFinder
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

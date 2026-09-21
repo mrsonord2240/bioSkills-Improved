@@ -4,6 +4,7 @@ description: Analyze spatial cell-cell interactions, neighborhoods, and niches i
 tool_type: python
 primary_tool: squidpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

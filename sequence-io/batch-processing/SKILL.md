@@ -4,6 +4,7 @@ description: Process many sequence files in batch (count, merge, split, convert,
 tool_type: python
 primary_tool: Bio.SeqIO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

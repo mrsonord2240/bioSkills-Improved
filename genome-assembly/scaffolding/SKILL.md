@@ -4,6 +4,7 @@ description: Orders and orients assembled contigs into chromosome-scale scaffold
 tool_type: cli
 primary_tool: YaHS
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

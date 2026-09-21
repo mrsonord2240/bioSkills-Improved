@@ -4,6 +4,7 @@ description: Identify recurrent and driver copy number alterations across a tumo
 tool_type: mixed
 primary_tool: gistic2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

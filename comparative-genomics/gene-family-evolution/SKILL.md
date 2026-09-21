@@ -4,6 +4,7 @@ description: Model gene-family birth-death dynamics across a species tree using 
 tool_type: cli
 primary_tool: CAFE5
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

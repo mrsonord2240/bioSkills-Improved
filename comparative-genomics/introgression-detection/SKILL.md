@@ -4,6 +4,7 @@ description: Detect introgression and admixture between species or populations u
 tool_type: cli
 primary_tool: Dsuite
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

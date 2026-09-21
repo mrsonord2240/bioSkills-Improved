@@ -4,6 +4,7 @@ description: Nominates and assesses CRISPR off-target sites genome-wide. Enumera
 tool_type: mixed
 primary_tool: Cas-OFFinder
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

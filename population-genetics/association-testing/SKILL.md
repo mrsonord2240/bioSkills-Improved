@@ -4,6 +4,7 @@ description: "Single-variant common-variant GWAS with plink2 --glm (linear/logis
 tool_type: cli
 primary_tool: plink2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

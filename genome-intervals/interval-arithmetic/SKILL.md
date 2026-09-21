@@ -4,6 +4,7 @@ description: Performs set operations on genomic intervals - intersect (-wa/-wb/-
 tool_type: mixed
 primary_tool: bedtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

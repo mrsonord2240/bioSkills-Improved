@@ -4,6 +4,7 @@ description: Reconstructs B-cell clonal families, quantifies somatic hypermutati
 tool_type: r
 primary_tool: alakazam
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

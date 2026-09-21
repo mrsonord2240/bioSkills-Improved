@@ -4,6 +4,7 @@ description: Calls microsatellite instability from WES/WGS/targeted-panel with M
 tool_type: cli
 primary_tool: MSIsensor-pro
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

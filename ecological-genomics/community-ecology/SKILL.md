@@ -4,6 +4,7 @@ description: Analyzes species-environment relationships with constrained ordinat
 tool_type: r
 primary_tool: vegan
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

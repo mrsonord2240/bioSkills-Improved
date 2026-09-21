@@ -4,6 +4,7 @@ description: Normalizes ChIP-seq data using exogenous spike-in (ChIP-Rx with Dro
 tool_type: mixed
 primary_tool: DiffBind
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

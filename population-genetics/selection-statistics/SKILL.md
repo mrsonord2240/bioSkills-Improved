@@ -4,6 +4,7 @@ description: Scans genomes for natural selection with SFS tests (Tajima's D, Fay
 tool_type: mixed
 primary_tool: scikit-allel
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

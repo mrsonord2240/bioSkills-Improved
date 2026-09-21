@@ -4,6 +4,7 @@ description: Build Manhattan, Miami, QQ, and locuszoom-style regional plots from
 tool_type: mixed
 primary_tool: qqman
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

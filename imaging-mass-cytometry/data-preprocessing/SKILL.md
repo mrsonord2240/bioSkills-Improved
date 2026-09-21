@@ -4,6 +4,7 @@ description: Load and preprocess imaging mass cytometry (IMC) and MIBI data from
 tool_type: mixed
 primary_tool: steinbock
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Retrieves and interprets AlphaFold Protein Structure Database (AFDB
 tool_type: python
 primary_tool: requests
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Quantifies alternative splicing as PSI (percent spliced in) from RN
 tool_type: mixed
 primary_tool: rMATS-turbo
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

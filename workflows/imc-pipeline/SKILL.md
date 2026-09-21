@@ -14,6 +14,7 @@ depends_on:
   - imaging-mass-cytometry/interactive-annotation
   - imaging-mass-cytometry/quality-metrics
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

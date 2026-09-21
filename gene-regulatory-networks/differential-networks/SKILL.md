@@ -4,6 +4,7 @@ description: Compare gene co-expression and regulatory networks between biologic
 tool_type: r
 primary_tool: DiffCorr
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

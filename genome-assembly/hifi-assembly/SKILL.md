@@ -4,6 +4,7 @@ description: Assembles haplotype-resolved diploid and telomere-to-telomere (T2T)
 tool_type: cli
 primary_tool: hifiasm
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Detects spatially variable genes, spatial autocorrelation, and cell
 tool_type: python
 primary_tool: squidpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

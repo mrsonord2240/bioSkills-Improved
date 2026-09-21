@@ -4,6 +4,7 @@ description: Unsupervised clustering and cell-type identification for high-dimen
 tool_type: r
 primary_tool: CATALYST
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

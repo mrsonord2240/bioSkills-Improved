@@ -4,6 +4,7 @@ description: Query protein-protein and gene interaction databases (STRING, BioGR
 tool_type: python
 primary_tool: requests
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

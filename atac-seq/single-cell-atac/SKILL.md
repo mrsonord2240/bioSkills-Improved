@@ -4,6 +4,7 @@ description: Process and analyze single-cell ATAC-seq data with Signac, ArchR, S
 tool_type: mixed
 primary_tool: Signac
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

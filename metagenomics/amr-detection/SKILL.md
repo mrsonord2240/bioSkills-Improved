@@ -4,6 +4,7 @@ description: Profiles the antimicrobial-resistance gene content (resistome) of s
 tool_type: cli
 primary_tool: AMRFinderPlus
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

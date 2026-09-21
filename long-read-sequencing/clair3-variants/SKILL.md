@@ -4,6 +4,7 @@ description: Calls germline small variants (SNPs and indels) from Oxford Nanopor
 tool_type: cli
 primary_tool: Clair3
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

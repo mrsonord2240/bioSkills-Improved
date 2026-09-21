@@ -4,6 +4,7 @@ description: Plot per-gene mutation distributions on a protein-domain map (lolli
 tool_type: mixed
 primary_tool: maftools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Authors bioinformatics pipelines in WDL (Workflow Description Langu
 tool_type: cli
 primary_tool: cromwell
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

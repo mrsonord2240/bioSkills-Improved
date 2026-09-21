@@ -4,6 +4,7 @@ description: Reconstruct ancestral states at internal phylogenetic nodes for seq
 tool_type: mixed
 primary_tool: PAML
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

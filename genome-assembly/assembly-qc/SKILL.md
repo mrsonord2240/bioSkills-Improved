@@ -4,6 +4,7 @@ description: Evaluates genome assembly quality across the three orthogonal axes 
 tool_type: cli
 primary_tool: QUAST
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Detect somatic and germline copy number variants from targeted, exo
 tool_type: cli
 primary_tool: cnvkit
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

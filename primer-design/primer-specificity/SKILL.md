@@ -4,6 +4,7 @@ description: Checks whether a PCR primer PAIR amplifies only the intended target
 tool_type: mixed
 primary_tool: mfeprimer
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Polishes Oxford Nanopore draft assemblies to higher consensus accur
 tool_type: cli
 primary_tool: medaka
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

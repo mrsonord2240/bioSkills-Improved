@@ -21,6 +21,7 @@ qc_checkpoints:
   - after_dedup: "Duplication rate <30% for WGS, <50% for exome"
   - after_calling: "Ti/Tv ratio ~2.0-2.1 for WGS, ~3.0-3.3 for exome; dbSNP overlap >95% only after annotating the ID column"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Count reads per gene from aligned BAM files using Subread featureCo
 tool_type: cli
 primary_tool: featureCounts
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

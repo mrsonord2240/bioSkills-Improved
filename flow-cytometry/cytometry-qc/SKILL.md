@@ -4,6 +4,7 @@ description: Quality control for flow, spectral, and mass cytometry - time-based
 tool_type: r
 primary_tool: flowAI
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

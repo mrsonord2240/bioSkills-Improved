@@ -4,6 +4,7 @@ description: Generates and interprets per-file and cross-sample QC reports from 
 tool_type: cli
 primary_tool: fastqc
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

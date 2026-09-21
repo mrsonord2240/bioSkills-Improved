@@ -4,6 +4,7 @@ description: Map nucleosome center positions, occupancy, and fuzziness from ATAC
 tool_type: mixed
 primary_tool: NucleoATAC
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

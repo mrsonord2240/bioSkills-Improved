@@ -4,6 +4,7 @@ description: Extracts per-cytosine methylation calls from aligned bisulfite/EM-s
 tool_type: cli
 primary_tool: Bismark
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

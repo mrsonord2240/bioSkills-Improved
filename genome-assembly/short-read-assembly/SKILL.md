@@ -4,6 +4,7 @@ description: Assembles a genome de novo from Illumina short reads with SPAdes (i
 tool_type: cli
 primary_tool: SPAdes
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

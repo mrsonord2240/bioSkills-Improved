@@ -4,6 +4,7 @@ description: Performs differential expression on bulk RNA-seq count data with ed
 tool_type: r
 primary_tool: edgeR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

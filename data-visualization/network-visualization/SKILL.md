@@ -4,6 +4,7 @@ description: Visualize biological networks (PPI, gene-regulatory, co-expression,
 tool_type: python
 primary_tool: NetworkX
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Builds and simulates multi-species metabolic community models from 
 tool_type: python
 primary_tool: micom
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

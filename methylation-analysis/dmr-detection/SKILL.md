@@ -4,6 +4,7 @@ description: Detects differentially methylated regions (DMRs) from short-read bi
 tool_type: r
 primary_tool: dmrseq
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

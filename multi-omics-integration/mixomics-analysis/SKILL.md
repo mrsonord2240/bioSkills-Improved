@@ -4,6 +4,7 @@ description: Builds supervised and unsupervised multivariate integration across 
 tool_type: r
 primary_tool: mixOmics
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

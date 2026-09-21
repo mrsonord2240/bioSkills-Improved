@@ -4,6 +4,7 @@ description: Call accessible chromatin regions from ATAC-seq BAM files using MAC
 tool_type: cli
 primary_tool: macs3
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Authors reproducible Nextflow DSL2 pipelines built on reactive data
 tool_type: cli
 primary_tool: Nextflow
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

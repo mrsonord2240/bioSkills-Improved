@@ -4,6 +4,7 @@ description: Extracts, filters, annotates, and exports differential expression r
 tool_type: r
 primary_tool: DESeq2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Predict peptide-MHC class II (HLA-DR/DQ/DP) binding and presentatio
 tool_type: cli
 primary_tool: NetMHCIIpan
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

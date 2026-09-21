@@ -4,6 +4,7 @@ description: Normalizes and transforms RNA-seq count matrices for DE, visualizat
 tool_type: mixed
 primary_tool: DESeq2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

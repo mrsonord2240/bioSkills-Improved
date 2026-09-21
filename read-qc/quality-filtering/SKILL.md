@@ -4,6 +4,7 @@ description: Filters reads by quality, length, N content, and complexity with Tr
 tool_type: cli
 primary_tool: trimmomatic
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

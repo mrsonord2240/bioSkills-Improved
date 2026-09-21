@@ -4,6 +4,7 @@ description: Detects acquired antimicrobial-resistance determinants and chromoso
 tool_type: mixed
 primary_tool: AMRFinderPlus
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

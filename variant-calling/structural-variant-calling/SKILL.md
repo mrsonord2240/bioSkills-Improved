@@ -4,6 +4,7 @@ description: Call structural variants (>=50 bp deletions, insertions, inversions
 tool_type: cli
 primary_tool: manta
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

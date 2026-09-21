@@ -4,6 +4,7 @@ description: Aligns RNA-seq reads to a genome with STAR, the fast splice-aware a
 tool_type: cli
 primary_tool: STAR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

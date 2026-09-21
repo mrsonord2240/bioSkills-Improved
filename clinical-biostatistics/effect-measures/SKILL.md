@@ -4,6 +4,7 @@ description: Computes and interprets treatment effect measures (OR, RR, RD, HR, 
 tool_type: python
 primary_tool: statsmodels
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

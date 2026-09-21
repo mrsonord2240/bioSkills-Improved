@@ -4,6 +4,7 @@ description: Turns a shotgun profiler table (MetaPhlAn relative abundance, Brack
 tool_type: mixed
 primary_tool: phyloseq
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

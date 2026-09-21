@@ -4,6 +4,7 @@ description: Implements missing-data sensitivity analyses for confirmatory clini
 tool_type: mixed
 primary_tool: rbmi
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Analyze TF motif accessibility variability across samples or single
 tool_type: r
 primary_tool: chromVAR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

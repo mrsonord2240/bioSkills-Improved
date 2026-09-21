@@ -4,6 +4,7 @@ description: Profiles non-miRNA small RNAs - tRNA-derived fragments (tRFs/tsRNAs
 tool_type: mixed
 primary_tool: MINTmap
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

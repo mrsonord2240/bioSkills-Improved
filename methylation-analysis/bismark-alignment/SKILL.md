@@ -4,6 +4,7 @@ description: Aligns bisulfite-converted (WGBS, RRBS, PBAT) and enzymatic (EM-seq
 tool_type: cli
 primary_tool: Bismark
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

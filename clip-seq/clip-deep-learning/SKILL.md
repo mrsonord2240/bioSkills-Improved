@@ -4,6 +4,7 @@ description: Predict RBP binding from RNA sequence using deep learning models (R
 tool_type: python
 primary_tool: RBPNet
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

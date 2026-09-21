@@ -4,6 +4,7 @@ description: Quantifies known miRNAs, isomiRs, tRFs, and A-to-I editing fast wit
 tool_type: python
 primary_tool: miRge3
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -15,6 +15,7 @@ qc_checkpoints:
   - after_calling: "SV count in the expected range, INS/DEL ratio sane, genotypes concordant"
   - after_benchmark: "Truvari F1 reported WITH its refdist/pctsize/pctseq, on Tier 1 AND CMRG"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

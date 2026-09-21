@@ -4,6 +4,7 @@ description: Runs RNA-seq-specific post-alignment QC - strandedness inference, g
 tool_type: mixed
 primary_tool: RSeQC
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

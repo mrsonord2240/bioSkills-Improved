@@ -4,6 +4,7 @@ description: Applies ACMG/AMP 2015 framework with ClinGen SVI specifications, Ta
 tool_type: python
 primary_tool: requests
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

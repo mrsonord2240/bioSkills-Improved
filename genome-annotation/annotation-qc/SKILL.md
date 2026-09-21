@@ -4,6 +4,7 @@ description: Assesses the quality and completeness of a genome annotation with B
 tool_type: cli
 primary_tool: BUSCO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

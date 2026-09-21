@@ -4,6 +4,7 @@ description: Computes immune-repertoire diversity, clonal structure, overlap, an
 tool_type: cli
 primary_tool: VDJtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

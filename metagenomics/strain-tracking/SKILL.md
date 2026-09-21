@@ -4,6 +4,7 @@ description: Resolves and compares bacterial strains below the species level fro
 tool_type: mixed
 primary_tool: inStrain
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

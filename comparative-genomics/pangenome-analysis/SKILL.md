@@ -4,6 +4,7 @@ description: Build and analyze pangenomes for prokaryotes (Panaroo, PPanGGOLiN, 
 tool_type: cli
 primary_tool: Panaroo
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

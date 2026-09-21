@@ -18,6 +18,7 @@ qc_checkpoints:
   - after_gene_prediction: "Gene count plausible, BUSCO completeness >90%"
   - after_functional_annotation: ">60% of genes with functional assignment"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

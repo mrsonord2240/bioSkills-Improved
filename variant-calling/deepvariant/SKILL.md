@@ -4,6 +4,7 @@ description: Calls germline SNPs and indels with Google DeepVariant, which refra
 tool_type: cli
 primary_tool: DeepVariant
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

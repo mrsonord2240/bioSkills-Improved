@@ -4,6 +4,7 @@ description: Write biological sequences to files (FASTA, FASTQ, GenBank, EMBL) u
 tool_type: python
 primary_tool: Bio.SeqIO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

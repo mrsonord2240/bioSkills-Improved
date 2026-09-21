@@ -4,6 +4,7 @@ description: Detect single-nucleotide crosslink (CL) sites in CLIP-seq data usin
 tool_type: cli
 primary_tool: PureCLIP
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

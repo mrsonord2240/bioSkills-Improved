@@ -4,6 +4,7 @@ description: Handles BED-format genomic intervals (BED3 through BED12, narrowPea
 tool_type: mixed
 primary_tool: bedtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

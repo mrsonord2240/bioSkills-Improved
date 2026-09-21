@@ -4,6 +4,7 @@ description: Extracts UMIs and collapses reads to original molecules with umi_to
 tool_type: cli
 primary_tool: umi_tools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

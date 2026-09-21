@@ -19,6 +19,7 @@ qc_checkpoints:
   - after_call: "Integer CN off a fitted purity/ploidy (not defaults); tumor purity above the ~40% death zone"
   - after_recurrent: "GISTIC2 input is diploid-CENTERED (uncentered WGD inverts recurrence)"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

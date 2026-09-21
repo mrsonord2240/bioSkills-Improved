@@ -4,6 +4,7 @@ description: Predicts protein-coding gene structures (exons, introns, UTRs) in e
 tool_type: cli
 primary_tool: BRAKER3
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Generates, normalizes, and converts bedGraph signal tracks (4-colum
 tool_type: mixed
 primary_tool: deeptools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

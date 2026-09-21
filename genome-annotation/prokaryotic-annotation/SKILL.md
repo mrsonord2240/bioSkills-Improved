@@ -4,6 +4,7 @@ description: Annotates bacterial and archaeal genomes (isolates, MAGs, plasmids)
 tool_type: cli
 primary_tool: Bakta
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

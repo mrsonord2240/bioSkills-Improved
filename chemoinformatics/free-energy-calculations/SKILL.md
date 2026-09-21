@@ -4,6 +4,7 @@ description: Performs alchemical free-energy calculations including relative bin
 tool_type: mixed
 primary_tool: OpenFE
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

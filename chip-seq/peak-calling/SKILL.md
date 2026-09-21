@@ -4,6 +4,7 @@ description: Calls ChIP-seq peaks with MACS3, MACS2, HOMER, or SPP across narrow
 tool_type: cli
 primary_tool: macs3
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

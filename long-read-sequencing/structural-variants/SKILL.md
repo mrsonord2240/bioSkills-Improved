@@ -4,6 +4,7 @@ description: Detects structural variants (deletions, insertions, inversions, dup
 tool_type: cli
 primary_tool: sniffles
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

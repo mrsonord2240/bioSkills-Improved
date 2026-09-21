@@ -4,6 +4,7 @@ description: Detect syntenic blocks and structural rearrangements between genome
 tool_type: mixed
 primary_tool: MCScanX
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

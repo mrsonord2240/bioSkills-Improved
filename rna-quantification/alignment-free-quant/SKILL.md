@@ -5,6 +5,7 @@ tool_type: cli
 primary_tool: salmon
 goal_approach_exempt: true
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

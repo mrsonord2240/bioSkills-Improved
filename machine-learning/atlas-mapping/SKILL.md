@@ -4,6 +4,7 @@ description: Maps query single-cell data onto reference atlases and transfers ce
 tool_type: python
 primary_tool: scvi-tools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

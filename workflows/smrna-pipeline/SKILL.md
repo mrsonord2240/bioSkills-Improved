@@ -17,6 +17,7 @@ qc_checkpoints:
   - before_de: "RAW counts confirmed (not RPM); size factors inspected for compositional distortion"
   - after_de: "baseMean reported with every call (significant FC on a ~5-count miRNA is noise)"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Visualises RNA-modification data with transcript-feature metagene p
 tool_type: mixed
 primary_tool: Guitar
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

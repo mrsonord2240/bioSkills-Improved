@@ -20,6 +20,7 @@ qc_checkpoints:
   - after_clustering: "10-30 metaclusters (over-provision then merge); cluster on TYPE markers only, test STATE in DS"
   - after_testing: ">=2-3 biological replicates/group (the sample is the unit); batch modeled in the design; BH FDR across clusters (and clusters x markers for DS)"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

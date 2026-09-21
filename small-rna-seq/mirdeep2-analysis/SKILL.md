@@ -4,6 +4,7 @@ description: Discovers novel miRNAs and quantifies known miRNAs with miRDeep2 by
 tool_type: cli
 primary_tool: miRDeep2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

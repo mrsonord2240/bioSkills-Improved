@@ -4,6 +4,7 @@ description: Decides whether and how to polish a draft genome assembly to raise 
 tool_type: cli
 primary_tool: Pilon
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

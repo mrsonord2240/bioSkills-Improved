@@ -4,6 +4,7 @@ description: Predict peptide-MHC class I binding and natural presentation with M
 tool_type: python
 primary_tool: mhcflurry
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

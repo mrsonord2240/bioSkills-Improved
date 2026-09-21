@@ -4,6 +4,7 @@ description: Detect transcription factor binding footprints in ATAC-seq using TO
 tool_type: cli
 primary_tool: tobias
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

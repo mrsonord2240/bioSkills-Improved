@@ -4,6 +4,7 @@ description: Build OncoPrint and co-mutation matrix plots from somatic-variant c
 tool_type: mixed
 primary_tool: ComplexHeatmap
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Build whole-genome alignments using Progressive Cactus (Armstrong 2
 tool_type: cli
 primary_tool: Cactus
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

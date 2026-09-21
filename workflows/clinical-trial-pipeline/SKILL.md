@@ -23,6 +23,7 @@ qc_checkpoints:
   - after_missing_data: "Per ICH E9(R1) ICE strategy: MMRM/MAR or reference-based MI (J2R/CR/CIR); Permutt tipping-point delta reported in residual SD units"
   - after_reporting: "Table 1 with SMD, missing data per CONSORT 2025 item 21c, harms per item 15, estimand statement per ICH E9(R1)"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

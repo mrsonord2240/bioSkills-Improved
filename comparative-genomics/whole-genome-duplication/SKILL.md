@@ -4,6 +4,7 @@ description: Detect, date, and contextualize whole-genome duplication (WGD / pal
 tool_type: mixed
 primary_tool: wgd
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

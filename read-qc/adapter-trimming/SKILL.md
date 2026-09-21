@@ -4,6 +4,7 @@ description: Removes sequencing adapters from FASTQ reads with Cutadapt and Trim
 tool_type: cli
 primary_tool: cutadapt
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

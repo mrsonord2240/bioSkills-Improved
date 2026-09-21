@@ -4,6 +4,7 @@ description: Predicts RNA secondary structure with ViennaRNA, treating the Boltz
 tool_type: cli
 primary_tool: ViennaRNA
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

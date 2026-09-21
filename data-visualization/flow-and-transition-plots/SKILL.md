@@ -4,6 +4,7 @@ description: Build Sankey, alluvial, river, and CONSORT-style flow diagrams to v
 tool_type: mixed
 primary_tool: ggalluvial
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

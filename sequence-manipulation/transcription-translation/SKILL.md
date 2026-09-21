@@ -4,6 +4,7 @@ description: Transcribe DNA to RNA and translate to protein using Biopython, wit
 tool_type: python
 primary_tool: Bio.Seq
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

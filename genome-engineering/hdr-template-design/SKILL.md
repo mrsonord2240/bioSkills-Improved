@@ -4,6 +4,7 @@ description: Designs donor/repair templates for precise CRISPR knock-ins -- choo
 tool_type: python
 primary_tool: primer3-py
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

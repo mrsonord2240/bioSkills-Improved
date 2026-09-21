@@ -4,6 +4,7 @@ description: Build the spatial neighbor graph that every downstream spatial stat
 tool_type: python
 primary_tool: squidpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

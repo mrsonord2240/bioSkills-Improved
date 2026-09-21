@@ -4,6 +4,7 @@ description: Handles batch effects in bulk RNA-seq via design-matrix inclusion (
 tool_type: r
 primary_tool: sva
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

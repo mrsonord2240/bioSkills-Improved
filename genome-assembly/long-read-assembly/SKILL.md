@@ -4,6 +4,7 @@ description: Assembles genomes de novo from noisy long reads (Oxford Nanopore R9
 tool_type: cli
 primary_tool: Flye
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Searches for non-coding RNA homologs and classifies RNA families wi
 tool_type: cli
 primary_tool: Infernal
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

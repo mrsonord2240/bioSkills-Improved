@@ -4,6 +4,7 @@ description: Imports gene expression count matrices from featureCounts, HTSeq, S
 tool_type: mixed
 primary_tool: tximport
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

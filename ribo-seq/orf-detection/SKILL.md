@@ -4,6 +4,7 @@ description: Detect and quantify translated ORFs from Ribo-seq using 3-nucleotid
 tool_type: mixed
 primary_tool: RiboCode
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

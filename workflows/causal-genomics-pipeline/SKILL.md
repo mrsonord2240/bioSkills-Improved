@@ -29,6 +29,7 @@ qc_checkpoints:
   - after_effector_gene: "L2G + PoPS + coloc + TWAS concordance >= 3 of 6 evidence streams"
   - after_mediation: "rho_crit > 0.3 OR mediational E-value > 2 (Imai sensitivity)"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

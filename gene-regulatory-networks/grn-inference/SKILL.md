@@ -4,6 +4,7 @@ description: Infer gene regulatory networks from bulk or general expression data
 tool_type: mixed
 primary_tool: VIPER
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

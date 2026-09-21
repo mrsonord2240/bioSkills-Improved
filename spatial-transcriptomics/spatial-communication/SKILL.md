@@ -4,6 +4,7 @@ description: Maps cell-cell communication and ligand-receptor co-expression in s
 tool_type: python
 primary_tool: squidpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

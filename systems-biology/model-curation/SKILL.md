@@ -4,6 +4,7 @@ description: Validates, gap-fills, and standardizes genome-scale metabolic model
 tool_type: python
 primary_tool: memote
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

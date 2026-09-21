@@ -4,6 +4,7 @@ description: Build restriction maps showing enzyme cut positions and inter-site 
 tool_type: python
 primary_tool: Bio.Restriction
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

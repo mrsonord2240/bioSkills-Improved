@@ -4,6 +4,7 @@ description: Designs pegRNAs and nicking guides for prime editing (PE) -- choosi
 tool_type: mixed
 primary_tool: PrimeDesign
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

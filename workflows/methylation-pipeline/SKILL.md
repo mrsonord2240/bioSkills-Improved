@@ -16,6 +16,7 @@ qc_checkpoints:
   - after_alignment: "Mapping efficiency >50%, bisulfite conversion >99%"
   - after_calling: "Coverage distribution reasonable, no biased positions"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

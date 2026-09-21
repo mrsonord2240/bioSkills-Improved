@@ -4,6 +4,7 @@ description: Annotate CLIP-seq peaks or crosslink sites to RNA features (5'UTR, 
 tool_type: mixed
 primary_tool: ChIPseeker
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

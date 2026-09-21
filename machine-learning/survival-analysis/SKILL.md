@@ -4,6 +4,7 @@ description: Builds and validates predictive time-to-event models on clinical an
 tool_type: python
 primary_tool: scikit-survival
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

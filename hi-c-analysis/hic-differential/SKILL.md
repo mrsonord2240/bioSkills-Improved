@@ -4,6 +4,7 @@ description: Compares Hi-C contact maps between conditions across the right scal
 tool_type: python
 primary_tool: cooltools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

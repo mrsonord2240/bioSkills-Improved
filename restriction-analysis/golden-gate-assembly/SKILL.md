@@ -4,6 +4,7 @@ description: Design and validate Type IIS scarless DNA assembly (Golden Gate, Mo
 tool_type: python
 primary_tool: Bio.Restriction
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

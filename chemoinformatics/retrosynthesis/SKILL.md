@@ -4,6 +4,7 @@ description: Performs retrosynthetic planning using AiZynthFinder (template-base
 tool_type: python
 primary_tool: AiZynthFinder
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Discovers, classifies, and masks repetitive elements and transposab
 tool_type: cli
 primary_tool: RepeatMasker
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

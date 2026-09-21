@@ -4,6 +4,7 @@ description: "Estimates tumor fraction (the genome-wide proportion of cfDNA mole
 tool_type: r
 primary_tool: ichorCNA
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

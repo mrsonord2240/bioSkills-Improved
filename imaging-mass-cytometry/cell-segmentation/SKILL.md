@@ -4,6 +4,7 @@ description: Segment single cells from multiplexed IMC/MIBI tissue images using 
 tool_type: python
 primary_tool: deepcell
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

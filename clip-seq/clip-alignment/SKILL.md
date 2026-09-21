@@ -4,6 +4,7 @@ description: Align preprocessed CLIP-seq reads (eCLIP, iCLIP, iCLIP2, PAR-CLIP) 
 tool_type: cli
 primary_tool: STAR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

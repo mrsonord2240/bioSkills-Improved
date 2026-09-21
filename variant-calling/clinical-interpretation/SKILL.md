@@ -4,6 +4,7 @@ description: Classify variant clinical significance with the ACMG/AMP germline f
 tool_type: mixed
 primary_tool: bcftools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

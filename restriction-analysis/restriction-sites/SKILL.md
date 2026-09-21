@@ -4,6 +4,7 @@ description: Find restriction enzyme cut sites in DNA sequences using Biopython 
 tool_type: python
 primary_tool: Bio.Restriction
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

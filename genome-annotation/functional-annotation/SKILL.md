@@ -4,6 +4,7 @@ description: Assigns GO terms, Pfam/InterPro domains, KEGG orthologs, EC numbers
 tool_type: cli
 primary_tool: eggNOG-mapper
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

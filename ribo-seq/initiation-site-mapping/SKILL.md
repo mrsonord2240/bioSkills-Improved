@@ -4,6 +4,7 @@ description: Map translation initiation sites, including non-AUG and alternative
 tool_type: mixed
 primary_tool: Ribo-TISH
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

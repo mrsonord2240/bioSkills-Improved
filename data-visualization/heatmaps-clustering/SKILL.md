@@ -4,6 +4,7 @@ description: Build clustered heatmaps for expression matrices and other features
 tool_type: mixed
 primary_tool: ComplexHeatmap
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

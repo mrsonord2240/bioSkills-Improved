@@ -4,6 +4,7 @@ description: Chooses a bulk multi-omics integration strategy before any tool run
 tool_type: r
 primary_tool: MultiAssayExperiment
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

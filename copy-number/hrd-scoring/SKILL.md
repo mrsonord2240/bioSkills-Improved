@@ -4,6 +4,7 @@ description: Quantify homologous recombination deficiency (HRD) from tumor copy 
 tool_type: mixed
 primary_tool: scarHRD
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility
