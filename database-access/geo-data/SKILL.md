@@ -377,10 +377,6 @@ def geo_from_pubmed(pmid):
 |---|---|---|
 | Empty IdList for `gse[entry_type]` | Wrong field name | Use `gse[Entry Type]` (case-sensitive) |
 | Matrix file has no expression data | SuperSeries with no aggregate matrix | Pull per-SubSeries matrices |
-| Submitter "normalized" matrix gives different result than paper | Hidden submitter transforms | Re-process from raw |
-| 404 on ArrayExpress URL | Migrated to BioStudies | Use new BioStudies URL |
-| GEOparse missing CEL files | Known flake | Use R GEOquery or direct FTP |
-| GEOmetadb-based pipeline missing recent series | DB unmaintained | Switch to pysradb / Entrez |
 
 ## References
 
