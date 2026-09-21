@@ -24,7 +24,7 @@ mSet <- CrossReferencing(mSet, 'name')
 mSet <- CreateMappingResultTable(mSet)              # inspect coverage before trusting any p-value
 mSet <- SetKEGG.PathLib(mSet, 'hsa', 'current')
 mSet <- SetMetabolomeFilter(mSet, TRUE)             # TRUE alone does not restrict the background --
-mSet <- Setup.KEGGReferenceMetabolome(mSet, 'reference_metabolome.txt')  # this call does (see pathway-mapping)
+mSet <- Setup.KEGGReferenceMetabolome(mSet, 'reference_metabolome.txt')  # this call does; file = one KEGG compound ID per line, names fail (see pathway-mapping)
 mSet <- CalculateOraScore(mSet, 'rbc', 'hyperg')
 # Sends the mapped compound list to xialab.ca and can reject a filtered request outright on this
 # version; if so, use pathway-mapping's Local-Only ORA (KEGGREST + local phyper, no remote call).

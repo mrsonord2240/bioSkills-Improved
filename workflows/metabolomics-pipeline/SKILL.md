@@ -110,7 +110,7 @@ Stable-isotope tracing (flux) is a SEPARATE branch off labeled raw data, not a s
 
 ## Stage 1 -- Feature Extraction (modern xcms 4.x)
 
-Read `references/stage1-xcms-extraction.md` for the xcms 4.x extraction block (`readMsExperiment` -> `findChromPeaks` -> `adjustRtime` -> `groupChromPeaks` -> `fillChromPeaks` -> `featureValues`) that produces `feat` and `defs`.
+Read `references/stage1-xcms-extraction.md` for `scripts/stage1_xcms_extract.R` and the extraction (`readMsExperiment` -> `findChromPeaks` -> `adjustRtime` -> `groupChromPeaks` -> `fillChromPeaks` -> `featureValues`) that produces `feat` and `defs`.
 
 ## Stage 2 -- QC, Drift, Normalization (not naive median + half-min)
 
@@ -119,45 +119,10 @@ Read `references/stage1-xcms-extraction.md` for the xcms 4.x extraction block (`
 **Approach:** Follow the normalization-qc pipeline order: blank/detection filter -> within-batch drift correction (QCRSC) -> RSD/D-ratio filter -> PQN -> mechanism-aware imputation. Do NOT silently half-min-impute and feed limma; validate drift correction on held-out QCs, not on QC clustering.
 
 ```r
-library(pmp)
-library(imputeLCMD)
-# feat (Stage 1 featureValues() output) is already features x samples -- the pmp convention.
-# No transpose needed; assert it instead of assuming, so an API change is caught, not silently
-# masked (pmp's own check_peak_matrix re-transposes with no warning when it can, which is what
-# hid this exact bug before: a wrong `t(feat)` here still "worked").
-fm <- feat
-stopifnot(nrow(fm) == nrow(defs), ncol(fm) == length(sample_class))
-
-filtered <- filter_peaks_by_fraction(fm, classes = sample_class, min_frac = 0.5, qc_label = 'QC')
-corrected <- QCRSC(df = filtered, order = injection_order, batch = batch_id,
-                   classes = sample_class, spar = 0, minQC = 5, qc_label = 'QC')  # CV-selected spline
-rsd_filtered <- filter_peaks_by_rsd(corrected, max_rsd = 30, classes = sample_class, qc_label = 'QC')
-normalized <- pqn_normalisation(rsd_filtered, classes = sample_class, qc_label = 'QC')
-
-# QCRSC silently returns an ENTIRE batch as all-NA when that batch has fewer QCs than minQC (see
-# normalization-qc's Common Errors) -- verified on real MTBLS79 data: 5 of 8 batches had only 4
-# QCs (< minQC=5), wiping 90 of 172 samples. A wholly-missing sample carries NO measured
-# information to impute -- report and drop it; do not fabricate a profile for it.
-nm <- as.matrix(normalized)
-wiped <- colMeans(is.na(nm)) == 1
-if (any(wiped)) {
-  cat(sum(wiped), 'of', ncol(nm), 'samples came back all-NA (QCRSC: their batch had < minQC QCs)',
-      '-- dropping, not imputing:\n')
-  print(table(batch_id[wiped]))
-  nm <- nm[, !wiped, drop = FALSE]
-  sample_class <- sample_class[!wiped]   # keep every per-sample vector in sync for Stage 4
-}
-
-# The remaining holes are the sparse, mechanism-driven kind imputation is actually valid for.
-# QRILC (MNAR / left-censored) is only valid on log-scale intensities; on raw intensities it
-# silently draws negative (impossible) values. Round-trip through log2/2^x, per normalization-qc.
-log_mat <- log2(nm)
-set.seed(123)   # impute.QRILC draws random values; seed it so the imputed matrix is reproducible
-imputed <- 2^(impute.QRILC(log_mat, tune.sigma = 1)[[1]])
-stopifnot(min(imputed, na.rm = TRUE) >= 0, !anyNA(imputed))  # no NAs may reach Stage 4 (opls() cannot tolerate them)
+source('scripts/stage2_qc_impute.R')   # feat, defs, sample_class, injection_order, batch_id in -> imputed (NA-free) and re-synced sample_class out
 ```
 
-Drift correction should lower QC RSD AND leave biological-sample RSD unchanged; if biological RSD rises, the spline absorbed signal. `imputed` (not `normalized`) is what Stage 4 receives. Verified end to end on real MTBLS79 data (2433 features, 172 samples, 8 batches): 90 wiped samples dropped, 82 survive with only sparse residual NAs (max 18% per sample), QRILC imputes cleanly, and the Stage 4 OPLS-DA below fits successfully (`pR2Y = pQ2 = 0.001`).
+`QCRSC` returns a whole batch as all-NA when it has fewer QCs than `minQC`; the script reports and drops those samples instead of imputing them (see Common Errors). Drift correction should lower QC RSD AND leave biological-sample RSD unchanged; if biological RSD rises, the spline absorbed signal. `imputed` (not `normalized`) is what Stage 4 receives. Verified end to end on real MTBLS79 data (2433 features, 172 samples, 8 batches): 90 wiped samples dropped, 82 survive with only sparse residual NAs (max 18% per sample), QRILC imputes cleanly, and the Stage 4 OPLS-DA below fits successfully (`pR2Y = pQ2 = 0.001`).
 
 ## Stage 3 -- Annotation Before Claiming IDs
 
@@ -214,7 +179,7 @@ Two disjoint entry points: confidently identified compounds (MSI Level 1-2 only)
 
 ## Alternative Front End -- MS-DIAL
 
-When peak detection happens in MS-DIAL (MS2Dec deconvolution, GC-EI, DIA/SWATH), enter the pipeline at Stage 2 with the imported alignment table; read `references/msdial-front-end.md` for the import block that builds `feat`, `defs`, `sample_class`, `injection_order` and `batch_id`.
+When peak detection happens in MS-DIAL (MS2Dec deconvolution, GC-EI, DIA/SWATH), enter the pipeline at Stage 2 with the imported alignment table; read `references/msdial-front-end.md` and run `scripts/msdial_import.R`, which builds `feat`, `defs`, `sample_class`, `injection_order` and `batch_id`.
 
 ## Reference Files
 
@@ -223,6 +188,16 @@ When peak detection happens in MS-DIAL (MS2Dec deconvolution, GC-EI, DIA/SWATH),
 | `references/stage1-xcms-extraction.md` | Starting from raw centroided mzML: the xcms 4.x extraction block (Stage 1) |
 | `references/stage5-pathway-mapping.md` | Reaching Stage 5: the Level 1-2 gate, MetaboAnalystR ORA (identified compounds) and mummichog (no IDs) |
 | `references/msdial-front-end.md` | Peak detection was done in MS-DIAL: importing its alignment export and entering at Stage 2 |
+
+## Scripts
+
+Paths are relative to this Skill's directory; each script is `source()`d and leaves its outputs in the calling environment (inputs and outputs are listed in its header).
+
+| Script | Does |
+|---|---|
+| `scripts/stage1_xcms_extract.R` | Stage 1: mzML -> `xdata`, `feat`, `defs` |
+| `scripts/msdial_import.R` | MS-DIAL alignment export -> `feat`, `defs`, `sample_class`, `injection_order`, `batch_id` |
+| `scripts/stage2_qc_impute.R` | Stage 2: filter, QCRSC drift correction, PQN, drop wiped samples, seeded QRILC -> `imputed` |
 
 ## QC Checkpoints
 
