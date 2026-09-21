@@ -137,6 +137,8 @@ sum(seqtab_nochim) / sum(st_all)   # chimeras = many ASVs but few READS (~0.8-0.
 
 Carry "run" forward as a batch covariate into differential abundance. A large READ fraction removed as chimeric is a leftover-primer smell (degenerate bases look chimeric), not a real chimera storm.
 
+`removeBimeraDenovo` is not exhaustive. On a planted-truth check (DADA2 1.34.0), a low-abundance chimera (115 reads, 0.6% of reads) survived `method='consensus'`, `'pooled'` and `'per-sample'` alike, so switching method does not recover it. Do not call the table chimera-free: inspect low-abundance ASVs whose sequence is a left/right splice of two abundant ASVs.
+
 ## Decontamination and Controls (low-biomass)
 
 **Goal:** Identify and remove reagent/kit ("kitome") contaminant ASVs before any downstream analysis - decisive for low-biomass samples, where contaminants can outnumber real signal.
@@ -154,6 +156,8 @@ seqtab_clean <- seqtab_nochim[, !contam$contaminant]
 
 Low-biomass samples (skin, biopsy, BAL, sterile-site swabs) can be dominated by the kitome, so a "community" there may be mostly contamination - never interpret a low-biomass result without controls. The shotgun analogue is metagenomics/contamination-controls.
 
+Do not substitute a flat relative-abundance cutoff (e.g. "drop ASVs below 1% or 5%") for decontam. Contaminant status is evidence about controls and DNA concentration, not about abundance: in a synthetic test with extraction blanks the kit contaminant (*Ralstonia*, 5.1% of reads) is more abundant than a real community member (*Escherichia-Shigella*, 4.3%), so any cutoff that removes it also removes the real taxon, while a cutoff that spares the real taxon keeps the contaminant.
+
 ## ITS: Never Fixed-Truncate
 
 **Goal:** Isolate the biologically variable-length ITS spacer without slicing real sequence.
@@ -161,8 +165,9 @@ Low-biomass samples (skin, biopsy, BAL, sterile-site swabs) can be dominated by 
 **Approach:** Strip primers with cutadapt, then HMM-trim the conserved SSU/5.8S/LSU flanks with ITSxpress (preserving quality scores), then denoise with `truncLen=0`, filtering on `maxEE`/`minLen` only.
 
 ```bash
+# --region ITS1/ITS2/ALL; --taxa selects the HMM model. Paired input is merged: one trimmed FASTQ out.
 itsxpress --fastq r1.fastq.gz --fastq2 r2.fastq.gz \
-    --region ITS2 --taxa Fungi \   # ITS1/ITS2/ALL; --taxa selects the HMM model
+    --region ITS2 --taxa Fungi \
     --outfile trimmed.fastq.gz --threads 4
 ```
 
@@ -176,8 +181,9 @@ out_its <- filterAndTrim(trimmed, filtered, truncLen=0,   # NEVER fix-truncate I
 DADA2 inside QIIME2: `qiime dada2 denoise-paired --p-trunc-len-f --p-trunc-len-r` (also `denoise-single`, `denoise-pyro` for 454/Ion Torrent, `denoise-ccs` with `--p-front`/`--p-adapter`/`--p-min-len`/`--p-max-len` for PacBio CCS). Deblur (static positive filter, one fixed length, 16S only):
 
 ```bash
+# --p-trim-length: ONE fixed length; Deblur cannot handle variable length
 qiime deblur denoise-16S --i-demultiplexed-seqs qc.qza \
-    --p-trim-length 250 --p-sample-stats \   # ONE fixed length; Deblur cannot handle variable length
+    --p-trim-length 250 --p-sample-stats \
     --o-representative-sequences rep-seqs.qza --o-table table.qza --o-stats stats.qza
 ```
 
