@@ -274,23 +274,37 @@ if (is.null(steiger)) {
 ```r
 library(MRPRESSO)
 
+dat_p <- dat[dat$mr_keep, ]  # harmonise_data() keeps dropped palindromes as mr_keep = FALSE rows; MR-PRESSO would fit them
 set.seed(42)  # mr_presso()'s global/outlier tests are Monte-Carlo; seed for a reproducible p-value
 presso <- mr_presso(
     BetaOutcome = 'beta.outcome', BetaExposure = 'beta.exposure',
     SdOutcome = 'se.outcome', SdExposure = 'se.exposure',
     OUTLIERtest = TRUE, DISTORTIONtest = TRUE,
-    data = dat, NbDistribution = 10000,  # >= 10000 for publication-grade p-value precision
+    data = dat_p, NbDistribution = 10000,  # >= 10000 for publication-grade p-value precision
     SignifThreshold = 0.05
 )
 
 print(presso$`MR-PRESSO results`$`Global Test`)         # any pleiotropy
 print(presso$`MR-PRESSO results`$`Distortion Test`)     # change after outlier removal
-outlier_snps <- which(presso$`MR-PRESSO results`$`Outlier Test`$Pvalue < 0.05 / nrow(dat))
+
+# Outlier SNPs. `Outlier Test` is NULL unless the global test is significant. Its Pvalue is
+# ALREADY Bonferroni-adjusted inside MRPRESSO (raw p x nrow(dat)) and may be a string such as
+# "<3e-04", so do not divide the threshold by nrow(dat) again (that double correction flagged 0
+# outliers where MRPRESSO's own rule flagged 11, 9 of them planted; checked on MRPRESSO 1.0).
+# MRPRESSO's own rule is adjusted P <= SignifThreshold.
+ot <- presso$`MR-PRESSO results`$`Outlier Test`
+outlier_snps <- character(0)
+if (!is.null(ot)) {
+    p_adj <- suppressWarnings(as.numeric(sub('^<', '', ot$Pvalue)))
+    outlier_snps <- dat_p[rownames(ot)[which(p_adj <= 0.05)], 'SNP']
+}
 ```
+
+`NbDistribution` sets the cost and the floor: the outlier test needs `NbDistribution > nrow(dat) / SignifThreshold` (100 SNPs need > 2000), otherwise MRPRESSO warns "Outlier test unstable" and the outlier P is imprecise. 10000 draws on ~100 SNPs did not finish in 40 minutes on a shared CPU, so run it in the background, and use 3000-5000 while exploring.
 
 ## CAUSE for Correlated Horizontal Pleiotropy
 
-CAUSE (Morrison 2020 Nat Genet 52:740) fits a shared-factor mixture to genome-wide sumstats and compares causal vs sharing-only models by delta-ELPD. Workflow: `gwas_merge()` -> sample ~1M variants for `est_cause_params()` -> filter sig SNPs (P < 1e-3) and optionally LD-prune -> `cause(X, variants, param_ests)`. Needs >= 100 sig SNPs. Full annotated example and ELPD interpretation in causal-genomics/pleiotropy-detection.
+CAUSE (Morrison 2020 Nat Genet 52:740) fits a shared-factor mixture to genome-wide sumstats and compares causal vs sharing-only models by delta-ELPD. Workflow: `gwas_merge()` -> sample ~1M variants for `est_cause_params()` -> filter sig SNPs (P < 1e-3) and optionally LD-prune -> `cause(X, variants, param_ests)`. Needs >= 100 sig SNPs. Full annotated example and ELPD interpretation in causal-genomics/pleiotropy-detection. Version note: `cause` 1.2.0.335 with `loo` 2.10.1 crashes inside `cause:::in_sample_elpd_loo` ("non-numeric argument to binary operator", from a `loo_compare()` return-shape change), even with 147 significant SNPs; that is a package mismatch, not a data problem, so check `packageVersion('loo')` before debugging the input.
 
 ## MVMR with Conditional F
 
@@ -323,7 +337,7 @@ mv_qa <- pleiotropy_mvmr(r_input = mvmr_dat, gencov = 0)  # Q_A heterogeneity te
 
 `gencov = 0` is valid ONLY if the exposure GWAS samples don't overlap; for overlapping exposures use the bivariate LDSC intercept matrix as `gencov`. If any conditional F < 10, the IVW point estimate is weak-IV-biased; the standard fallback is the Q-minimization estimator `qhet_mvmr(r_input, pcor, CI = TRUE, iterations = 1000)` (Sanderson 2021 Stat Med 40:5434), which minimizes Q-statistic heterogeneity rather than weighting by inverse variance.
 
-**Caveat and guard (verified 2026-09-17, reproduced from an audit run):** qhet_mvmr's robustness to weak conditional instruments has a floor. At conditional F < 1 it does not just lose precision -- it can flip the sign of an exposure's estimate. On synthetic instruments with planted direct effects 0.30 / -0.10 and conditional F = 0.87 / 0.78, MVMR-IVW stayed close to truth (0.298 / -0.099) but qhet_mvmr gave 0.236 / **+0.049** -- the second exposure's sign flipped. Guard: below conditional F = 1, do not trust qhet_mvmr's point estimate as a correction for exposure 1 or 2; report the weak-IV-biased MVMR-IVW estimate with that caveat instead, or acquire stronger/less-correlated instruments before drawing a directional conclusion. The code above raises an error at that floor rather than silently returning a fallback estimate that may be flipped.
+**Caveat and guard (verified 2026-09-17, reproduced from an audit run; confidence-interval note added 2026-09-21):** qhet_mvmr's robustness to weak conditional instruments has a floor. At conditional F < 1 it does not just lose precision -- it can flip the sign of an exposure's estimate. On synthetic instruments with planted direct effects 0.30 / -0.10 and conditional F = 0.87 / 0.78, MVMR-IVW stayed close to truth (0.298 / -0.099) but qhet_mvmr gave 0.236 / **+0.049** -- the second exposure's sign flipped. Guard: below conditional F = 1, do not trust qhet_mvmr's point estimate as a correction for exposure 1 or 2; report the weak-IV-biased MVMR-IVW estimate with that caveat instead, or acquire stronger/less-correlated instruments before drawing a directional conclusion. The code above raises an error at that floor rather than silently returning a fallback estimate that may be flipped. Above the floor the estimate is correctly signed but imprecise until conditional F nears 10 (a re-audit run at conditional F ~2.2, planted 0.30 / -0.10: qhet_mvmr gave 0.44 [0.12, 0.88] / -0.26 [-0.67, 0.16]), so report it with its confidence interval, never as a precise correction.
 
 ## Bidirectional and Steiger
 
@@ -347,7 +361,8 @@ if (is.null(dir_test)) stop("directionality_test() returned NULL -- dat needs sa
 | Pattern | Likely cause | Action |
 |---------|--------------|--------|
 | IVW sig, Egger null with non-zero intercept | Directional pleiotropy | Report Egger as primary if `I^2_GX >= 0.9`; otherwise SIMEX-correct |
-| IVW sig, weighted median sig, mode null | Mode underpowered or bimodal pleiotropy | Trust the agreement of IVW + median |
+| IVW sig, weighted median sig, mode null | Mode underpowered or bimodal pleiotropy -- only if Cochran Q and the MR-PRESSO global test are non-significant | Trust the agreement of IVW + median only then; if Q or the PRESSO global test is significant, treat as the next row |
+| IVW, weighted median and MR-RAPS all sig; Egger and mode null; Q and PRESSO global sig | Directional pleiotropy the median and RAPS do not absorb (planted null effect of 0, 30% invalid IVs: IVW p=2e-6, RAPS p=5e-5, median p=0.006, Egger p=0.72, mode p=0.82; outlier-corrected IVW still p=1.5e-4) | Do not report a causal effect; report as consistent with pleiotropy, lead with Egger/mode and the heterogeneity result |
 | MR-PRESSO distortion test sig | Outliers materially shift estimate | Report PRESSO-adjusted estimate as primary |
 | CAUSE sig, IVW sig, same direction | High-confidence causal claim | Report both; emphasize CAUSE rules out CHP |
 | CAUSE null, IVW sig, same direction | CHP indistinguishable from causation | Downgrade to "consistent with causation but not separable from CHP" |
@@ -383,7 +398,8 @@ if (is.null(dir_test)) stop("directionality_test() returned NULL -- dat needs sa
 | `Unauthorized` / `403` from OpenGWAS | OAuth deprecated May 2024; JWT token required | Generate at api.opengwas.io -> set `OPENGWAS_JWT=<token>` in `~/.Renviron` -> restart R -> verify with `ieugwasr::get_opengwas_jwt()`. For production, skip the API: use `ld_clump_local()` with local 1KG bfile (saves rate-limit + auth headaches). |
 | Conditional F vs total F confusion in MVMR | Reporting `mean(F)` not `strength_mvmr()` per-exposure | Always use `MVMR::strength_mvmr()` and report each column |
 | `install.packages("mr.raps")` fails | CRAN-archived 2025-03-01 | `remotes::install_github('qingyuanzhao/mr.raps')`; TwoSampleMR's `mr_raps()` wrapper internally calls this package |
-| MR-PRESSO returns NA p-value | `NbDistribution` too small; signal too thin | Increase to >= 10000; check that >= 4 SNPs remain after harmonization |
+| MR-PRESSO returns NA p-value, or warns "Outlier test unstable" | `NbDistribution` too small (needs > `nrow(dat) / SignifThreshold`); signal too thin | Increase to >= 5000 (>= 10000 for publication; run in the background); check that >= 4 SNPs remain after harmonization |
+| MR-PRESSO flags no outliers though the global test is significant | Outlier threshold divided by `nrow(dat)` a second time (its outlier P is already Bonferroni-adjusted) | Use adjusted P <= `SignifThreshold` as in "MR-PRESSO Outlier Detection" |
 | Egger intercept "highly significant" with 5 SNPs | Underpowered Egger over-fits the slope | Egger needs >= 10 SNPs; below that, intercept is unreliable |
 | Sample-overlap correction ignored | Treating UKB-on-UKB as two-sample | Apply Burgess 2016 correction or MRlap -- MR-RAPS alone does not fix overlap-driven confounding (see Operational rule above), only weak-instrument bias |
 | `cause()` runs forever | Default model fit on too many SNPs | Filter to sig SNPs (P < 1e-3) before `cause()`; `est_cause_params` uses the random subset |
