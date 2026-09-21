@@ -79,8 +79,8 @@ Common configurations and their included checks are:
 | Config | Includes | When to use |
 |--------|----------|-------------|
 | `redock` | All checks + RMSD vs reference + protein vdW overlap | Self-docking benchmarks, retrospective validation |
-| `dock` | All non-reference checks; drops RMSD plus the four reference-dependent checks (molecular formula, molecular bonds, double-bond stereo, chirality) since those need `mol_true` | Blind docking, prospective virtual screening |
-| `mol` | Intra-ligand only (sanity, bonds, angles, rings, stereo, energy) | Conformer QC; no protein context |
+| `dock` | All checks that need no reference; drops RMSD and the reference-dependent checks listed under the check table | Blind docking, prospective virtual screening |
+| `mol` | Intra-ligand only (sanitization, bond lengths/angles, internal clash, ring and double-bond flatness, energy); no stereo or chirality checks, which need `mol_true` | Conformer QC; no protein context |
 
 PoseBusters also ships additional and faster configurations in some releases. Treat the table as a workflow guide, not an exhaustive registry, and inspect the configurations available in the installed version.
 
