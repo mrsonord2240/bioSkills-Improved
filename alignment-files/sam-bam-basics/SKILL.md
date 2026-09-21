@@ -23,7 +23,7 @@ package and adapt the example to match the actual API rather than retrying.
 # SAM/BAM/CRAM Basics
 
 **"Read a BAM file"** -> Open a binary alignment file and iterate over aligned reads with their mapping coordinates, flags, and quality scores.
-- Python: `pysam.AlignmentFile()` (pysam)
+- Python: `pysam.AlignmentFile()` (pysam; see `references/pysam.md`)
 - CLI: `samtools view` (samtools)
 - R: `scanBam()` (Rsamtools)
 
@@ -130,7 +130,7 @@ Add `-@ N` to any `samtools view` for extra compression/decompression threads.
 
 **Goal:** Convert between SAM (text), BAM (binary), and CRAM (reference-compressed) alignment formats.
 
-**Approach:** Use `samtools view` with format flags (`-b` for BAM, `-C` for CRAM, `-h` for SAM with header). CRAM requires a reference FASTA with `-T`, for reading as well as writing. `examples/convert_formats.sh <in> <out> [reference.fa]` does this by extension (case-insensitive), passes the reference for CRAM input too, and refuses input == output.
+**Approach:** Use `samtools view` with format flags (`-b` for BAM, `-C` for CRAM, `-h` for SAM with header). CRAM requires a reference FASTA with `-T`, for reading as well as writing (resolution order, offline cache, checks: `references/cram-reference.md`). `examples/convert_formats.sh <in> <out> [reference.fa]` does this by extension (case-insensitive), passes the reference for CRAM input too, and refuses input == output.
 
 ### BAM to SAM
 ```bash
@@ -200,25 +200,7 @@ Two different concepts that are routinely conflated:
 
 `-F 2304` removes both. Strip supplementary only when downstream is small-variant calling; keep supplementary for SV calling, fusion detection, or any analysis that follows split-reads.
 
-## MAPQ Is Not Portable Across Aligners
-
-`samtools view -q 30` does different things depending on what produced the BAM. MAPQ is an aligner-specific scale, not a universal probability:
-
-| Aligner | MAPQ scale | "Unique" sentinel | Common gotcha |
-|---------|-----------|-------------------|----------------|
-| BWA-MEM / BWA-MEM2 | 0-60 | 60 | `-q 30` is sensible "high confidence" |
-| minimap2 (DNA / pbmm2) | 0-60 | 60 | Spec-compliant (checked: minimap2 2.31, pbmm2 26.2.99) |
-| HISAT2 | 0-60 | 60 | Spec-compliant |
-| Bowtie2 | 0-42 end-to-end (0-44 with `--local`) | 42 (44 in `--local`) is the top score and most common: 97% of records in a checked run | `-q 60` drops everything; `-q 23` is a common "uniquely mapped" convention (not a probabilistic 99% threshold) |
-| STAR | 0, 1, 3, 255 | **255 = uniquely mapped (sentinel, not a quality)** | `-q 255` for "unique only"; `-q 30` accidentally keeps unique only too |
-| DRAGEN | 0 to `--mapq-max` (default 60) | varies | `-q 30` still meaningful; distribution shape differs (not verified here) |
-| Cell Ranger / STARsolo | inherits STAR | 255 | Same trap as STAR (not verified here) |
-
-MAPQ 255 means "not available" in the SAM spec; only STAR (and tools that inherit it) use it for "unique". Verify the actual scale of any unfamiliar BAM:
-```bash
-samtools view input.bam | awk '{print $5}' | sort -n | uniq -c | head -20   # count per MAPQ value
-samtools view -H input.bam | grep '^@PG' | head -1   # which aligner produced this BAM
-```
+For `-q` thresholds, MAPQ scales differ by aligner (Bowtie2 tops out at 42, STAR uses 255 for unique): see `references/mapq-by-aligner.md`.
 
 ## 0-Based vs 1-Based Coordinates (Footgun)
 
@@ -263,156 +245,16 @@ Aligned reference span = sum of M/D/N/=/X (pysam `reference_length`); SEQ length
 
 CIGAR `M` is overloaded -- it is the union of `=` and `X`. Some aligners emit `=`/`X` directly (e.g. minimap2 with `--eqx`); `bcftools mpileup` gives identical output on `=`/`X` and `M` alignments (checked on 1.24), and `samtools calmd` rebuilds MD/NM for either. `N` operations break naive coverage calculations: a 1000 bp RNA-seq read with one 50 kb intron does not cover 50 kb. Distinguish soft-clip (`S`, bases retained) from hard-clip (`H`, bases discarded -- irreversible).
 
-## Context-Specific Tags
+## Reference Files
 
-Beyond the standard fields, downstream tools depend on optional tags whose presence depends on aligner and assay. Inspect with `samtools view input.bam | head -1 | tr '\t' '\n'` or pysam `read.get_tag('XX')`.
+Read the file when the task needs it; SKILL.md above covers viewing, conversion, FLAG, coordinates and CIGAR.
 
-| Tag | Set by | Meaning | Required by |
-|-----|--------|---------|-------------|
-| NM:i | bwa, minimap2, samtools calmd | Edit distance to reference | Edit-distance filters, e.g. `samtools view -e '[NM]<=2'` |
-| MD:Z | bwa, samtools calmd | Mismatch positions (text) | Not needed by `bcftools mpileup` or mapDamage (output identical with MD/NM stripped, checked); `samtools calmd` regenerates it |
-| MC:Z | samtools fixmate -m (bwa mem also writes it) | Mate CIGAR | samtools markdup |
-| ms:i | samtools fixmate -m | Mate score (lowercase per SAMtags); minimap2's own `ms:i` is an unrelated DP score | samtools markdup |
-| RG:Z | aligner from -R | Read group ID | GATK BQSR, MarkDuplicates LB lookup |
-| SA:Z | All split-read aligners | Other alignments of the read: `rname,pos,strand,CIGAR,mapQ,NM;` records (pos 1-based, each ends with `;`) | Sniffles, Manta, cuteSV, GRIDSS, Delly |
-| NH:i | STAR, HISAT2 | Number of reported hits | featureCounts multimapper handling, Salmon (not verified here) |
-| HI:i | STAR | Hit index among NH (1-based by default; `--outSAMattrIHstart 0` for 0-based) | RSEM (not verified here) |
-| XS:A | STAR (`--outSAMstrandField intronMotif`), HISAT2 | Strand inferred from splice motif | StringTie, Cufflinks |
-| ts:A | minimap2 `-ax splice` | Transcript strand from splice motif | StringTie |
-| CB:Z | Cell Ranger, STARsolo | Corrected cell barcode (not verified here) | scRNA quantification |
-| UB:Z | Cell Ranger, STARsolo | Corrected UMI (not verified here) | UMI-aware dedup |
-| RX:Z | fgbio AnnotateBamWithUmis | Raw UMI (bulk) | fgbio GroupReadsByUmi |
-| MI:Z | fgbio GroupReadsByUmi | Molecular identifier (UMI group) | CallMolecularConsensusReads, duplex calling |
-| cs:Z | minimap2 --cs | Compact CIGAR-with-bases | paftools, SV tools |
-
-A missing tag can make a tool refuse or quietly do less. `samtools markdup` on a file without fixmate's tags refuses (`no ms score tag. Please run samtools fixmate on file first.`, exit 1); check each tool's tag requirements instead of assuming.
-
-## Provenance: @PG Chain
-
-The `@PG` lines record every tool that touched the BAM, linked through `PP` (previous program) tags. This is the audit trail.
-
-```bash
-samtools view -H input.bam | grep '^@PG'
-```
-`samtools view -H` appends its own `@PG` line to the output; add `--no-PG` to see the file's chain unchanged.
-
-A clean germline pipeline:
-```
-@PG ID:bwa PN:bwa VN:0.7.17
-@PG ID:samtools PN:samtools VN:1.20 PP:bwa CL:samtools sort
-@PG ID:samtools.1 PN:samtools VN:1.20 PP:samtools CL:samtools fixmate
-@PG ID:samtools.2 PN:samtools VN:1.20 PP:samtools.1 CL:samtools markdup
-```
-
-A broken/missing chain (no PP, unknown tools, gaps) means the BAM cannot be reliably reproduced.
-
-## CRAM Reference Resolution (Critical)
-
-CRAM stores reads relative to a reference; without it, the file is unreadable. htslib resolves the reference in this order:
-
-1. Command-line `-T ref.fa` / `--reference`
-2. `REF_CACHE` env var (local MD5-named cache; searched *before* `REF_PATH`)
-3. `REF_PATH` env var (colon-separated; each element matched by the `@SQ M5:` MD5). A remote server such as EBI ENA is consulted only if its URL is present here -- it was the built-in default through htslib 1.21, but that default was **removed in 1.22** to reduce EBI load, so modern htslib does no network lookup unless that URL is added explicitly.
-4. Local file named in the `@SQ UR:` header tag (local / `file://` paths only; `http`/`ftp` URIs in `UR:` are ignored)
-
-On HPC nodes without internet, populate a local cache once:
-```bash
-mkdir -p $HOME/cram_cache
-seq_cache_populate.pl -root $HOME/cram_cache reference.fa
-export REF_CACHE=$HOME/cram_cache/%2s/%2s/%s
-export REF_PATH=$REF_CACHE   # local only; no network/ENA lookup
-
-samtools quickcheck -v file.cram                 # header + EOF only: passes with the reference missing and with a corrupt body
-samtools view -o /dev/null file.cram && echo ok  # full decode: exit 1 if the reference cannot be resolved or a slice is corrupt
-```
-`samtools view -c`, `flagstat` and `idxstats` never decode bases, so they succeed on a CRAM whose reference is unreachable (checked on 1.24); only a full decode (`view -o /dev/null`, or `stats`) proves it.
-
-`samtools view -C` without `-T` does not fail when no reference can be resolved: it warns (`Enabling embed_ref=2`) and embeds the read sequences. For a self-contained CRAM that decodes with no reference, use `-T ref.fa --output-fmt-option embed_ref=1`.
-
-CRAM can be made irreversibly lossy, but the `archive` profile is NOT how: `--output-fmt-option archive` is a *lossless* maximum-compression preset (fqzcomp quality codec, name tokenization, larger slices) that does not alter bases or qualities. Irreversible loss comes instead from explicit quality **binning** (e.g. Illumina 8-bin), which must be applied deliberately and is harmful for low-coverage / somatic / forensic / archival data. Convert against the *exact* reference the BAM was aligned to (matched by `@SQ M5:`). A wrong reference is refused, not silently accepted: each slice stores its reference MD5, so decoding fails with `MD5 checksum reference mismatch` (exit 1). Bases are silently wrong only with `--input-fmt-option ignore_md5=1`.
-
-## pysam Python Alternative
-
-**Goal:** Read and manipulate alignment data programmatically in Python.
-
-**Approach:** Use `pysam.AlignmentFile` to open BAM/CRAM files, iterate over reads, and access properties like coordinates, flags, CIGAR, and tags.
-
-### Open and Iterate
-```python
-import pysam
-
-with pysam.AlignmentFile('input.bam', 'rb') as bam:
-    for read in bam:
-        print(f'{read.query_name}\t{read.reference_name}:{read.reference_start}')
-```
-
-### Access Header
-```python
-with pysam.AlignmentFile('input.bam', 'rb') as bam:
-    for sq in bam.header['SQ']:
-        print(f'{sq["SN"]}: {sq["LN"]} bp')
-```
-
-### Read Alignment Properties
-```python
-with pysam.AlignmentFile('input.bam', 'rb') as bam:
-    for read in bam:
-        print(f'Name: {read.query_name}')
-        print(f'Flag: {read.flag}')
-        print(f'Chrom: {read.reference_name}')
-        print(f'Pos: {read.reference_start}')  # 0-based
-        print(f'MAPQ: {read.mapping_quality}')
-        print(f'CIGAR: {read.cigarstring}')
-        print(f'Seq: {read.query_sequence}')
-        print(f'Qual: {read.query_qualities}')
-        break
-```
-
-### Check Flag Properties
-```python
-with pysam.AlignmentFile('input.bam', 'rb') as bam:
-    for read in bam:
-        if read.is_paired and read.is_proper_pair:
-            if read.is_reverse:
-                strand = '-'
-            else:
-                strand = '+'
-            print(f'{read.query_name} on {strand} strand')
-```
-
-### Fetch Region
-```python
-with pysam.AlignmentFile('input.bam', 'rb') as bam:
-    for read in bam.fetch('chr1', 1000, 2000):
-        print(read.query_name)
-```
-
-Reading detects SAM/BAM/CRAM from the file, so `'r'` and `'rb'` both read any of them (`bam.is_bam` / `bam.is_cram` tell which); the mode selects the format only when writing:
-
-| Mode | Description |
-|------|-------------|
-| `r` / `rb` / `rc` | Read (format auto-detected) |
-| `w` | Write SAM |
-| `wb` | Write BAM |
-| `wc` | Write CRAM (give `reference_filename=`; without it pysam warns and writes an embedded-reference CRAM) |
-
-`bam.mapped` / `bam.unmapped` come from the BAM index and are unavailable for SAM, unindexed BAM and CRAM (0 or an error); count with a scan instead, as `examples/view_bam.py <file> [limit] [reference.fa]` does. On an unindexed CRAM, pysam prints `[E::cram_index_load]` lines on stderr; they are harmless when the run succeeds.
-
-### Convert BAM to SAM
-```python
-with pysam.AlignmentFile('input.bam', 'rb') as infile:
-    with pysam.AlignmentFile('output.sam', 'w', header=infile.header) as outfile:
-        for read in infile:
-            outfile.write(read)
-```
-
-### Convert to CRAM
-```python
-with pysam.AlignmentFile('input.bam', 'rb') as infile:
-    with pysam.AlignmentFile('output.cram', 'wc', reference_filename='reference.fa', header=infile.header) as outfile:
-        for read in infile:
-            outfile.write(read)
-```
+| File | Read when |
+|------|-----------|
+| `references/mapq-by-aligner.md` | Choosing or interpreting a `samtools view -q` threshold, or a BAM of unknown origin (MAPQ scale per aligner) |
+| `references/tags-and-provenance.md` | A tool needs an optional tag (NM, MD, MC, ms, SA, NH, HI, CB, UB, RX, MI...), or the `@PG` chain must be audited |
+| `references/cram-reference.md` | Any CRAM read or write: reference resolution order, offline `REF_CACHE`, proving a CRAM readable, embedded references, lossy vs lossless, wrong reference |
+| `references/pysam.md` | Reading or writing alignments from Python: `AlignmentFile` modes, properties, fetch, format conversion, `bam.mapped` limits |
 
 ## Quick Reference
 
