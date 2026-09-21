@@ -138,29 +138,15 @@ how much filtering happened.
 
 **Approach:** Read the tab-separated quantification files and the JSON metadata.
 
-```python
-import pandas as pd
-import json
-from pathlib import Path
-
-def parse_crispresso(output_dir):
-    '''Extract key metrics from CRISPResso output directory.'''
-    out = {}
-    # Mapping statistics: 7-column, 2-row TSV (header + one data row); no percentage column,
-    # so compute mapping_pct from READS ALIGNED / READS IN INPUTS.
-    map_stats = pd.read_csv(Path(output_dir) / 'CRISPResso_mapping_statistics.txt', sep='\t').iloc[0]
-    out['reads_in_input'] = int(map_stats['READS IN INPUTS'])
-    out['reads_aligned'] = int(map_stats['READS ALIGNED'])
-    out['mapping_pct'] = out['reads_aligned'] / out['reads_in_input'] * 100
-    # Editing quantification
-    quant = pd.read_csv(Path(output_dir) / 'CRISPResso_quantification_of_editing_frequency.txt', sep='\t')
-    out['editing_quant'] = quant.set_index('Amplicon').to_dict()
-    # JSON metadata
-    info_path = Path(output_dir) / 'CRISPResso2_info.json'
-    if info_path.exists():
-        out['info'] = json.loads(info_path.read_text())
-    return out
+```bash
+python scripts/parse_crispresso.py sample_results/CRISPResso_on_sample_id   # metrics as JSON
+python scripts/parse_crispresso.py --selftest                               # parser self-check
 ```
+
+From Python, `from parse_crispresso import parse_crispresso` (with `scripts/` on `sys.path`) returns
+`reads_in_input`, `reads_aligned`, `mapping_pct` (computed as `READS ALIGNED / READS IN INPUTS`, since the
+mapping-statistics file has no percentage column), `editing_quant` and, when present, `info`
+(`CRISPResso2_info.json`). Checked on the FANC.Cas9 test amplicon: 250 / 235 / 94.0%, Modified% 26.38.
 
 ## Failure Modes
 
@@ -168,7 +154,7 @@ def parse_crispresso(output_dir):
 
 **Trigger:** Wrong amplicon sequence (off by one nt, wrong strand, primer-trimmed vs untrimmed).
 **Mechanism:** CRISPResso fails to align reads beyond the amplicon edges; discards as unmappable.
-**Symptom:** `READS ALIGNED` / `READS IN INPUTS` (from `CRISPResso_mapping_statistics.txt`, see `parse_crispresso()` above) <50%; per-position coverage drops at amplicon edges.
+**Symptom:** `READS ALIGNED` / `READS IN INPUTS` (from `CRISPResso_mapping_statistics.txt`, see `scripts/parse_crispresso.py`) <50%; per-position coverage drops at amplicon edges.
 **Fix:** Re-derive amplicon from genome at primer-trimmed boundaries; verify strand orientation; check that primers are NOT included in `--amplicon_seq`.
 
 ### Total alignment failure (wrong locus / zero output)
