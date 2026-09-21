@@ -9,7 +9,9 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: Signac 1.13+, Seurat 5.0+, ArchR 1.0+
+Reference examples tested with: Signac 1.13+, Seurat 5.0+, ArchR 1.0+. Checked on Signac 1.17.1 (Seurat 5.5.0, R 4.4.3).
+
+Signac 1.17.x deprecates `NucleosomeSignal()` and `TSSEnrichment()` in favor of `ATACqc()`. The two old calls still run and fill `nucleosome_signal` / `TSS.enrichment`, but warn. `ATACqc()` is not a drop-in swap: it needs the external `fragtk` binary (`fragtk.path=`). Use the old calls when `fragtk` is absent; if a later Signac release removes them (as 1.17.0 removed `RunChromVAR()`), switch to `ATACqc()`.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - R: `packageVersion('<pkg>')` then `?function_name` to verify parameters
