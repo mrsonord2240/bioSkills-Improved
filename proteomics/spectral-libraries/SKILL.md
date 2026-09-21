@@ -12,6 +12,10 @@ author: GPTomics
 Reference examples tested with: koinapy 0.0.5+ (checked on 0.0.11), ms2pip 4.0+ (checked on 4.2.0),
 deeplc 4.1+ (checked on 4.5.0), pandas 2.2+
 
+Install: `pip install koinapy ms2pip deeplc pandas numpy scipy pyteomics`. CLI tools: EncyclopeDIA
+(Java), EasyPQP/FragPipe for DDA libraries, OpenMS for `TargetedFileConverter` and
+`OpenSwathDecoyGenerator` (checked on OpenMS 3.5.0).
+
 deeplc dropped the `DeepLC()` class in 4.1 for a module-level API built on `psm_utils.PSM`/
 `PSMList` (verified running on deeplc 4.5.0):
 
@@ -111,6 +115,24 @@ irt_model = Koina('Prosit_2019_irt', 'koina.wilhelmlab.org:443')
 irt = irt_model.predict(inputs[['peptide_sequences']])  # arbitrary iRT units -- calibrate before use
 ```
 
+Validate peptides before submitting: Prosit accepts only the 20 standard residues, length 7-30
+(modified residues use the model's own notation, e.g. `M[UNIMOD:35]`). Anything else raises an
+uncaught `tritonclient.utils.InferenceServerException` from the server rather than a clear message.
+
+```python
+import re
+from tritonclient.utils import InferenceServerException
+
+def valid_prosit_peptide(seq, lo=7, hi=30):
+    return lo <= len(seq) <= hi and re.fullmatch(r'[ACDEFGHIKLMNPQRSTVWY]+', seq) is not None
+
+bad = inputs[~inputs['peptide_sequences'].map(valid_prosit_peptide)]  # report and drop these
+try:
+    fragments = intensity_model.predict(inputs.drop(bad.index))
+except InferenceServerException as e:
+    raise RuntimeError(f'Koina rejected the request: {e}') from e
+```
+
 ### Calibrate iRT to Observed RT
 
 **Goal:** Map arbitrary-unit predicted iRT onto the run's real RT so peak groups extract at the right time.
@@ -158,32 +180,48 @@ def spectronaut_to_diann(lib):
 ```
 
 **OpenSwathDecoyGenerator's real input requirements (verified on OpenMS 3.5.0):**
-`TargetedFileConverter` converts and validates a TSV/TraML with placeholder `ProductMz` values
-without complaint, but `OpenSwathDecoyGenerator` then silently produces `Number of decoy
-peptides: 0` and fails ("... below the threshold of 80.0%") unless the transition list carries
-BOTH a literal `Annotation` column (e.g. `y3^1`) AND chemically real theoretical fragment m/z --
-not placeholders:
+`TargetedFileConverter` converts a TSV without complaint even when it is unusable. The transition
+list needs ALL of: a literal `Annotation` column (e.g. `y3^1`), chemically real theoretical fragment
+m/z (not placeholders), and a per-precursor grouping column -- `transition_group_id`, unique per
+PeptideSequence + PrecursorCharge (`FullUniModPeptideName` also works). Without the grouping
+column, distinct peptides sharing a charge collapse into one `<Peptide id="_2">` group with no error
+(2 targets become 1), and the decoy step then fails or reports wrong counts. Missing `Annotation` or
+placeholder m/z gives `Number of decoy peptides: 0`. Check the peptide count after conversion:
 
 ```python
+import pandas as pd
 from pyteomics import mass
 
-def y_ion_mz(seq, i, charge=1):
-    return mass.fast_mass(seq[-i:], ion_type='y', charge=charge)  # real theoretical m/z, required
-
-# each transition row needs: ProductMz=y_ion_mz(seq, i), Annotation=f'y{i}^1'
+def build_openswath_tsv(peptides, path, n_frag=6):
+    """peptides: [(sequence, charge, protein, iRT)] -> OpenSWATH TSV of y-ion transitions."""
+    rows = []
+    for seq, z, prot, irt in peptides:
+        group = f'{seq}_{z}'  # unique per PeptideSequence + PrecursorCharge; required
+        for i in range(1, n_frag + 1):
+            rows.append({'PrecursorMz': mass.fast_mass(seq, charge=z),
+                         'ProductMz': mass.fast_mass(seq[-i:], ion_type='y', charge=1),  # real m/z
+                         'Tr_recalibrated': irt, 'transition_name': f'{group}_y{i}',
+                         'transition_group_id': group, 'decoy': 0, 'LibraryIntensity': 1000.0 / i,
+                         'PeptideSequence': seq, 'FullUniModPeptideName': seq,
+                         'ProteinName': prot, 'PrecursorCharge': z, 'FragmentType': 'y',
+                         'FragmentSeriesNumber': i, 'FragmentCharge': 1,
+                         'Annotation': f'y{i}^1'})  # literal Annotation; required
+    pd.DataFrame(rows).to_csv(path, sep='	', index=False)
 ```
 
 ```bash
 TargetedFileConverter -in library.tsv -in_type tsv -out library.TraML -out_type TraML
+grep -c "<Peptide " library.TraML   # must equal the number of distinct sequence+charge precursors
 OpenSwathDecoyGenerator -in library.TraML -out library_decoy.TraML -method pseudo-reverse
 ```
 
 The default `-method shuffle` has no seed flag and is NOT reproducible: two runs on identical
-input produce different decoy peptide sequences (confirmed by diffing output TraML from repeated
-runs). Use `-method reverse` or `-method pseudo-reverse` instead when decoys must be
-reproducible run-to-run -- both are deterministic (confirmed byte-identical across repeated
-runs). `-method shift` is listed by `--helphelp` but rejected every peptide as a duplicate in
-testing (OpenMS 3.5.0) because it leaves the amino-acid sequence unchanged; do not rely on it.
+input produce different decoy peptide sequences. Use `-method pseudo-reverse` when decoys must be
+reproducible (5/5 repeated runs byte-identical). `-method reverse` gives reproducible decoy
+sequences and fragments, but repeated runs are not always byte-identical (3 distinct hashes in 8
+runs): only the last digits of the isolation-window target m/z metadata float vary. `-method shift`
+is listed by `--helphelp` but rejected every peptide as a duplicate in testing (OpenMS 3.5.0)
+because it leaves the amino-acid sequence unchanged; do not rely on it.
 
 ### QC and Merge Libraries
 
@@ -231,11 +269,11 @@ def library_stats(lib):
 **Symptom:** FDR cannot be estimated or is meaningless.
 **Fix:** Run OpenSwathDecoyGenerator to append decoys; do NOT also supply decoys to DIA-NN/Spectronaut, which generate their own.
 
-### OpenSwathDecoyGenerator silently generates 0 decoys
-**Trigger:** Transition list has placeholder/approximate `ProductMz` values or lacks a literal `Annotation` column, even though it converted cleanly via TargetedFileConverter.
-**Mechanism:** The decoy algorithm matches target and decoy fragments by annotation and real m/z; without both it cannot pair any fragment and drops every candidate peptide.
-**Symptom:** "Number of decoy peptides: 0" and a hard failure at the 80% threshold check, not a partial library.
-**Fix:** Add a literal `Annotation` column and compute real theoretical fragment m/z (e.g. `pyteomics.mass.fast_mass`) before conversion -- see "Convert Library Formats" above.
+### OpenSwathDecoyGenerator silently generates 0 decoys or merges peptides
+**Trigger:** Transition list has placeholder/approximate `ProductMz`, lacks a literal `Annotation` column, or lacks `transition_group_id`, yet converts cleanly via TargetedFileConverter.
+**Mechanism:** The decoy algorithm matches target and decoy fragments by annotation and real m/z, so without both it pairs no fragment and drops every candidate. Without a grouping column TargetedFileConverter merges peptides sharing a charge into one group.
+**Symptom:** "Number of decoy peptides: 0" and a hard failure at the 80% threshold check; or, with no error at all, fewer `<Peptide>` groups in the TraML than precursors in the TSV.
+**Fix:** Supply `Annotation`, real theoretical fragment m/z and `transition_group_id`, and compare the `<Peptide>` count to the precursor count after conversion -- see "Convert Library Formats" above.
 
 ### Modification mismatch between library and data
 **Trigger:** Library lacks the sample's variable mods, or carries too many.
@@ -269,8 +307,8 @@ def library_stats(lib):
 | DeepLC RT all near constant or on the wrong scale | `deeplc.predict()` called without calibration | Use `deeplc.calibrate()` + `deeplc.predict()`, or `deeplc.predict_and_calibrate(psms, psm_list_reference=cal_psms)`; mods as ProForma via `Peptidoform`, not MS2PIP `location\|name` |
 | Extraction at wrong time, ID collapse | Predicted RT not calibrated to the gradient | Fit iRT/CiRT anchors or run GPF-DIA empirical correction before searching |
 | OpenSWATH FDR meaningless | Target-only library, no decoys | Append decoys with OpenSwathDecoyGenerator |
-| OpenSwathDecoyGenerator: "Number of decoy peptides: 0" / below 80% threshold | Transition list lacks a literal `Annotation` column or has placeholder `ProductMz` | Add `Annotation` (e.g. `y3^1`) and real theoretical fragment m/z before conversion -- see "Convert Library Formats" |
-| Decoy peptide sequences differ between identical `-method shuffle` runs | Shuffle decoy generation has no seed flag; this is expected, not a bug | Use `-method reverse` or `-method pseudo-reverse` for reproducible decoys |
+| OpenSwathDecoyGenerator: "Number of decoy peptides: 0" / below 80% threshold, or fewer `<Peptide>` groups than precursors | Missing `Annotation`, placeholder `ProductMz`, or no `transition_group_id` | See the OpenSwathDecoyGenerator failure mode above |
+| Decoy peptide sequences differ between identical `-method shuffle` runs | Shuffle decoy generation has no seed flag; this is expected, not a bug | Use `-method pseudo-reverse` for reproducible decoys |
 | ms2pip.predict_batch appears to hang on first call ("Model hash not recognized." then nothing) | The default `model='HCD'` (= HCD2021) downloads two XGBoost files to `~/.ms2pip` on first use -- 66MB + 847MB, confirmed via `Content-Length` -- with no progress output, no timeout, and no resume (a killed download restarts from 0, not where it left off) | Let it finish once with network access (~10+ min on a slow link), pre-populate `model_dir` from a machine that already has it cached, or pass a smaller model (`model='HCD2019'`, ~17MB total, confirmed working end-to-end in ~45s) if HCD2021's extra accuracy isn't needed |
 | Fewer transitions than expected after merge | Dedup key missed charges | Key on the full five-field transition key |
 
