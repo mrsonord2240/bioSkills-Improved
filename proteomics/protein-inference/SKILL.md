@@ -10,13 +10,14 @@ author: GPTomics
 ## Version Compatibility
 
 Reference examples tested with: pyOpenMS 3.5.0, pandas 2.2+, Percolator 3.09.0, Philosopher 5.1.0
+Install: `pip install pyopenms pandas`; Percolator, OpenMS `Epifany` and Philosopher are separate CLI installs (Philosopher 5.1.0 ships the TPP-derived subcommands, so a separate TPP install is not needed).
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
 - R: `packageVersion('<pkg>')` then `?function_name` to verify parameters
 - CLI: `<tool> --help` (or `<tool> help <subcommand>`) and confirm the flag is in the listing BEFORE
   scripting it -- protein-inference flags get renamed and removed between releases (Percolator's Fido
-  option `--protein`/`-A` is gone in 3.09.0 and exits 1 with `ERROR: the option --protein is invalid.`)
+  `--protein`/`-A` is the example; see the taxonomy)
 
 If code throws ImportError, AttributeError, or TypeError, introspect the installed
 package and adapt the example to match the actual API rather than retrying.
@@ -57,8 +58,8 @@ Scope: this skill OWNS peptide-to-protein grouping, the indistinguishable/subsum
 | Score aggregation (OpenMS `BasicProteinInferenceAlgorithm`) | -- | Aggregates peptide scores for EVERY protein; `greedy_group_resolution` adds razor-style resolution | Not parsimony by default: subsumable and shared-only proteins stay as groups unless `greedy_group_resolution='true'` |
 | ProteinProphet | Nesvizhskii 2003 | EM APPORTIONS shared peptides across candidate proteins, weighted by other evidence | TPP / FragPipe pipelines; the classic probabilistic standard |
 | EPIFANY | Pfeuffer 2020 | Bayesian network over the peptide-protein graph, loopy belief propagation + convolution trees | When you want calibrated posteriors rather than a parsimony set. It is NOT automatically better calibrated at the group level: on the reference idXML it passed 583 groups at 1% picked FDR with 3.43% true FDP, against 556 and 0.36% for Basic + `greedy_group_resolution` |
-| Fido | Serang 2010 | Bayesian generative model; was Percolator's `--protein` / `-A` option | GONE from the Percolator CLI -- absent from 3.09.0 `--help`, and `--protein` exits 1 with `ERROR: the option --protein is invalid.` Only "Not available for Fido" remarks on `--protein-report-fragments`/`-duplicates` survive. Do not script it |
-| Percolator picked-protein (`-f` / `--picked-protein <fasta>`) | Savitski 2015 | In-silico digest of the FASTA -> protein grouping -> fragment/duplicate elimination -> picking, on the `.pin` Percolator already read | The way Percolator 3.09 does protein inference, and it IS the picked method recommended here -- no extra tool needed after Percolator |
+| Fido | Serang 2010 | Bayesian generative model; was Percolator's `--protein` / `-A` option | GONE from the Percolator CLI -- absent from 3.09.0 `--help`; `--protein` exits 1 (see Common Errors). Only "Not available for Fido" remarks on `--protein-report-fragments`/`-duplicates` survive. Do not script it |
+| Percolator picked-protein (`-f` / `--picked-protein <fasta>`) | Savitski 2015 | In-silico digest of the FASTA -> protein grouping -> fragment/duplicate elimination -> picking, on the `.pin` Percolator already read | The way Percolator 3.09 does protein inference, and it IS the picked method recommended here -- no extra tool needed after Percolator. Default output is one representative per row, NOT a group list (partners are eliminated; see the CLI block) |
 | Razor peptide | -- | Shared peptide assigned winner-take-all to the group with most evidence (MaxQuant) | MaxQuant default; ID-fine but distorts QUANT (route to quantification) |
 | Picked-protein FDR | Savitski 2015 | Pair target with its decoy, keep the higher-scoring of the pair, then count decoys | Protein-level FDR on any non-trivial dataset |
 | Picked-group FDR | The 2022 | Picking applied at the protein-GROUP level | When the inference unit is the group (the correct unit on deep data) |
@@ -69,7 +70,7 @@ Scope: this skill OWNS peptide-to-protein grouping, the indistinguishable/subsum
 | Scenario | Recommended | Why |
 |----------|-------------|-----|
 | Standard DDA run, OpenMS-based pipeline | `BasicProteinInferenceAlgorithm` with `greedy_group_resolution='true'` + picked-group FDR; `BayesianProteinInferenceAlgorithm` (EPIFANY) when you want calibrated posteriors | Both are group-FDR aware, but resolution is what controls FDP: on the same idXML, Basic+greedy gave 0.36% true FDP and 0 subsumable groups passing, EPIFANY called with `greedy_group_resolution=False` gave 3.43% and 3 |
-| Already running Percolator after the search | `percolator -f target_decoy.fasta -P DECOY_ -l prot.target.tsv -L prot.decoy.tsv ... search.pin` | Percolator's own picked-protein route; adds no tool and computes the method recommended below |
+| Already running Percolator after the search | `percolator -f target_decoy.fasta -P DECOY_ -l prot.target.tsv -L prot.decoy.tsv ... search.pin` | Percolator's own picked-protein route; adds no tool and computes the method recommended below. Add `--protein-report-duplicates --protein-report-fragments` if the report must list group members |
 | MaxQuant output (`proteinGroups.txt`) | Parse groups as-is; drop `Reverse` (`+`, accessions `REV__`), `Potential contaminant` and `Only identified by site` rows; quantify on UNIQUE peptides | Groups already inferred; `Protein IDs` = all members, `Majority protein IDs` = members with at least half the group's peptides, first = leading; `Unique peptides` = unique to the GROUP, not to one protein |
 | FragPipe / TPP pipeline | `philosopher peptideprophet` -> `proteinprophet` -> `filter --picked --razor` -> `report` (commands below), then COUNT THE ROWS in `protein.tsv` | Native EM apportionment + 2-level FDR; `filter` exits 0 and prints `Converged to 0.00 % FDR` when it read nothing, so the row count is the only real result |
 | Deep dataset (many thousands of proteins) | Picked-GROUP FDR on resolved groups | No protein-level FDR leaves a 7-30% false protein list (measure it; the figure depends on depth and the PSM threshold); the non-picked count over-estimates FDR and loses proteins |
@@ -81,17 +82,19 @@ Default when uncertain: run `BasicProteinInferenceAlgorithm` with `annotate_indi
 
 **Input contract:** protein FDR needs decoys, so the upstream PSM/peptide filter must KEEP the decoy hits that pass it. Know the score orientation: PEP is lower-better, posterior probability and the group probability written by these algorithms are higher-better.
 
-**Output contract (CLI):** judge every command-line inference/FDR step by the file it was supposed to write, NEVER by its exit status. A protein-FDR tool that read zero PSMs reports the emptiest possible result as a triumph -- `philosopher filter` exits 0 and prints `Converged to 0.00 % FDR with 0 PSMs` and `Final report ... proteins=0`, and `philosopher peptideprophet` exits 0 after writing an `interact-*.pep.xml` with every `spectrum_query` copied through and zero `peptideprophet_result` elements (both reproduced on Philosopher 5.1.0 with real Comet pepXML). After each step assert non-empty: `protein.tsv` has more than its header line, the `prot.xml` exists, the peptide count Percolator prints is greater than zero. A "0.00 % FDR" or a "0% protein FDR" is a failed run until a row count says otherwise.
+**Output contract (CLI):** judge every command-line inference/FDR step by the file it was supposed to write, NEVER by its exit status. A protein-FDR tool that read zero PSMs reports the emptiest possible result as a triumph (`philosopher filter` and `philosopher peptideprophet` both exit 0 on it; reproduced on Philosopher 5.1.0 with real Comet pepXML -- see Common Errors). After each step assert non-empty: `protein.tsv` has more than its header line, the `prot.xml` exists, the peptide count Percolator prints is greater than zero. A "0.00 % FDR" or a "0% protein FDR" is a failed run until a row count says otherwise.
 
 ### Group Proteins with pyOpenMS (aggregation + greedy resolution)
 
 **Goal:** Turn an FDR-filtered peptide identification list into protein groups with a leading protein, resolving shared-peptide ambiguity.
 
-**Approach:** Load the idXML from peptide identification, run `BasicProteinInferenceAlgorithm` (score aggregation per protein) with indistinguishable-group annotation AND greedy group resolution on -- without resolution, subsumable and shared-only proteins stay as their own groups -- then read the groups off the protein identification run and apply picked protein-group FDR with the built-in.
+**Approach:** Load the idXML from peptide identification, run `BasicProteinInferenceAlgorithm` (score aggregation per protein) with indistinguishable-group annotation AND greedy group resolution on -- without resolution, subsumable and shared-only proteins stay as their own groups -- apply picked protein-group FDR with the built-in, and read the groups off the protein identification run as records: `leading_protein`, `accessions`, `n_peptides`, `n_unique_peptides` (unique to the GROUP), `is_decoy`, `qvalue` -- the contract to bind downstream code to, and the same record `examples/protein_groups.py` returns.
 
 ```python
 from pyopenms import (IdXMLFile, BasicProteinInferenceAlgorithm, PeptideIdentificationList,
                       FalseDiscoveryRate, String)
+
+DECOY_PREFIX = 'DECOY_'   # tool-specific: DECOY_ OpenMS/Comet, rev_ Philosopher, REV__ MaxQuant
 
 protein_ids = []
 peptide_ids = PeptideIdentificationList()   # pyOpenMS 3.5+: a plain [] fails
@@ -108,15 +111,35 @@ inference.setParameters(params)
 inference.run(peptide_ids, protein_ids)
 
 # picked protein-group FDR: (decoy string, is prefix, groups too); group.probability becomes a q-value
-FalseDiscoveryRate().applyPickedProteinFDR(protein_ids[0], String('DECOY_'), True, True)
+FalseDiscoveryRate().applyPickedProteinFDR(protein_ids[0], String(DECOY_PREFIX), True, True)
 
-for group in protein_ids[0].getIndistinguishableProteins():
-    accs = [a.decode() for a in group.accessions]   # bytes; pyOpenMS sorts them alphabetically
-    if all(a.startswith('DECOY_') for a in accs) or group.probability > 0.01:
-        continue
-    # members share the same evidence; choose the lead explicitly: canonical (no -N isoform suffix) first
-    leading = sorted(accs, key=lambda a: ('-' in a, a))[0]
-    print(leading, group.probability, accs)
+# peptide sequences behind each protein, from the best hit of every PSM
+peps_of = {}
+for pid in peptide_ids:
+    hit = pid.getHits()[0]
+    for ev in hit.getPeptideEvidences():
+        peps_of.setdefault(ev.getProteinAccession(), set()).add(hit.getSequence().toString())
+
+# group record: leading_protein, accessions, n_peptides, n_unique_peptides, is_decoy, qvalue
+# (the same record examples/protein_groups.py returns)
+groups = []
+for g in protein_ids[0].getIndistinguishableProteins():
+    accs = [a.decode() for a in g.accessions]   # bytes; pyOpenMS sorts them alphabetically
+    peptides = set().union(*(peps_of.get(a, set()) for a in accs))
+    others = set().union(*(s for a, s in peps_of.items() if a not in accs))   # unique = not in any other protein
+    groups.append({
+        # members share the same evidence; choose the lead explicitly: canonical (no -N isoform suffix) first
+        'leading_protein': sorted(accs, key=lambda a: ('-' in a, a))[0],
+        'accessions': accs,
+        'n_peptides': len(peptides),
+        'n_unique_peptides': len(peptides - others),
+        'is_decoy': all(a.startswith(DECOY_PREFIX) for a in accs),
+        'qvalue': g.probability,
+    })
+passing = [g for g in groups if not g['is_decoy'] and g['qvalue'] <= 0.01]
+print(len(passing), 'groups at 1% picked-group FDR')
+for g in passing[:5]:
+    print(g)
 ```
 
 ### Bayesian Inference + Group FDR with EPIFANY
@@ -148,7 +171,7 @@ for group in protein_ids[0].getIndistinguishableProteins():
 
 **Goal:** Estimate protein-group FDR without the inflation that the reused PSM formula causes on large data.
 
-**Approach:** For each target group, find its decoy counterpart (same accessions with the decoy prefix); keep only the higher-scoring member of each target/decoy PAIR; rank the picked set and count decoys as the FDR estimate. For idXML, prefer the built-in `FalseDiscoveryRate().applyPickedProteinFDR(prot_id, String(prefix), True, True)` shown above; for group-level work on large data, the kusterlab `picked_group_fdr` package implements The 2022. The sketch below pairs by the exact accession set, so decoy groups whose membership differs from their target's stay unpaired and are counted unpicked. The decoy prefix is tool-specific (`DECOY_` OpenMS, `rev_` FragPipe/Philosopher's `--tag` default, `REV__` MaxQuant) and must be passed explicitly. A wrong prefix does not pass silently in either implementation: `applyPickedProteinFDR` raises `IndexError: invalid unordered_map<K, T> key`, and the sketch below raises `ValueError: no decoy groups with prefix ...`. Treat both as "the prefix is wrong", not as a corrupt input file.
+**Approach:** For each target group, find its decoy counterpart (same accessions with the decoy prefix); keep only the higher-scoring member of each target/decoy PAIR; rank the picked set and count decoys as the FDR estimate. For idXML, prefer the built-in `FalseDiscoveryRate().applyPickedProteinFDR(prot_id, String(prefix), True, True)` shown above; for group-level work on large data, the kusterlab `picked_group_fdr` package implements The 2022. The sketch below pairs by the exact accession set, so decoy groups whose membership differs from their target's stay unpaired and are counted unpicked. The decoy prefix is tool-specific (`DECOY_` OpenMS/Comet, `rev_` FragPipe/Philosopher's `--tag` default, `REV__` MaxQuant) and must be passed explicitly (`DECOY_PREFIX` in the blocks). A wrong prefix does not pass silently in either implementation: `applyPickedProteinFDR` raises `IndexError: invalid unordered_map<K, T> key`, and the sketch below raises `ValueError: no decoy groups with prefix ...`. Treat both as "the prefix is wrong", not as a corrupt input file.
 
 ```python
 def picked_group_fdr(groups, decoy_prefix, min_decoys=10):
@@ -190,19 +213,24 @@ def picked_group_fdr(groups, decoy_prefix, min_decoys=10):
 # --- Percolator 3.09.0: picked-protein FDR, no extra tool after Percolator ---
 # Fido (the old `--protein` / `-A`) is GONE in 3.09.0; `-f` is the only protein route.
 # -P is the decoy prefix in the FASTA; -z must match the search enzyme (default trypsin).
-percolator -f target_decoy.fasta -P DECOY_ -z trypsin \
+# Add --protein-report-duplicates --protein-report-fragments (-g -c) to list group members.
+DECOY_PREFIX=DECOY_   # tool-specific: DECOY_ OpenMS/Comet, rev_ Philosopher, REV__ MaxQuant
+percolator -f target_decoy.fasta -P "$DECOY_PREFIX" -z trypsin \
            -l prot.target.tsv -L prot.decoy.tsv \
            -r pep.target.tsv  -B pep.decoy.tsv \
            -m psm.target.tsv  -M psm.decoy.tsv -S 1 search.pin
 # OUTPUT CHECK. prot.target.tsv columns: ProteinId, ProteinGroupId, q-value,
-# posterior_error_prob, peptideIds -- one row per group representative, already picked.
+# posterior_error_prob, peptideIds -- one row per picked representative. By default the
+# indistinguishable partners are ELIMINATED, not listed: on the reference .pin all 2,339 rows
+# had one accession each, and with the two report flags 28 rows listed several. Never report
+# prot.target.tsv as a group list without the flags.
 awk -F'\t' 'NR>1 && $3<=0.01' prot.target.tsv | wc -l    # groups at 1% protein-group FDR
 
 # --- Philosopher 5.1.0: the FragPipe / TPP route ---
 philosopher workspace --init                              # once per output folder
-philosopher database --annotate target_decoy.fasta --prefix DECOY_
+philosopher database --annotate target_decoy.fasta --prefix "$DECOY_PREFIX"
 philosopher peptideprophet --database target_decoy.fasta --ppm --accmass \
-                           --nonparam --decoy DECOY_ --decoyprobs search.pep.xml
+                           --nonparam --decoy "$DECOY_PREFIX" --decoyprobs search.pep.xml
 # OUTPUT CHECK: peptideprophet exits 0 even when it modelled nothing, copying every
 # spectrum_query through with no probability attached. Count the results, not the exit code.
 grep -c peptideprophet_result interact-search.pep.xml || { echo 'PeptideProphet modelled 0 PSMs'; exit 1; }
@@ -210,7 +238,7 @@ philosopher proteinprophet --maxppmdiff 2000000 interact-search.pep.xml
 test -s interact.prot.xml || { echo 'ProteinProphet wrote no prot.xml'; exit 1; }
 # --tag defaults to 'rev_', NOT the OpenMS/Comet 'DECOY_'; --razor is silently ignored
 # unless --protxml supplies inference data.
-philosopher filter --psm 0.01 --pep 0.01 --prot 0.01 --tag DECOY_ --picked --razor \
+philosopher filter --psm 0.01 --pep 0.01 --prot 0.01 --tag "$DECOY_PREFIX" --picked --razor \
                    --pepxml interact-search.pep.xml --protxml interact.prot.xml
 philosopher report
 # OUTPUT CHECK: `filter` exits 0 and prints "Converged to 0.00 % FDR with 0 PSMs" on an
@@ -224,7 +252,7 @@ philosopher report
 **Trigger:** (a) No protein-level FDR at all ("1% PSM FDR is enough"); (b) the classic protein-level `decoys/targets` count without picking on a deep dataset; (c) picked FDR on unresolved groups.
 **Mechanism:** (a) false PSMs nucleate one-hit-wonder false proteins that no protein-level estimate catches; (b) decoy proteins keep accumulating random hits while true targets saturate, so decoys are over-counted; (c) subsumable and shared-only proteins count as extra target groups.
 **Symptom:** (a) protein list 7-30% false depending on depth and PSM threshold (7.0% observed on the 113k-PSM synthetic benchmark at 1% PSM FDR); (b) FDR over-estimated, real proteins lost (conservative, not anticonservative); (c) nominal 1% with several-fold higher true FDP.
-**Fix:** Picked-protein FDR (Savitski 2015) or picked-group FDR (The 2022) on resolved groups; validate with a two-species or entrapment search.
+**Fix:** Picked-protein FDR (Savitski 2015) or picked-group FDR (The 2022) on resolved groups; validate with an entrapment search, which needs a proteome ABSENT from the sample (append e.g. Arabidopsis or a shuffled second proteome to the search database) -- a multi-species benchmark such as a HYE human/yeast/E. coli mix does not provide one, because every species in it is truly present.
 
 ### Two-peptide rule
 **Trigger:** Filtering to proteins with >=2 (unique) peptides "for confidence".
@@ -258,15 +286,11 @@ philosopher report
 | Picked FDR (target/decoy pairing) | Savitski 2015; The 2022 | Removes target/decoy asymmetry; dataset-size-independent, unlike naive decoy/target |
 | Decoy:target ratio 1:1 | community standard | Standard null; unequal ratios require formula correction |
 | Min PSMs for trustworthy protein FDR | hundreds+ | Below ~100s of items decoy counts are too noisy; "0% FDR" from zero decoys is luck, not control |
-| Two-peptide rule | DO NOT USE (Gupta & Pevzner 2009) | Drops real proteins; FDR effect depends on the PSM threshold; replaced by picked FDR + per-ID score |
-| Single-peptide IDs | judge by score, not count | A high-confidence unique peptide can be a legitimate ID |
 
 ## Common Errors
 
 | Error / symptom | Cause | Solution |
 |-----------------|-------|----------|
-| Protein FDR much higher than nominal on deep data | No protein-level estimate, or groups not resolved (Basic without `greedy_group_resolution`) | Resolve groups, then picked-protein or picked-group FDR |
-| Real low-abundance proteins missing | Two-peptide rule applied, or non-picked protein FDR (conservative) | Remove the rule; control picked FDR |
 | `AttributeError: module 'pyopenms' has no attribute 'EpifanyAlgorithm'` | The pyOpenMS class is named differently; the R `ProteinInference::infer_proteins` could not be confirmed to exist | Use `pyopenms.BayesianProteinInferenceAlgorithm`; use pyOpenMS, not an unverified R package |
 | `Exception: can not handle type of (..., [], [])` on `IdXMLFile().load` | pyOpenMS 3.5+ needs a `PeptideIdentificationList` | `peptide_ids = PeptideIdentificationList()` |
 | `TypeError: a bytes-like object is required, not 'str'` on group accessions | `ProteinGroup.accessions` are bytes | `[a.decode() for a in group.accessions]` |
@@ -275,8 +299,6 @@ philosopher report
 | `philosopher filter` exits 0, logs `Converged to 0.00 % FDR with 0 PSMs` and `proteins=0`, writes header-only or no tables | It read zero PSMs from the pepXML; the exit status reports the empty result as success | Never trust the exit code -- assert `protein.tsv` has more than a header line. Then fix the input: check `Database search results ions=/peptides=/psms=` in the log, that `--tag` matches the FASTA prefix (default is `rev_`), and that `philosopher database --annotate` ran first |
 | `philosopher peptideprophet` exits 0 but `proteinprophet` then says `did not find any PeptideProphet results` | PeptideProphet modelled nothing and still wrote an `interact-*.pep.xml` full of `spectrum_query` elements with no probabilities | `grep -c peptideprophet_result interact-*.pep.xml` immediately after the step; 0 means the run failed |
 | Indistinguishable proteins reported as separate IDs | Flat protein list instead of groups | Enable `annotate_indistinguishable_groups`; report groups with a leading protein |
-| Spurious DE on paralog-sharing proteins | Razor-peptide quant flipped between conditions | Quantify on unique peptides -> quantification |
-| "Unique" peptide count changed when DB changed | Uniqueness is database-relative | Fix and document the database (isoforms, contaminants, decoys) |
 
 ## References
 
