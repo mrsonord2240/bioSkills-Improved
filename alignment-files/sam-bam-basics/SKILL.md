@@ -93,7 +93,7 @@ samtools view input.bam chr1             # whole chromosome
 Region queries need a coordinate-sorted, indexed file (`@HD SO:coordinate`, `samtools index`); without an index: `Could not retrieve index file`. Contig names must match `@SQ SN:` exactly (`chr1` vs `1`): an unknown name prints `[main_samview] region "22:2000-3000" specifies an invalid region or unknown reference. Continue anyway.` and returns 0 records with **exit code 0**. List the names with `samtools idxstats input.bam | cut -f1`.
 
 ### Multiple Regions (overlaps print records twice)
-`samtools view input.bam r1 r2` runs one query per region, so a record overlapping two regions is printed twice, silently (exit 0). On the test BAM `chr22:2000-3000 chr22:2500-3500` gave 7356 rows for 5426 distinct records (full-scan truth). De-duplicate with `-M` (multi-region iterator), or use a BED file:
+`samtools view input.bam r1 r2` runs one query per region, so a record overlapping two regions is printed twice, silently (exit 0). On the test BAM `chr22:2000-3000 chr22:2500-3500` gave 7356 rows for 5426 distinct records (full-scan truth). De-duplicate with `-M` (multi-region iterator; needs an index, like any region query), or use a BED file:
 ```bash
 samtools view -M input.bam chr1:1000-2000 chr1:1500-2500
 samtools view -M -L regions.bed input.bam      # BED is 0-based, half-open
@@ -156,7 +156,9 @@ samtools view -b -T reference.fa -o output.bam input.cram
 ```bash
 samtools view -b input.sam > output.bam
 ```
-CRAM stores optional tags in its own order (NM/MD move to the end), so a round trip keeps every field and tag but not the tag order.
+
+### CRAM round trip is not byte-lossless
+BAM -> CRAM -> BAM keeps read names, positions, SEQ and QUAL, but not the rest verbatim (checked on samtools 1.24): `=`/`X` CIGAR ops are rewritten to `M`; NM/MD are regenerated when the reference is available (MD:Z appears on reads that had none); tags are reordered (NM/MD move to the end); an unmapped read's MAPQ becomes 0. Use BAM when the exact CIGAR ops or tag set matter.
 
 ## Common Flags
 
@@ -205,16 +207,16 @@ Two different concepts that are routinely conflated:
 | Aligner | MAPQ scale | "Unique" sentinel | Common gotcha |
 |---------|-----------|-------------------|----------------|
 | BWA-MEM / BWA-MEM2 | 0-60 | 60 | `-q 30` is sensible "high confidence" |
-| minimap2 (DNA / pbmm2) | 0-60 | 60 | Spec-compliant |
+| minimap2 (DNA / pbmm2) | 0-60 | 60 | Spec-compliant (checked: minimap2 2.31, pbmm2 26.2.99) |
 | HISAT2 | 0-60 | 60 | Spec-compliant |
 | Bowtie2 | 0-42 end-to-end (0-44 with `--local`) | 42 (44 in `--local`) is the top score and most common: 97% of records in a checked run | `-q 60` drops everything; `-q 23` is a common "uniquely mapped" convention (not a probabilistic 99% threshold) |
 | STAR | 0, 1, 3, 255 | **255 = uniquely mapped (sentinel, not a quality)** | `-q 255` for "unique only"; `-q 30` accidentally keeps unique only too |
-| DRAGEN | 0 to `--mapq-max` (default 60) | varies | `-q 30` still meaningful; distribution shape differs |
-| Cell Ranger / STARsolo | inherits STAR | 255 | Same trap as STAR |
+| DRAGEN | 0 to `--mapq-max` (default 60) | varies | `-q 30` still meaningful; distribution shape differs (not verified here) |
+| Cell Ranger / STARsolo | inherits STAR | 255 | Same trap as STAR (not verified here) |
 
 MAPQ 255 means "not available" in the SAM spec; only STAR (and tools that inherit it) use it for "unique". Verify the actual scale of any unfamiliar BAM:
 ```bash
-samtools view input.bam | awk '{print $5}' | sort -un | head
+samtools view input.bam | awk '{print $5}' | sort -n | uniq -c | head -20   # count per MAPQ value
 samtools view -H input.bam | grep '^@PG' | head -1   # which aligner produced this BAM
 ```
 
@@ -273,12 +275,12 @@ Beyond the standard fields, downstream tools depend on optional tags whose prese
 | ms:i | samtools fixmate -m | Mate score (lowercase per SAMtags); minimap2's own `ms:i` is an unrelated DP score | samtools markdup |
 | RG:Z | aligner from -R | Read group ID | GATK BQSR, MarkDuplicates LB lookup |
 | SA:Z | All split-read aligners | Other alignments of the read: `rname,pos,strand,CIGAR,mapQ,NM;` records (pos 1-based, each ends with `;`) | Sniffles, Manta, cuteSV, GRIDSS, Delly |
-| NH:i | STAR, HISAT2 | Number of reported hits | featureCounts multimapper handling, Salmon |
-| HI:i | STAR | Hit index among NH (1-based by default; `--outSAMattrIHstart 0` for 0-based) | RSEM |
+| NH:i | STAR, HISAT2 | Number of reported hits | featureCounts multimapper handling, Salmon (not verified here) |
+| HI:i | STAR | Hit index among NH (1-based by default; `--outSAMattrIHstart 0` for 0-based) | RSEM (not verified here) |
 | XS:A | STAR (`--outSAMstrandField intronMotif`), HISAT2 | Strand inferred from splice motif | StringTie, Cufflinks |
 | ts:A | minimap2 `-ax splice` | Transcript strand from splice motif | StringTie |
-| CB:Z | Cell Ranger, STARsolo | Corrected cell barcode | scRNA quantification |
-| UB:Z | Cell Ranger, STARsolo | Corrected UMI | UMI-aware dedup |
+| CB:Z | Cell Ranger, STARsolo | Corrected cell barcode (not verified here) | scRNA quantification |
+| UB:Z | Cell Ranger, STARsolo | Corrected UMI (not verified here) | UMI-aware dedup |
 | RX:Z | fgbio AnnotateBamWithUmis | Raw UMI (bulk) | fgbio GroupReadsByUmi |
 | MI:Z | fgbio GroupReadsByUmi | Molecular identifier (UMI group) | CallMolecularConsensusReads, duplex calling |
 | cs:Z | minimap2 --cs | Compact CIGAR-with-bases | paftools, SV tools |
@@ -296,10 +298,10 @@ samtools view -H input.bam | grep '^@PG'
 
 A clean germline pipeline:
 ```
-@PG ID:bwa-mem PN:bwa VN:0.7.17
-@PG ID:samtools.1 PN:samtools VN:1.20 PP:bwa-mem CL:samtools sort
-@PG ID:samtools.2 PN:samtools VN:1.20 PP:samtools.1 CL:samtools fixmate
-@PG ID:samtools.3 PN:samtools VN:1.20 PP:samtools.2 CL:samtools markdup
+@PG ID:bwa PN:bwa VN:0.7.17
+@PG ID:samtools PN:samtools VN:1.20 PP:bwa CL:samtools sort
+@PG ID:samtools.1 PN:samtools VN:1.20 PP:samtools CL:samtools fixmate
+@PG ID:samtools.2 PN:samtools VN:1.20 PP:samtools.1 CL:samtools markdup
 ```
 
 A broken/missing chain (no PP, unknown tools, gaps) means the BAM cannot be reliably reproduced.
@@ -392,9 +394,9 @@ Reading detects SAM/BAM/CRAM from the file, so `'r'` and `'rb'` both read any of
 | `r` / `rb` / `rc` | Read (format auto-detected) |
 | `w` | Write SAM |
 | `wb` | Write BAM |
-| `wc` | Write CRAM (needs `reference_filename=`) |
+| `wc` | Write CRAM (give `reference_filename=`; without it pysam warns and writes an embedded-reference CRAM) |
 
-`bam.mapped` / `bam.unmapped` come from the BAM index and are unavailable for SAM, unindexed BAM and CRAM (0 or an error); count with a scan instead, as `examples/view_bam.py <file> [limit] [reference.fa]` does.
+`bam.mapped` / `bam.unmapped` come from the BAM index and are unavailable for SAM, unindexed BAM and CRAM (0 or an error); count with a scan instead, as `examples/view_bam.py <file> [limit] [reference.fa]` does. On an unindexed CRAM, pysam prints `[E::cram_index_load]` lines on stderr; they are harmless when the run succeeds.
 
 ### Convert BAM to SAM
 ```python
