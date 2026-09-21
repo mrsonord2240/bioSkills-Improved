@@ -126,9 +126,12 @@ def plot_sashimi(grouping_file, region, output_prefix, gtf_file, options=None):
     min_junc = options.get('min_junc', 1)
     best = max((n for b in bams for n in junction_counts(b, chrom, start, end).values()), default=0)
     shrink = options.get('shrink', True)
-    if shrink and best < min_junc:
-        print(f'WARNING: no junction has >= {min_junc} reads in {region}; dropping --shrink (ggsashimi crashes on it)')
-        shrink = False
+    if best < min_junc:
+        # ggsashimi exits 0 and writes a coverage-only figure with no arcs; with --shrink it crashes instead
+        print(f'WARNING: no junction has >= {min_junc} reads (best {best}) in {region}: the figure will have no arcs; lower min_junc')
+        if shrink:
+            print('WARNING: dropping --shrink (ggsashimi crashes on it when no junction passes -M)')
+            shrink = False
 
     cmd = [
         'ggsashimi.py',
@@ -224,7 +227,7 @@ def batch_plot_rmats_events(rmats_file, grouping_file, gtf_file, output_dir,
 
 
 def plot_specific_event(grouping_file, gtf_file, chrom, start, end,
-                        output_prefix, gene_name=None, flank=500):
+                        output_prefix, gene_name=None, flank=500, min_junc=1):
     '''
     Plot a specific genomic region with optional flanking sequence.
 
@@ -237,6 +240,7 @@ def plot_specific_event(grouping_file, gtf_file, chrom, start, end,
         output_prefix: Output file prefix
         gene_name: Optional gene name for labeling
         flank: Base pairs to add on each side
+        min_junc: ggsashimi -M (per sample, before aggregation); 1 = draw every junction
     '''
     region = f'{chrom}:{start - flank}-{end + flank}'
 
@@ -245,7 +249,7 @@ def plot_specific_event(grouping_file, gtf_file, chrom, start, end,
         options={
             'shrink': True,
             'fix_y_scale': True,
-            'min_junc': 5,
+            'min_junc': min_junc,
             'aggregate': 'mean_j',
             'height': 4,
             'width': 10

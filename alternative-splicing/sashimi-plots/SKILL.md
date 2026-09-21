@@ -19,6 +19,7 @@ Install (ggsashimi and Jutils are on neither conda nor PyPI; PyPI `jutils` is an
 conda install -c conda-forge -c bioconda rmats2sashimiplot pygenometracks pysam bedtools regtools samtools
 conda install -c conda-forge r-base=4.2 r-ggplot2=3.4.4 r-data.table r-gridextra r-gtable seaborn scikit-learn
 git clone https://github.com/guigolab/ggsashimi     # ggsashimi.py: one script, needs pysam and R on PATH
+export PATH=$PWD/ggsashimi:$PATH                    # the recipes call `ggsashimi.py` by name; its `#!/usr/bin/env python` must find a python with pysam
 git clone https://github.com/splicebox/Jutils       # jutils.py
 ```
 
@@ -63,7 +64,7 @@ Visualize RNA-seq coverage tracks with splice junction arcs labeled by read coun
 
 **Goal:** Generate publication-quality sashimi plot for a region with samples grouped by condition and per-sample tracks aggregated.
 
-**Approach:** Define samples + groups in a TSV (no header), a palette file, then call ggsashimi with coordinates, GTF, and visual flags. ggsashimi exits 0 when it drops a missing BAM, draws an empty region or hits an R error, so check the inputs before and the figure after.
+**Approach:** Define samples + groups in a TSV (no header), a palette file, then call ggsashimi with coordinates, GTF, and visual flags. ggsashimi exits 0 on several failures (see Silent Failures), so check the inputs before and the figure after.
 
 ```python
 import subprocess
@@ -108,8 +109,8 @@ Key ggsashimi flags (Garrido-Martin 2018 *PLoS Comput Biol*):
 - `-O 3`: column 3 of the TSV is the overlay level; samples of a group are drawn in one track. Required for `-A`
 - `-C 3 -P palette.txt`: colour by column 3 using the palette file (R colour names or hex, one per line). Without `-C` everything is grey; with `-C` and no `-P` the colours are R defaults (red/green), not blue/orange
 - `-A mean_j`: the arc label is the rounded (half to even: 6.5 shows 6) plain mean of the raw junction counts of the group's samples that have the junction; every sample's coverage stays overlaid. `mean` and `median` also aggregate the coverage; `median_j` is the median analogue. There is no depth normalization
-- `-M`: minimum reads for a junction to be drawn, **default 1**, inclusive, applied **per sample before `-A`**: samples below `-M` drop out of the mean, biasing labels upward (planted 10.33 shows 11 at `-M 10`; 10 at `-M 1`). Keep `-M 1` for exact labels; raise it (5-10, 20+ for crowded plots) only to declutter, and never so high that no junction passes
-- `--shrink`: rescale long introns for compact display. Crashes with `RuntimeError: generator raised StopIteration` when no junction passes `-M` (with `-s`, when one strand has none): lower `-M` or drop `--shrink`
+- `-M`: minimum reads for a junction to be drawn, **default 1**, inclusive, applied **per sample before `-A`**: samples below `-M` drop out of the mean, biasing labels upward (planted 10.33 shows 11 at `-M 10`; 10 at `-M 1`). Keep `-M 1` for exact labels; raise it (5-10, 20+ for crowded plots) only to declutter. If `-M` is above every junction's count, ggsashimi still exits 0 and writes a coverage-only figure with no arcs (`examples/plot_sashimi.py` warns)
+- `--shrink`: rescale long introns for compact display (keeps exons visible in genes with multi-kb introns). Crashes with `RuntimeError: generator raised StopIteration` when no junction passes `-M` (with `-s`, when one strand has none): lower `-M` or drop `--shrink`
 - `--fix-y-scale`: identical y-axis across groups (essential for visual comparison)
 - `--alpha 0.25`: transparency of per-sample coverage in overlay mode
 - `--height`/`--width`/`--ann-height`/`--base-size`: sizes in inches / font size (e.g. `--width 12 --height 4 --base-size 16`)
@@ -121,7 +122,7 @@ Key ggsashimi flags (Garrido-Martin 2018 *PLoS Comput Biol*):
 
 **Goal:** Auto-generate sashimi plots for all significant rMATS differential events.
 
-**Approach:** Parse SE.MATS.JC.txt, expand coordinates to flanking exons + 500nt context, map the contig name onto the BAM header, iterate ggsashimi and check every figure. rMATS writes `chrX`; an Ensembl-style BAM calls it `X` and ggsashimi dies with `ValueError: invalid contig`. Events near a contig start give a start < 1.
+**Approach:** Continues the ggsashimi block above (it reuses `groups`, `sashimi_groups.tsv` and `palette.txt`). Parse SE.MATS.JC.txt, expand coordinates to flanking exons + 500nt context, map the contig name onto the BAM header, iterate ggsashimi and check every figure. rMATS writes `chrX`; an Ensembl-style BAM calls it `X` and ggsashimi dies with `ValueError: invalid contig`. Events near a contig start give a start < 1.
 
 ```python
 import re
@@ -203,10 +204,15 @@ n_pdf=$(find sashimi_rmats/Sashimi_plot -name '*.pdf' -size +0 2>/dev/null | wc 
 MAJIQ/VOILA (bundled with MAJIQ, majiq.biociphers.org) is licence-gated (academic/commercial download) and was **not installed or run** in testing; the commands follow MAJIQ's public docs, so check `voila view --help` for your version.
 
 ```bash
-# splicegraph file name and format depend on the MAJIQ version used for the build
-voila view -p 5000 -j 8 build/splicegraph.<ext> psi_output/sample.psi.voila
-voila view -p 5000 -j 8 build/splicegraph.<ext> deltapsi_output/group1_group2.deltapsi.voila
+# MAJIQ V2 build: splicegraph.sql + one .voila file per quantification
+voila view -p 5000 -j 8 build/splicegraph.sql psi_output/sample.psi.voila
+voila view -p 5000 -j 8 build/splicegraph.sql deltapsi_output/group1_group2.deltapsi.voila
+
+# MAJIQ V3 build (per the V2-to-V3 migration page): sg.zarr + the .psicov quantification + the .sgc coverage file of the group
+voila view build/sg.zarr psi_output/Brain_Cerebellum.psicov build/Brain_Cerebellum.sgc
 ```
+
+Do not mix V2 and V3 inputs in one call. Check `voila view --help` for the options (`-p`, `-j`) your version accepts.
 
 VOILA shows:
 - Complete LSV graphs (single source / single target nodes)
@@ -214,7 +220,7 @@ VOILA shows:
 - ΔPSI distributions across all conditions
 - Confidence by junction within an LSV
 
-**The only tool that visualizes complex multi-junction LSVs intuitively.** For events that don't fit canonical SE/A5SS/A3SS, VOILA is the visualization of choice. It needs the MAJIQ build's splicegraph plus the `.voila` file; without a licence use ggsashimi on the region instead.
+**The only tool that visualizes complex multi-junction LSVs intuitively.** For events that don't fit canonical SE/A5SS/A3SS, VOILA is the visualization of choice. It needs the MAJIQ build's splicegraph plus the quantification file (`.voila` in V2; `.psicov` and `.sgc` in V3); without a licence use ggsashimi on the region instead.
 
 ## leafviz Shiny App
 
@@ -309,10 +315,12 @@ file_type = bedgraph
 [junctions]
 file = junctions.bedpe
 title = Junctions
-height = 2
+height = 5
 file_type = links
 links_type = arcs
 ```
+
+Arc height grows with the junction's span, so a short `[junctions]` track crops the widest arc (`height = 2` did on a 3-exon locus whose skipping junction spans 60% of the window; 5 shows it whole): raise `height`, or narrow `--region`, until the widest arc is complete, and look at the figure.
 
 Tracks are scaled independently: set the same `min_value`/`max_value` on both coverage tracks (pick `max_value` from the data) or the two groups are not comparable. A BigWig made from the same `-split` bedGraph works too (`file_type = bigwig`).
 
@@ -339,12 +347,12 @@ pyGenomeTracks --tracks tracks.ini --region chr17:43094000-43125000 -o figure.pd
 |----------------|--------------------|
 | Filled coverage track | Read coverage at each genomic position (per sample, overlaid; the group mean with `-A mean`) |
 | Arc / curve between exons | Junction-spanning reads; arc connects donor to acceptor |
-| Number on arc | Count of junction-spanning reads (raw per sample; with `-A` the rounded group mean) |
+| Number on arc | Junction-spanning alignment records (raw per sample; with `-A` the rounded group mean). ggsashimi skips only unmapped records: secondary and duplicate alignments are counted, so labels match a plain pysam CIGAR scan only when those are counted too (2 of 10 labels matched when secondary records were skipped) |
 | Arc thickness | Often proportional to read count (tool-dependent) |
 | Gene model below | Exons (boxes) and introns (lines) from GTF |
 | Multiple parallel tracks | Per-sample (default) or per-group (with `-O`) |
 
-**Junction count interpretation:** the number on an arc is the absolute count of reads whose CIGAR string contained an `N` operation matching that intron coordinate. Higher = more usage. Compare counts on inclusion vs skipping arcs to estimate PSI visually.
+**Junction count interpretation:** an arc's number is the count of alignments whose CIGAR has an `N` operation matching that intron. Higher = more usage. Compare inclusion vs skipping arcs to estimate PSI visually.
 
 ## Per-Tool Failure Modes
 
@@ -380,10 +388,8 @@ pyGenomeTracks --tracks tracks.ini --region chr17:43094000-43125000 -o figure.pd
 
 | Tip | Rationale |
 |-----|-----------|
-| Use `--shrink` for genes with large introns | Keeps exons visible (TTN, brain genes with multi-kb introns) |
 | Limit to 3-4 groups per figure | More becomes hard to read |
 | Include 200-500 nt flanking exons | Show full splicing context |
-| For MXE events, plot both alternative exons | Otherwise only half of the event is visible |
 | Check accessibility colors | Use ColorBrewer-safe palettes for color-blind readers |
 | Always include a legend | Sashimi figures without legends are uninformative for non-experts |
 
@@ -412,7 +418,6 @@ pyGenomeTracks --tracks tracks.ini --region chr17:43094000-43125000 -o figure.pd
 | Annotation missing or wrong gene | GTF lacks gene_name attribute or wrong build | Verify GTF version vs BAM reference; pre-filter the GTF to the relevant features |
 | Memory issues on large regions | >100 kb regions with many samples | Plot smaller windows or pre-extract reads with samtools view |
 | Y-axis dominated by one peak | Outlier sample | Filter the outlier out of the TSV |
-| Gene model shifted against coverage, tick labels clipped | ggplot2 >= 3.5 | Use ggplot2 3.4.4 |
 
 ## Related Skills
 
