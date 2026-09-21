@@ -12,25 +12,12 @@ samtools view -s 42.1 -b -o subset.bam input.bam
 # Sequential cuts with INDEPENDENT seeds
 samtools view -s 1.5 -b in.bam > half1.bam
 samtools view -s 2.25 -b half1.bam > quarter.bam   # 12.5% of original
-
-# Coverage-matching to a target read count (hash-based, lands a few % off the target)
-total=$(samtools view -c -F 2304 input.bam)
-target=10000000
-if [ "$total" -le "$target" ]; then
-    echo "only $total primary reads, fewer than the target; copying unchanged" >&2
-    cp input.bam matched.bam
-else
-    frac=$(awk -v t=$target -v n=$total 'BEGIN{printf "%.6f", t/n}')
-    samtools view -s "1.${frac#*.}" -b -o matched.bam input.bam
-fi
-
-# Tumor-normal coverage matching (pull tumor down to normal)
-normal_reads=$(samtools view -c -F 2308 normal.bam)
-tumor_reads=$(samtools view -c -F 2308 tumor.bam)
-if [ "$tumor_reads" -gt "$normal_reads" ]; then
-    frac=$(awk -v n=$normal_reads -v t=$tumor_reads 'BEGIN{printf "%.6f", n/t}')
-    samtools view -s "1.${frac#*.}" -b -o tumor_matched.bam tumor.bam
-fi
 ```
 
-The `if` guards matter: a fraction of 1 or more spliced into `-s` (`1.084419`) silently keeps only 8% of the reads.
+Coverage-matching to a target read count, or to another BAM's read count (tumor-normal: pull the tumor down to the normal). Hash-based, lands a few % off the target; a BAM already at or under the target is copied unchanged (`scripts/match_read_count.sh`):
+```bash
+bash scripts/match_read_count.sh input.bam matched.bam --target 10000000
+bash scripts/match_read_count.sh tumor.bam tumor_matched.bam --like normal.bam
+```
+
+The script's guard matters: a fraction of 1 or more spliced into `-s` (`1.084419`) silently keeps only 8% of the reads.

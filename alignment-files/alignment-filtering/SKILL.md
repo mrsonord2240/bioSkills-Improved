@@ -244,6 +244,8 @@ Checked on the 1000G test BAM (samtools 1.24).
 | `references/expressions-and-read-groups.md` | Filtering on tags, CIGAR or other fields with `samtools view -e`; selecting by read group or library (`-r`, `-R`, `-l`, `-n`) |
 | `references/pysam.md` | Filtering in Python: predicate filter, region and BED recipes, hash-based subsampling; `examples/filter_bam.py` is the command-line version |
 
+Runnable code lives in `scripts/` (`filter_by_bed.py`, `subsample_pysam.py`, `match_read_count.sh`) and `examples/filter_bam.py`; invocations are in the reference files. Paths are relative to this Skill's folder.
+
 ## Output Options and Checks
 ```bash
 samtools view -b -F 4 -o output.bam input.bam                   # BAM (a .bam -o name also gives BAM)
