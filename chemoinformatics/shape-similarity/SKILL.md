@@ -82,7 +82,7 @@ Read the file for the method you are running; the decision tree above says which
 | Low | High | Similar 2D chemotype in a different sampled shape |
 | Low | Low | Unrelated by these representations |
 
-Calibrate “high” and “low” on a task-relevant reference set; do not treat the illustrative function defaults below as universal scientific cutoffs.
+Calibrate “high” and “low” on a task-relevant reference set; do not treat the illustrative defaults below as universal scientific cutoffs.
 
 The shape >> ECFP4 quadrant is the scaffold-hopping gold:
 
@@ -90,28 +90,11 @@ The shape >> ECFP4 quadrant is the scaffold-hopping gold:
 
 **Approach:** Run the conformer-ensemble shape search (`shape_search_ensemble`, `references/open3dalign.md`), keep hits above a shape Tanimoto cutoff, then retain only those whose ECFP4 Tanimoto to the query is below an ECFP4 dissimilarity cutoff.
 
-```python
-from rdkit import DataStructs
-from rdkit.Chem import rdFingerprintGenerator
-
-def ecfp_tanimoto(mol1, mol2):
-    # Radius 2 / 2048 bits: compare only fingerprints built with identical settings
-    gen = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
-    return DataStructs.TanimotoSimilarity(gen.GetFingerprint(mol1), gen.GetFingerprint(mol2))
-
-# These thresholds are repository starting defaults only; calibrate both on a
-# task-relevant active/decoy or retrieval benchmark before making decisions.
-def scaffold_hop_candidates(query_mol, library, shape_threshold=0.7,
-                            ecfp_threshold=0.5):
-    shape_hits = shape_search_ensemble(query_mol, library)
-    candidates = []
-    for target, shape_score in shape_hits:
-        if shape_score >= shape_threshold:
-            ecfp_sim = ecfp_tanimoto(query_mol, target)
-            if ecfp_sim < ecfp_threshold:
-                candidates.append((target, shape_score, ecfp_sim))
-    return candidates
+```bash
+python scripts/shape_search_ensemble.py --query 'CC(=O)Nc1ccc(C(=O)c2ccccc2)cc1' --library lib.smi --scaffold-hop --shape-threshold 0.7 --ecfp-threshold 0.5
 ```
+
+The 0.7 / 0.5 cutoffs are repository starting defaults only; calibrate both on a task-relevant active/decoy or retrieval benchmark before making decisions. ECFP4 here is Morgan radius 2, 2048 bits (compare only fingerprints built with identical settings). Import `scaffold_hop_candidates` from the script for Python use.
 
 ## Per-Tool Failure Modes
 
