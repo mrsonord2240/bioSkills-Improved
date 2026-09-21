@@ -159,6 +159,13 @@ def main():
         assert sat['all'][-1] == 4 and sat['known'][-1] == 2, sat
         assert sat['verdict'].startswith('PLATEAU') or sat['verdict'].startswith('STILL'), sat
         print('ok  saturation curve parsed', sat['growth_80_100'], sat['verdict'])
+        try:
+            sq.junction_saturation(str(spliced_bam), str(bed), str(tmp / 'sat_bad'), lo=80, step=5)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('expected ValueError for lo != step')
+        print('ok  lo != step refused')
 
     shutil.rmtree(tmp)
     print('all checks passed')

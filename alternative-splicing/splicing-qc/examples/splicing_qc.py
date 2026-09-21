@@ -135,6 +135,8 @@ def junction_saturation(bam_file, bed_file, output_prefix, plot=False, step=5, l
     RSeQC shuffles splice events without a seed: repeat runs differ by a few junctions.
     Returns the curves, growth of the known and all-junction curves, and the verdict.
     '''
+    if lo != step:
+        raise ValueError('RSeQC samples correctly only when lo == step (-l equals -s); a finer curve means a smaller step, e.g. lo=step=2')
     check_contigs(bam_file, bed_file)
     _run_rseqc('junction_saturation.py', bam_file, bed_file, output_prefix, plot,
                extra=('-l', str(lo), '-u', str(hi), '-s', str(step)))

@@ -137,7 +137,7 @@ Notes:
 **Approach:** RSeQC subsamples the splice events (5%, 10%, ... 100%) and counts junctions at each step. The numbers are only inside `*.junctionSaturation_plot.r` (vectors `x` percent, `y` known, `z` all, `w` novel); the helper parses them.
 
 ```bash
-junction_saturation.py -i sample.bam -r genes.bed12 -o sample_junc_sat --skip-plot   # add -l/-u/-s for a finer 80-100% range
+junction_saturation.py -i sample.bam -r genes.bed12 -o sample_junc_sat --skip-plot   # finer curve: lower -s and keep -l equal to -s (-l 2 -u 100 -s 2); -l != -s mislabels the percentages
 python examples/splicing_qc.py saturation sample.bam genes.bed12 sample_junc_sat
 ```
 
