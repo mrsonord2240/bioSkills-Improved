@@ -1,6 +1,6 @@
 ---
 name: bio-splicing-qc
-description: Assesses RNA-seq data quality specifically for alternative splicing analysis. QC layers include experimental design audit (library prep, read length, depth, replicates), STAR 2-pass cohort-style alignment, junction saturation curves and discovery plateau detection, novel-vs-known junction ratio diagnostics, junction-overhang distribution, splice-site strength scoring (MaxEntScan intrinsic + SpliceAI context-aware), strandedness verification, GENCODE basic vs comprehensive choice, and rRNA contamination screening. Splicing analysis is more demanding than DGE on read length, depth, library prep, alignment strategy, and annotation choice — failures silently bias PSI estimates and inflate novel-junction false positives. Use when evaluating data suitability for splicing analysis, troubleshooting low event detection, or designing sequencing experiments where AS is a primary endpoint.
+description: Assesses RNA-seq data quality for alternative splicing analysis. QC layers include experimental design audit (library prep, read length, depth, replicates), STAR cohort-style 2-pass alignment, junction saturation and plateau detection, known-vs-novel junction ratio, junction overhang and read support, splice-site strength (MaxEntScan, SpliceAI), strandedness verification, GENCODE basic vs comprehensive choice, and rRNA contamination screening. Failures in these layers silently bias PSI estimates and inflate novel-junction false positives. Use when evaluating data suitability for splicing analysis, troubleshooting low event detection, or designing sequencing experiments where AS is a primary endpoint.
 tool_type: python
 primary_tool: RSeQC
 license: MIT
@@ -8,32 +8,42 @@ license: MIT
 
 ## Version Compatibility
 
-Reference examples tested with: RSeQC 5.0+, STAR 2.7.11+, samtools 1.19+, pysam 0.22+, regtools 1.0+, maxentpy 0.0.1+, spliceai 1.3+, matplotlib 3.8+, pandas 2.2+
+Checked 2026-09-20 with: RSeQC 5.0.5, STAR 2.7.11b, samtools 1.24, pysam 0.24.1, pandas 2.3.3, maxentpy 0.0.2, Picard 3.5.0, fastq_screen 0.16.0 (minimap2 aligner), SpliceAI 1.3.1. Install (bioconda / conda-forge): `rseqc star samtools picard fastq-screen gffread maxentpy pysam pandas`; `spliceai` from PyPI. If a flag or signature differs from an older release, run `<tool> --help` or `help(module.function)` and adapt.
 
-Before using code patterns, verify installed versions match. If versions differ:
-- Python: `pip show <package>` then `help(module.function)` to check signatures
-- CLI: `<tool> --version` then `<tool> --help` to confirm flags
+## Scope
 
-If code throws ImportError, AttributeError, or TypeError, introspect the installed
-package and adapt the example to match the actual API rather than retrying.
+Research QC of RNA-seq datasets. Splice-site scores here describe sites in a dataset; classifying a patient's variant (ACMG/ClinGen evidence, PP3/BP4) is a clinical-laboratory decision and out of scope (see `splice-variant-prediction`).
 
 # Splicing-Specific Quality Control
 
-Splicing analysis is more demanding than DGE on read length, depth, library prep, alignment strategy, and annotation choice. Failures in any of these silently bias PSI estimates and inflate novel-junction false positives. The decision sequence is: experimental design -> library prep -> alignment strategy -> annotation -> diagnostic metrics. Each layer's failure mode is distinct.
+Splicing analysis is more demanding than DGE on read length, depth, library prep, alignment strategy, and annotation choice. The decision sequence is: experimental design -> library prep -> alignment strategy -> annotation -> diagnostic metrics.
+
+## Before You Run Anything
+
+- **Gene model:** `junction_annotation.py` and `junction_saturation.py` need a **BED12** file. Convert a GTF with `gffread genes.gtf --bed | cut -f1-12 > genes.bed12` (gffread 0.12.9 appends a 13th attribute column). With a BED6 file RSeQC exits 0 and calls every junction `complete_novel`; `infer_experiment.py` accepts BED6.
+- **Contig names must match the BAM** (`chr1` vs `1`). On a mismatch RSeQC exits 0 and reports zeros (`Total 0 usable reads were sampled`, flat all-zero saturation curve).
+- **Rscript is needed only for RSeQC's plots.** Without it `junction_annotation.py` and `junction_saturation.py` exit 1 (`Rscript executable not found`); pass `--skip-plot` (numbers are still written to `.junction.xls` / `.junctionSaturation_plot.r`). Picard needs Java; fastq_screen needs an aligner (see rRNA section).
+- **Helper script:** `examples/splicing_qc.py` wraps the RSeQC steps below with the checks above (BED12, contig overlap, no spliced reads, `--skip-plot` when Rscript is absent) and adds fragment-level junction support and MaxEntScan scoring; `python examples/test_splicing_qc.py` runs a self-contained check on a tiny planted BAM.
+
+```bash
+python examples/splicing_qc.py report sample.bam genes.bed12 sample_qc   # annotation + saturation + junction support
+```
 
 ## QC Layer Taxonomy
 
-| Layer | Target | Tool | Fails when |
-|-------|--------|------|------------|
-| Experimental design | Read length, depth, replicates, library type | Pre-sequencing review | <PE 75nt; n<3 vs n<3; <30M reads/sample |
-| Library prep | poly(A) vs rRNA depletion | Pre-sequencing review | poly(A) library used for IR analysis |
-| Alignment | STAR 2-pass cohort-style | STAR | 1-pass loses 14% novel junctions; per-sample 2-pass introduces inconsistency |
-| Junction discovery | Saturation, novelty | RSeQC `junction_saturation`, `junction_annotation` | Curve still rising = under-sequenced; novel% >40% suggests biology or artifact |
-| Strand specificity | Library protocol consistency | RSeQC `infer_experiment` | Wrong `--libType` halves usable junctions |
-| Splice site strength | Cryptic vs canonical | MaxEntScan, SpliceAI | Weak splice sites (MaxEnt<5) may indicate cryptic, regulated, or annotation error |
-| Junction overhang | Read-junction support quality | pysam CIGAR parsing | Overhang <8nt = high false-positive rate |
-| Contamination | rRNA, adapters | fastq_screen | >20% rRNA in "depleted" library = failed depletion |
-| Annotation | GENCODE basic vs comprehensive | Annotation choice | Basic for canonical events; comprehensive for DTU |
+| Layer | Tool | Section |
+|-------|------|---------|
+| Experimental design, library prep | Pre-sequencing review | Experimental Design Audit |
+| Alignment | STAR cohort-style 2-pass | STAR 2-Pass Alignment |
+| Junction discovery | RSeQC `junction_saturation`, `junction_annotation` | Junction Saturation; Novel-vs-Known |
+| Junction support | pysam CIGAR parsing | Junction Read Overhang and Coverage |
+| Splice site strength | MaxEntScan, SpliceAI | Splice Site Strength |
+| 3' bias, mapping distribution | Picard, RSeQC `geneBody_coverage` | Picard CollectRnaSeqMetrics |
+| Strand specificity | RSeQC `infer_experiment` | Strandedness Verification |
+| Annotation | GENCODE basic vs comprehensive | Annotation Choice |
+| Contamination | fastq_screen, samtools | rRNA Contamination Check |
+
+All numeric pass/fail cut-offs are in **Quality Thresholds**, the design targets in **Experimental Design Audit**.
 
 ## Decision Tree by Question
 
@@ -41,35 +51,36 @@ Splicing analysis is more demanding than DGE on read length, depth, library prep
 |----------|-----------------|
 | Will my planned RNA-seq design support AS analysis? | Pre-sequencing audit: library type, read length, depth, replicates |
 | Is my data suitable for cassette exon analysis? | Junction saturation + known/novel ratio + read length |
-| Why does my AS analysis call so few events? | Saturation curve, depth, library type, alignment 2-pass |
+| Why does my AS analysis call so few events? | Saturation curve, depth, library type, strandedness, 2-pass |
 | Why does my AS analysis call so many novel junctions? | Annotation completeness + novel% + biology check (TDP-43, SF3B1) |
 | Are my SpliceAI predictions calibrated for my tissue? | MaxEntScan + SpliceAI concordance for known sites |
-| Did STAR 2-pass actually run cohort-style? | Verify SJ.out.tab merging across samples |
+| Did STAR 2-pass actually run cohort-style? | Verify the merged novel-junction file was passed to pass 2 |
 | Is intron retention detectable in my data? | Library type (must be rRNA-depleted); strand-specific |
-| Are my microexons detectable? | Read length >=100; aligner anchor settings; consider VAST-TOOLS |
 
 ## Experimental Design Audit (Before Sequencing)
 
+Targets are conventions, not hard limits.
+
 | Decision | For splicing analysis | Rationale |
 |----------|------------------------|-----------|
-| **Library prep** | rRNA depletion (Ribo-Zero, RiboCop) | poly(A) selection loses pre-mRNA, nascent transcripts, and detained introns; for IR analysis rRNA depletion is mandatory (convention) |
-| **Read length** | PE 100-150 nt (PE 150 strongly preferred) | Junction-spanning reads need >=8 nt overhang on each exon; shorter single-end reads bias junction detection toward shorter exons (convention) |
+| **Library prep** | rRNA depletion (Ribo-Zero, RiboCop) | poly(A) selection loses pre-mRNA, nascent transcripts and detained introns; mandatory for IR analysis |
+| **Read length** | PE 100-150 nt (PE 150 preferred) | Junction-spanning reads need >=8 nt overhang on each side |
 | **Pairing** | Paired-end | Single-end loses fragment-level disambiguation of junctions |
-| **Depth** | 50-100M reads/sample | DGE-grade 30M misses low-PSI events; 100M for low-abundance event discovery |
-| **Strandedness** | Stranded library (Illumina TruSeq stranded) | Distinguishes overlapping antisense; some tools double-count unstranded junctions |
-| **Replicates** | n>=3 per condition | n=2 vs n=2 has poor calibration in most tools (especially SUPPA2) |
-| **Annotation** | GENCODE basic for canonical, comprehensive for DTU/discovery | basic = high-confidence; comprehensive includes putative — affects FDR control |
-| **Microexons** | PE 100+ with `--alignSJoverhangMin 8`; VAST-TOOLS | Default aligners miss 3-27nt exons |
-| **Long-intron genes (TTN, brain)** | Increased `--alignIntronMax` | Default 1Mb may miss >1Mb introns |
+| **Depth** | 50-100M reads/sample; >=100M for low-abundance events | 30M is the DGE-grade minimum; only a fraction of reads span junctions (24.5% on the chrX test data: 24,692 of 100,826 records) |
+| **Strandedness** | Stranded library (dUTP / TruSeq stranded) | Distinguishes overlapping antisense; some tools double-count unstranded junctions |
+| **Replicates** | n>=3 per condition | n=2 vs n=2 is poorly calibrated |
+| **Long-intron genes (TTN, brain)** | Increase `--alignIntronMax` | Default 0 means the window-derived maximum, 2^16 x 9 = 589,824 nt (~590 kb; from `STAR --help`), which misses longer introns |
+
+Annotation choice is in its own section below.
 
 ## STAR 2-Pass Alignment
 
-**Goal:** Maximize novel-junction sensitivity for downstream AS analysis.
+**Goal:** Maximize novel-junction sensitivity with one junction reference shared by all samples.
 
-**Approach:** Run STAR once per sample to discover novel junctions (pass 1), merge novel junctions across cohort, then re-align with the augmented junction set (pass 2). Cohort-style 2-pass beats per-sample basic 2-pass for differential splicing because all samples use the same junction reference.
+**Approach:** Run STAR once per sample to discover novel junctions (pass 1), merge the novel junctions across the cohort, then re-align every sample with the merged set (pass 2). Per-sample `--twopassMode Basic` is simpler but each sample then inserts its own junctions, so junction sets differ across samples and differential calls do not replicate; use the cohort version for differential splicing. Veeneman 2016 *Bioinformatics* benchmarked per-sample two-pass (>=94% of simulated novel junctions had improved quantification); the cohort-vs-per-sample comparison is the STAR manual's multi-sample 2-pass rationale, not a number from that paper.
 
 ```bash
-# Pass 1: per-sample
+# Pass 1: per sample; only SJ.out.tab is needed
 STAR --runMode alignReads \
     --runThreadN 8 \
     --genomeDir genome_index \
@@ -77,19 +88,23 @@ STAR --runMode alignReads \
     --sjdbOverhang 149 \
     --readFilesIn sample_R1.fq.gz sample_R2.fq.gz \
     --readFilesCommand zcat \
-    --outSAMtype BAM SortedByCoordinate \
+    --outSAMtype None \
     --outFileNamePrefix pass1_${sample}_ \
     --outSJtype Standard \
     --outFilterMultimapNmax 20 \
     --alignSJoverhangMin 8 \
-    --alignSJDBoverhangMin 1
+    --alignSJDBoverhangMin 3
 ```
 
-```bash
-# Cohort-style 2-pass: collect all SJ.out.tab from pass 1
-cat pass1_*_SJ.out.tab | awk '$5 > 0 && $7 >= 3' | sort -u > cohort_novel_SJ.tab
+`--sjdbOverhang` = max read length - 1 (149 for 2x150). It must equal the value used at `genomeGenerate`, or STAR stops (Common Errors).
 
-# Pass 2: re-align with augmented junctions
+```bash
+# Cohort merge. SJ.out.tab columns: 1 chr, 2 start, 3 end, 4 strand (0 undefined, 1 +, 2 -),
+# 5 motif (0 non-canonical), 6 annotated (0/1), 7 unique reads, 8 multi-mapped reads, 9 max overhang.
+# Keep novel (6==0), canonical-motif junctions with >=3 unique reads; STAR wants only columns 1-4.
+cat pass1_*_SJ.out.tab | awk '$6 == 0 && $5 > 0 && $7 >= 3' | cut -f1-4 | sort -u > cohort_novel_SJ.tab
+
+# Pass 2: re-align with the augmented junction set
 STAR --runMode alignReads \
     --runThreadN 8 \
     --genomeDir genome_index \
@@ -99,364 +114,269 @@ STAR --runMode alignReads \
     --readFilesIn sample_R1.fq.gz sample_R2.fq.gz \
     --readFilesCommand zcat \
     --outSAMtype BAM SortedByCoordinate \
+    --outSAMstrandField intronMotif \
     --outFileNamePrefix pass2_${sample}_ \
     --outSJtype Standard \
-    --twopassMode None \
     --quantMode GeneCounts \
     --alignSJoverhangMin 8 \
     --alignSJDBoverhangMin 3
+
+samtools index pass2_${sample}_Aligned.sortedByCoord.out.bam   # pysam fetch() needs the index
 ```
 
-| Approach | Novel-junction recovery | Cohort consistency |
-|----------|-------------------------|--------------------|
-| 1-pass with annotation | ~80-86% (depends on GENCODE completeness) | High (annotation-based) |
-| Per-sample basic 2-pass (`--twopassMode Basic`) | >=94% | Variable (each sample has its own junction set) |
-| Cohort-style 2-pass (manual merge) | >=94% | High (shared junction reference) |
-
-Per-sample 2-pass (`--twopassMode Basic`) is simpler but produces inconsistent junction sets across samples; for differential splicing the **cohort-style** version is preferred (Veeneman 2016 *Bioinformatics*).
-
-The pass-1 filter `awk '$5 > 0 && $7 >= 3'` keeps junctions with strand info AND >=3 unique reads — adjust threshold to balance discovery vs noise.
+Notes:
+- `$5 > 0` alone is not a novelty filter: on the four chrX test samples the merged file had 5,717 lines but 2,184 distinct junctions, and 2,178 of those were already annotated (`sort -u` on whole lines keeps one line per differing read count). `$6 == 0` plus `cut -f1-4` leaves 6 novel junctions.
+- `--outSAMstrandField intronMotif` adds the `XS` tag that leafcutter, regtools `-s XS` and Shiba need (0 of 20,000 spliced reads carried it without the flag). It also removes reads with non-canonical unannotated introns, so drop it if you need those reads.
+- Pass-2 `SJ.out.tab` marks inserted novel junctions as annotated (col 6 = 1); use pass 1 to tell novel from annotated.
+- Raise the unique-read threshold (or require the junction in >=N samples) if the merged file is large enough to hit the `limitSjdbInsertNsj` error.
 
 ## Junction Saturation
 
 **Goal:** Determine whether sequencing depth is sufficient for comprehensive splicing detection.
 
-**Approach:** Run RSeQC junction saturation; check whether the discovery curve plateaus.
+**Approach:** RSeQC subsamples the splice events (5%, 10%, ... 100%) and counts junctions at each step. The numbers are only inside `*.junctionSaturation_plot.r` (vectors `x` percent, `y` known, `z` all, `w` novel); the helper parses them.
 
 ```bash
-junction_saturation.py \
-    -i sample.bam \
-    -r gencode_v45.bed \
-    -o sample_junc_sat \
-    -m 50
+junction_saturation.py -i sample.bam -r genes.bed12 -o sample_junc_sat --skip-plot   # add -l/-u/-s for a finer 80-100% range
+python examples/splicing_qc.py saturation sample.bam genes.bed12 sample_junc_sat
 ```
 
-```python
-import subprocess
-import pandas as pd
+**Plateau rule:** if the **known**-junction curve grows by <2% from 80% to 100% of reads, it has plateaued; still rising means more sequencing would yield more known junctions. RSeQC shuffles the events without a seed, so the curve is stochastic (three repeats on one planted BAM differed by up to 16 known junctions at the same step; growth from 80% to 100% ranged 4.0-5.3%): compare libraries by growth percentage, not by exact counts.
 
-samples = ['s1.bam', 's2.bam', 's3.bam']
-for sample in samples:
-    subprocess.run([
-        'junction_saturation.py',
-        '-i', sample,
-        '-r', 'gencode_v45.bed',
-        '-o', sample.replace('.bam', '_junc_sat')
-    ], check=True)
-```
-
-The output `*.junctionSaturation_plot.r` plots known + novel junctions vs subsampled reads.
-
-**Plateau detection rule:** if from 80% to 100% of reads, the junction count rises by <2%, consider it plateaued. Still rising means more sequencing would yield more junctions.
-
-For AS analysis, **plateau on the known junction curve** is the requirement; novel-junction curves often don't plateau even at deep coverage (which is biologically informative — novel junctions are inherently rarer events).
+A curve that is flat from the first steps is a *saturated* library, not an uninformative one; a curve of all zeros means no spliced reads or a BED/BAM contig mismatch.
 
 ## Novel-vs-Known Junction Ratio
 
 **Goal:** Detect annotation/mapping issues or biologically interesting cryptic splicing.
 
-**Approach:** Classify junctions with RSeQC and compute the novel:known ratio.
-
 ```bash
-junction_annotation.py -i sample.bam -r gencode_v45.bed -o sample_junc_annot
+junction_annotation.py -i sample.bam -r genes.bed12 -o sample_junc_annot --skip-plot
 ```
 
 ```python
 import pandas as pd
 
-# RSeQC .junction.xls has a header: chrom, intron_st(0-based), intron_end(1-based), read_count, annotation
+# RSeQC .junction.xls: chrom, intron_st(0-based), intron_end(1-based), read_count, annotation
 junc = pd.read_csv('sample_junc_annot.junction.xls', sep='\t')
-total = junc['read_count'].sum()
-
+junc['annotation'] = junc['annotation'].str.strip()    # RSeQC writes ' annotated' with a leading space
 by_class = junc.groupby('annotation')['read_count'].sum()
-known_frac = by_class.get('annotated', 0) / total
-novel_frac = (by_class.get('partial_novel', 0) + by_class.get('complete_novel', 0)) / total
-
-print(f'known: {known_frac:.1%}, novel: {novel_frac:.1%}')
+known = by_class.get('annotated', 0) / by_class.sum()
+novel = (by_class.get('partial_novel', 0) + by_class.get('complete_novel', 0)) / by_class.sum()
+assert abs(known + novel - 1) < 1e-9, by_class.index.tolist()
+print(f'known: {known:.1%}, novel: {novel:.1%}')
 ```
 
-| Known fraction | Status | Interpretation |
-|----------------|--------|----------------|
+Without the `str.strip()` the class names never match and the snippet prints `known: 0.0%, novel: 0.0%` on every library.
+
+**Definitions.** RSeQC calls a junction `annotated` when its donor AND acceptor are each in the gene model, so an unannotated skipping junction between two annotated exons counts as known; `partial_novel` has one known end, `complete_novel` none. The snippet above is **read-weighted**, which is what the table below uses; RSeQC's printed summary is **junction-level** and reads much lower on the same BAM (planted library: 93.4% of reads known, 34.6% of junctions).
+
+| Known fraction (reads) | Status | Interpretation |
+|------------------------|--------|----------------|
 | >=80% | Healthy | Comprehensive annotation, good alignment |
 | 60-80% | Acceptable | Check annotation completeness or organism |
-| <60% | Suspect or interesting | Mapping artifacts, contamination, OR biologically informative |
+| <60% | Suspect or interesting | Mapping artifacts, contamination, OR biology |
 
-**High novel-junction rate may be biology, not artifact:**
+If novel% >40%, drill down. **High novel-junction rate may be biology, not artifact:**
 - **TDP-43 loss** (ALS/FTD post-mortem brain): cryptic exon de-repression in UNC13A, STMN2, ATG4B (Brown 2022 *Nature*; Klim 2019 *Nat Neurosci*)
 - **SF3B1-mutant** cancer (MDS, CLL, uveal melanoma): cryptic 3'ss ~10-30nt upstream of canonical (Darman 2015 *Cell Rep*)
-- **Non-model organism**: GENCODE-grade annotation unavailable; novel junctions reflect annotation gaps not biology
-- **Microbial / viral contamination**: reads aligning to host but with unusual junctions
-
-If novel% >40%, drill down: check organism, check spliceosomal mutation status, check known disease signatures.
+- **Non-model organism**: GENCODE-grade annotation unavailable; novel junctions reflect annotation gaps
 
 ## Junction Read Overhang and Coverage
 
-**Goal:** Profile per-junction read counts and overhang distribution to identify weakly-supported events.
+**Goal:** Per-junction read support and anchor lengths, to find weakly supported junctions.
 
-**Approach:** Parse CIGAR for N (intron) operations; tally per-junction reads and minimum exon overhangs.
-
-```python
-import pysam
-from collections import defaultdict
-
-def junction_stats(bam_path):
-    bam = pysam.AlignmentFile(bam_path, 'rb')
-    counts = defaultdict(int)
-    min_overhang = defaultdict(lambda: float('inf'))
-
-    for read in bam.fetch():
-        if read.is_unmapped or read.is_secondary:
-            continue
-        ref_pos = read.reference_start
-        cumulative_query = 0
-        cigar = read.cigartuples
-        for i, (op, length) in enumerate(cigar):
-            if op == 3:
-                left_match = sum(l for o, l in cigar[:i] if o in (0, 7, 8))
-                right_match = sum(l for o, l in cigar[i+1:] if o in (0, 7, 8))
-                overhang = min(left_match, right_match)
-                key = (read.reference_name, ref_pos, ref_pos + length)
-                counts[key] += 1
-                min_overhang[key] = min(min_overhang[key], overhang)
-            if op in (0, 2, 3, 7, 8):
-                ref_pos += length
-
-    bam.close()
-    return counts, dict(min_overhang)
-
-counts, overhang = junction_stats('sample.bam')
-print(f'total junctions: {len(counts)}')
-print(f'>= 10 reads: {sum(1 for c in counts.values() if c >= 10)}')
-print(f'overhang >= 8 nt: {sum(1 for k, c in counts.items() if overhang[k] >= 8)}')
+```bash
+python examples/splicing_qc.py junctions sample.bam --min-overhang 8
 ```
 
-Junction reads with overhang <8 nt are common false positives, especially for novel sites. Most callers default to >=8 nt anchor for this reason. Microexon-aware aligners use overhang as low as 6 nt with explicit configuration.
+`junction_stats()` in `examples/splicing_qc.py` (works on an unindexed BAM) reports, per junction `(contig, intron_start_0based, intron_end)`: `reads` (fragments passing the overhang filter), `reads_all`, and `min_overhang`. Rules it applies, each checked on planted CIGARs:
+- **Overhang** is the aligned length (M/=/X) of the block immediately left and right of each N, not the total matched on that side: `30M1000N4M800N66M` has overhang 4 at both junctions (summing gives 30).
+- Secondary and supplementary records are skipped; NH>1 (or MAPQ < 30 without an NH tag) is skipped; the two mates of a pair count once per junction. On real chrX pass-2 data this equals STAR's unique-read `SJ.out.tab` count on all 2,765 shared junctions with `--min-overhang 0` (371 junctions with >=10 reads, same as STAR), while per-record counting agreed on only 2,182.
+- `=`/`X` CIGAR operations are handled (an `=`-blind version put a junction 50 nt off).
+
+Junction reads with overhang <8 nt are common false positives, especially for novel sites; most callers default to >=8 nt. For very deep BAMs use STAR `SJ.out.tab` or `regtools junctions extract` instead (the helper keeps read names in memory).
 
 ## Splice Site Strength (MaxEntScan and SpliceAI)
 
-**Goal:** Score donor and acceptor splice sites to flag weak / cryptic sites and to predict variant impact on splicing.
-
-**Approach:** Use MaxEntScan (sequence information content) and SpliceAI (context-aware deep-learning) — they answer different questions.
+**Goal:** Score donor and acceptor sites to flag weak / cryptic sites.
 
 ```python
-from maxentpy.maxent import score5, score3
+import sys; sys.path.insert(0, 'examples')
+from splicing_qc import score_splice_sites
 
-donor = 'CAGGTAAGT'
-acceptor = 'TTTTTTTTTTTTTTTTTTTTCAG'
-print(f"5'ss MaxEnt: {score5(donor):.2f}")
-print(f"3'ss MaxEnt: {score3(acceptor):.2f}")
+# 5'ss: 9 nt (3 exon + 6 intron). 3'ss: 23 nt (20 intron + 3 exon); the intron must end in AG.
+donors = ['CAGGTAAGT', 'CAGATAAGT']
+acceptors = ['TTTTTTTTTTTTTTCCTTAGGAG']          # 11.58; 'T'*20 + 'CAG' has no AG and scores -7.20
+s5, s3 = score_splice_sites(donors, acceptors)   # one score per input; NaN for invalid input
+print(s5, s3)                                     # [10.86, 2.68] [11.58]
 ```
 
-| Score | Interpretation | Source |
-|-------|----------------|--------|
-| 5'ss MaxEnt > 8 | Strong donor | Yeo & Burge 2004 *J Comput Biol* |
-| 5'ss MaxEnt 5-8 | Moderate | |
-| 5'ss MaxEnt < 5 | Weak / cryptic | |
-| 3'ss MaxEnt > 8 | Strong acceptor | |
-| 3'ss MaxEnt < 5 | Weak / cryptic | |
-| SpliceAI delta >= 0.2 | PP3 (applied at supporting weight); BP4 at <= 0.1 | Walker 2023 *AJHG* (ClinGen SVI 2023) |
-| SpliceAI delta 0.5 / 0.8 | Higher-precision cutoffs (SpliceAI recommended/high-precision tiers) | Jaganathan 2019 *Cell* — NOT ClinGen graded evidence-strength upgrades |
+`maxentpy.maxent.score5/score3` end the process (`SystemExit: Wrong length of fa!`) on a wrong length and raise `KeyError` on N/U; lower-case is accepted. The helper validates length and A/C/G/T first and returns NaN.
 
-**MaxEntScan vs SpliceAI:**
-- **MaxEntScan** scores sequence information content (intrinsic strength). Captures position-wise dependencies at the consensus.
-- **SpliceAI** predicts in-vivo usage probability given full pre-mRNA context (10 kb window).
-- A position with **high MaxEnt but low SpliceAI** is intrinsically strong but contextually silenced (chromatin, trans factors).
-- A position with **low MaxEnt but high SpliceAI** is intrinsically weak but contextually used (enhancer-driven, e.g. weak donors stabilized by ESEs).
-- Report both for variant interpretation; for variant impact see `splice-variant-prediction`.
+| Score | Interpretation |
+|-------|----------------|
+| 5'ss MaxEnt > 8 | Strong donor |
+| 5'ss MaxEnt 5-8 | Moderate |
+| 5'ss MaxEnt < 5 | Weak / cryptic |
+| 3'ss MaxEnt > 8 / < 5 | Strong / weak acceptor |
+
+MaxEntScan (Yeo & Burge 2004 *J Comput Biol*) defines the score; the cut-offs are conventions, supported on real data: of 8,549 annotated chrX GT donors 60.7% scored >8 and 11.6% <5 (median 8.6), 95.5% of 88 decoy GT donors scored <5 (AUC 0.97 donor, 0.96 acceptor), and all 399 non-GT annotated donors scored <5.
+
+**SpliceAI** predicts in-vivo usage from the full pre-mRNA context. Score a VCF (the assembly must match the FASTA):
+
+```bash
+spliceai -I variants.vcf -O variants.spliceai.vcf -R genome.fa -A grch38 -D 50 -M 0
+# INFO: SpliceAI=ALLELE|SYMBOL|DS_AG|DS_AL|DS_DG|DS_DL|DP_AG|DP_AL|DP_DG|DP_DL
+```
+
+Checked on a canonical donor G>A (PLCXD1, GRCh37): `DS_DG 0.90, DS_DL 1.00`. Reference cut-offs on the maximum delta score: >=0.2 (ClinGen SVI, Walker 2023 *Am J Hum Genet*: PP3 at supporting strength) and <=0.1 (BP4); 0.5 and 0.8 are the recommended and high-precision tiers of Jaganathan 2019 *Cell*, not ClinGen strength upgrades. Use them to prioritise sites in a dataset (Scope).
+
+- **MaxEntScan** scores intrinsic sequence strength; **SpliceAI** scores contextual usage. High MaxEnt with low SpliceAI = intrinsically strong but contextually silenced; low MaxEnt with high SpliceAI = weak but contextually used (e.g. enhancer-driven). Report both; for variant impact see `splice-variant-prediction`.
 
 ## Picard CollectRnaSeqMetrics and Gene-Body Coverage
 
-**Goal:** Get integrated RNA-seq QC including intronic / exonic / intergenic mapping rates and gene-body coverage uniformity.
+**Goal:** Mapping distribution (coding / UTR / intronic / intergenic / rRNA) and 5'-3' bias.
 
-**Approach:** Run picard CollectRnaSeqMetrics for mapping distribution; RSeQC `geneBody_coverage.py` for 5'-3' bias.
+Picard needs a `refFlat` file. Build it from the BED12 (checked with Picard 3.5.0):
 
 ```bash
+awk 'BEGIN{OFS="\t"} {n=$10; split($11,sz,","); split($12,st,","); s=""; e="";
+     for(i=1;i<=n;i++){s=s ($2+st[i]) ","; e=e ($2+st[i]+sz[i]) ","}
+     print $4,$4,$1,$6,$2,$3,$7,$8,n,s,e}' genes.bed12 > refFlat.txt
+
 picard CollectRnaSeqMetrics \
-    I=sample.bam \
-    O=sample.rna_metrics.txt \
-    REF_FLAT=refFlat.txt \
+    I=sample.bam O=sample.rna_metrics.txt REF_FLAT=refFlat.txt \
     STRAND_SPECIFICITY=SECOND_READ_TRANSCRIPTION_STRAND \
-    RIBOSOMAL_INTERVALS=rRNA_intervals.interval_list
+    RIBOSOMAL_INTERVALS=rRNA_intervals.interval_list      # header-bearing interval_list, not BED
 
-# Strandedness conversion (foot-gun):
-# Reverse-stranded (Illumina TruSeq Stranded; NEB Ultra II Directional — both dUTP):
-#   rMATS  --libType fr-firststrand
-#   featureCounts -s 2
-#   Picard STRAND_SPECIFICITY=SECOND_READ_TRANSCRIPTION_STRAND
-# Forward-stranded (Lexogen QuantSeq FWD, certain ligation-based kits):
-#   rMATS  --libType fr-secondstrand
-#   featureCounts -s 1
-#   Picard STRAND_SPECIFICITY=FIRST_READ_TRANSCRIPTION_STRAND
-# STAR has no library-strand flag; pass --outSAMstrandField intronMotif
-# (works for any library) so downstream tools can read XS tags.
-
-geneBody_coverage.py \
-    -i sample.bam \
-    -r gencode_v45.bed \
-    -o sample_geneBody
+geneBody_coverage.py -i sample.bam -r genes.bed12 -o sample_geneBody --skip-plot
 ```
 
-| Metric | Healthy | Concerning |
-|--------|---------|------------|
-| PCT_CODING_BASES | >=50% | <30% (suggests degradation or mis-priming) |
-| PCT_UTR_BASES | 20-40% | >>50% (3' bias) |
-| PCT_INTRONIC_BASES | <30% (poly(A)); <60% (rRNA-depleted) | >50% (poly(A)) suggests pre-mRNA contamination |
-| PCT_INTERGENIC_BASES | <10% | >20% (genomic DNA contamination) |
-| MEDIAN_5PRIME_TO_3PRIME_BIAS | 0.7-1.3 | >2 or <0.5 (severe degradation) |
-| Gene body coverage curve | Flat | Strong 3' skew = RIN low or library mis-prep |
+Strand flags per library (foot-gun):
 
-3' bias (degraded RNA) directly reduces splicing-event detection because junction reads scatter across the gene body; with 3' bias they concentrate near the 3' end and miss CDS junctions.
+| Library | rMATS `--libType` | featureCounts | Picard `STRAND_SPECIFICITY` |
+|---------|-------------------|---------------|------------------------------|
+| Reverse-stranded (TruSeq Stranded, NEB Ultra II Directional; dUTP) | `fr-firststrand` | `-s 2` | `SECOND_READ_TRANSCRIPTION_STRAND` |
+| Forward-stranded (Lexogen QuantSeq FWD, some ligation kits) | `fr-secondstrand` | `-s 1` | `FIRST_READ_TRANSCRIPTION_STRAND` |
+| Unstranded | `fr-unstranded` | `-s 0` | `NONE` |
+
+On a planted dUTP library `SECOND_READ_TRANSCRIPTION_STRAND` gave `PCT_CORRECT_STRAND_READS` 1.0 and `FIRST_READ...` 0.0. STAR has no library-strand flag; use `--outSAMstrandField intronMotif` for `XS` tags.
+
+| Metric | Healthy (convention) | Concerning |
+|--------|----------------------|------------|
+| PCT_CODING_BASES | >=50% | <30% (degradation or mis-priming) |
+| PCT_UTR_BASES | 20-40% | >50% (3' bias) |
+| PCT_INTRONIC_BASES | <30% (poly(A)); <60% (rRNA-depleted) | >50% in poly(A): pre-mRNA contamination |
+| PCT_INTERGENIC_BASES | <10% | >20%: genomic DNA contamination |
+| PCT_RIBOSOMAL_BASES | see rRNA section | |
+| MEDIAN_5PRIME_TO_3PRIME_BIAS | 0.7-1.3 | **<0.5 = 3' bias** (degraded RNA or poly(A) capture); **>2 = 5' bias** |
+| Gene-body coverage curve | Flat | Strong 3' skew = low RIN or library mis-prep |
+
+Checked on planted BAMs: a 3'-biased library gave `MEDIAN_5PRIME_TO_3PRIME_BIAS` 0.047 (uniform 1.009) and `geneBody_coverage` 5'/3' 0.04 vs 1.02. With 3' bias junction reads concentrate at the 3' end and miss internal junctions.
 
 ## Strandedness Verification
 
 ```bash
-infer_experiment.py -i sample.bam -r gencode_v45.bed -s 200000
+infer_experiment.py -i sample.bam -r genes.bed12 -s 200000     # BED6 or BED12
 ```
 
-Output reports the fraction of reads consistent with each library type:
+Read the two `Fraction of reads explained by ...` lines (and `failed to determine`):
 
-| Output pattern | Library type | rMATS `--libType` |
-|----------------|---------------|---------------------|
-| ~50% / ~50% | Unstranded | `fr-unstranded` |
-| >=90% "++ , --" | Forward-stranded | `fr-secondstrand` |
-| >=90% "+- , -+" | Reverse-stranded (Illumina TruSeq stranded) | `fr-firststrand` |
+| Output | Library | rMATS `--libType` |
+|--------|---------|-------------------|
+| ~0.5 / ~0.5 | Unstranded | `fr-unstranded` |
+| >=0.9 `"1++,1--,2+-,2-+"` (PE) or `"++,--"` (SE) | Forward-stranded | `fr-secondstrand` |
+| >=0.9 `"1+-,1-+,2++,2--"` (PE) or `"+-,-+"` (SE) | Reverse-stranded (dUTP / TruSeq stranded) | `fr-firststrand` |
 
-**Wrong strand setting halves usable junction reads** — always verify before quantification. RSeQC `infer_experiment.py` is fast and authoritative.
+A wrong strand setting halves usable junction reads, so verify before quantification. Leaky libraries: 20% and 40% planted leakage read 0.80 and 0.59 on the dominant string. At 0.7-0.9 report the leakage and expect that fraction of reads on the wrong strand; below 0.7 treat the library as unstranded.
 
 ## Annotation Choice
 
 | GENCODE level | Contents | Use for |
 |---------------|----------|---------|
-| Basic | High-confidence canonical isoforms | Standard rMATS, leafcutter, SUPPA2 |
-| Comprehensive | All transcripts including putative/predicted | DTU pipelines (DRIMSeq+DEXSeq, satuRn), isoform discovery |
-| RefSeq | NCBI curated | Less complete than GENCODE; legacy use |
+| Basic | High-confidence canonical isoforms | Standard rMATS, leafcutter, SUPPA2; event-level AS |
+| Comprehensive | All transcripts including putative/predicted | Transcript-level DTU (DRIMSeq+DEXSeq, satuRn), isoform discovery |
+| RefSeq | NCBI curated | Less complete than GENCODE |
 | Ensembl | Same content as GENCODE in vertebrates | Different attribute conventions |
 
-Comprehensive captures more biology but inflates DTU multiple-testing burden and includes annotation noise. For event-level (rMATS) AS, basic is usually adequate; for transcript-level DTU (DRIMSeq, satuRn), comprehensive may be necessary to capture rare isoforms.
+Comprehensive captures rare isoforms but adds annotation noise and multiple-testing burden; basic can under-detect rare isoforms in DTU.
 
 ## rRNA Contamination Check
 
-```bash
-fastq_screen --conf fastq_screen.conf --threads 8 sample_R1.fq.gz
-```
-
-Or post-alignment:
+**Post-alignment (fraction of primary mapped records overlapping rRNA):**
 
 ```bash
-samtools view -c sample.bam | awk '{print "total:",$0}'
-samtools view -c -L rRNA_intervals.bed sample.bam | awk '{print "rRNA:",$0}'
+total=$(samtools view -c -F 0x904 sample.bam)                       # -F 0x904: drop unmapped, secondary, supplementary
+rrna=$(samtools view -c -F 0x904 -L rRNA_intervals.bed sample.bam)
+awk -v r=$rrna -v t=$total 'BEGIN{printf "rRNA: %.1f%%\n", 100*r/t}'
 ```
 
-| rRNA fraction | Library type | Status |
-|----------------|---------------|--------|
-| >=20% | "depleted" | Failed depletion; redo |
-| 5-20% | "depleted" | Acceptable; some rRNA leakage |
+Without `-F 0x904` the denominator includes secondary and unmapped records: a planted 22.2% library read 15.6% and passed the 20% rule. Picard `PCT_RIBOSOMAL_BASES` (0.222 on the same BAM) is the alternative.
+
+**Pre-alignment:** `fastq_screen --aligner minimap2 --conf fastq_screen.conf --threads 8 sample_R1.fq.gz` (bowtie2, bowtie and bwa work too if installed). Setup facts, verified with fastq_screen 0.16.0:
+- The default aligner is bowtie2; without it (or another aligner) the command exits 255.
+- `DATABASE<TAB>rRNA<TAB>/path/to/prefix` gives the index basename. For minimap2 fastq_screen opens `prefix.fa.gz` (gzipped FASTA next to the `.mmi`); if it is missing the run exits 0 with only an `Aligner warning` in the log and reports 100% unmapped.
+- Read `sample_R1_screen.txt`: the `%One_hit_one_genome` plus `%Multiple_hits_*` columns of the rRNA row are the rRNA fraction (25.00% on a planted 25% library).
+
+| rRNA fraction | Library | Status |
+|---------------|---------|--------|
+| <5% | rRNA-depleted | Excellent |
+| 5-20% | rRNA-depleted | Acceptable; some leakage |
+| >=20% | rRNA-depleted | Failed depletion; redo |
 | <5% | poly(A) | Healthy |
-| <5% | "depleted" | Excellent depletion |
-| 1-3% | poly(A) | Suggests RNA degradation |
-
->5% rRNA in a poly(A) library suggests degraded RNA; >20% in a "depleted" library indicates failed depletion.
+| >5% | poly(A) | Suggests degraded RNA or poor selection |
 
 ## Per-Tool Failure Modes
 
-### RSeQC `junction_saturation`: Subsampling Behavior
+### RSeQC junction tools: silent zeros
 
-**Trigger:** Running on extremely deep BAM (>200M reads).
+**Trigger:** BED/BAM contig names differ, the gene model is BED6, or there are no spliced reads at MAPQ >= 30 (`-q`, default 30).
 
-**Mechanism:** RSeQC subsamples at 5%, 10%, ..., 100%; with very deep BAMs, the early subsamples are still tens of millions of reads, masking saturation behavior.
+**Symptom:** exit 0 with all-zero saturation curves, `Total 0 usable reads were sampled` (`infer_experiment.py`), an empty `.junction.xls` (0 bytes, `pandas.errors.EmptyDataError`), or 0% known because every junction is `complete_novel` (BED6).
 
-**Symptom:** Curve appears flat throughout; uninformative.
+**Fix:** run the checks in **Before You Run Anything**; the helper raises a clear error for each. For `infer_experiment.py` on a BAM whose MAPQ never reaches 30 (multi-mapper-heavy aligner output), pass `-q 0`; `-q 30` is already the default.
 
-**Fix:** Subsample BAM with `samtools view -s 0.1` before running junction_saturation; or use `-s` flag to set custom step intervals.
+### `infer_experiment.py`: "0 usable reads"
 
-### STAR 2-Pass: Per-Sample Inconsistency
+`Total 0 usable reads were sampled` / `Unknown data type: Mixture` means the gene model shares no contig with the BAM, the file is a GTF rather than BED, or every read fails `-q`. It is not a sample-size problem; `-s` (default 200000) only caps the sample.
 
-**Trigger:** Using `--twopassMode Basic` on differential splicing cohorts.
+### MaxEntScan: invalid sequences
 
-**Mechanism:** Per-sample 2-pass means each sample has its own SJ.out.tab; samples may differ in which novel junctions they re-align against.
-
-**Symptom:** Inconsistent novel junction calls across replicates; rMATS `--novelSS` differential calls don't replicate.
-
-**Fix:** Switch to cohort-style 2-pass (collect all pass-1 SJ.out.tabs, merge, re-align all samples with merged set).
-
-### MaxEntScan: Out-of-Range Sequences
-
-**Trigger:** Sequences with N bases or wrong length.
-
-**Mechanism:** `score5` expects exactly 9 nt (3 exon + 6 intron); `score3` expects 23 nt (20 intron + 3 exon).
-
-**Symptom:** ValueError or silently incorrect score.
-
-**Fix:** Pre-validate sequence length and N-content; use a wrapper that returns NaN for invalid inputs.
-
-### SpliceAI: TensorFlow Memory
-
-**Trigger:** Running spliceai on large VCF without GPU.
-
-**Mechanism:** TensorFlow CPU mode is slow; default batch size may exceed memory.
-
-**Symptom:** OOM kill; very slow runtime (hours per chromosome).
-
-**Fix:** Use `-D 50` for screening (fastest); split VCF by chromosome; use GPU when available.
-
-### `infer_experiment.py`: Sample Size
-
-**Trigger:** Running on very low-coverage region or small subsample (-s).
-
-**Mechanism:** Default sample size is 200,000 reads; with low coverage, this isn't met.
-
-**Symptom:** "0 of 200000 reads" output; cannot infer strand.
-
-**Fix:** Lower `-s` to actual available reads; or use `-q 30` to filter by quality.
+See Splice Site Strength: wrong length ends the process, N/U raise `KeyError`; validate first.
 
 ## Common Errors
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `STAR: SJDBoverhang differs from genome` | Index built with different overhang than current run | Rebuild index with `--sjdbOverhang` matching read length - 1 |
-| `RSeQC: BED format error` | Annotation BED has wrong column order | Convert with `awk` or `bedtools` |
-| `MaxEntScan: invalid sequence character N` | N in input | Filter or replace; document |
-| `samtools view: missing index` | BAM not indexed | `samtools index sample.bam` |
-| `STAR: too many SJs in cohort merge` | Cohort SJ.out.tab too large after merge | Filter to junctions in >=3 samples or with >=3 unique reads |
-| `regtools: invalid CIGAR` | Non-spec read in BAM | Filter with `samtools view -h -F 0x100 -F 0x800` |
+| Error (as printed) | Cause | Solution |
+|--------------------|-------|----------|
+| `EXITING because of fatal PARAMETERS error: present --sjdbOverhang=74 is not equal to the value at the genome generation step =100` | Index built with a different overhang | Use the index's value, or regenerate the index with `--sjdbOverhang` = read length - 1 |
+| `Fatal LIMIT error: the number of junctions to be inserted on the fly =10552 is larger than the limitSjdbInsertNsj=...` / `SOLUTION: re-run with at least --limitSjdbInsertNsj 10552` | Annotation + merged novel junctions exceed the default 1,000,000, or a small value was set | Re-run with the value STAR prints; filter the merged file if it is unexpectedly large |
+| `junction_annotation.py: error: Rscript executable not found: Rscript` (exit 1) | R not on PATH | `--skip-plot`, or install R |
+| `pandas.errors.EmptyDataError: No columns to parse from file` on `.junction.xls` | BAM has no spliced reads at MAPQ >= 30 | Check the library; lower `-q` only if the aligner's MAPQ scale requires it |
+| `ValueError: fetch called on bamfile without index` | pysam `fetch()` on an unindexed BAM | `samtools index`, or use `examples/splicing_qc.py` (reads with `until_eof`) |
+| `SystemExit: Wrong length of fa!` / `KeyError` from `maxentpy` | 5'ss not 9 nt, 3'ss not 23 nt, or N/U present | Use `score_splice_sites` from `examples/splicing_qc.py` |
 
 ## Quality Thresholds
 
 | Metric | Good | Acceptable | Poor | Source |
 |--------|------|------------|------|--------|
-| Read length (PE) | 150 nt | 100 nt | <75 nt | convention |
-| Sequencing depth | >=100M | 50-100M | <30M | DGE-grade insufficient |
-| Junction saturation | Plateau (<2% growth in last 20%) | Near plateau | Still rising | RSeQC convention |
-| Known-junction fraction | >=80% | 60-80% | <60% (suspect or interesting) | RSeQC convention |
-| Junctions >=10 reads | >=50% | 30-50% | <30% | rMATS reliability cutoff |
-| 5'ss / 3'ss MaxEnt | >8 | 5-8 | <5 | Yeo & Burge 2004 |
-| Strandedness | >90% one direction | 70-90% | <70% | RSeQC convention |
-| rRNA in depleted library | <5% | 5-20% | >20% | convention |
-| 2-pass STAR | Cohort-style | Per-sample basic | 1-pass only | Veeneman 2016 *Bioinformatics* |
+| Read length (PE) | >=150 nt | 100-149 nt | <100 nt | convention |
+| Sequencing depth | >=50M | 30-49M | <30M | convention |
+| Junction saturation (known curve, growth 80->100%) | <2% (plateau) | Near plateau | Still rising | RSeQC convention |
+| Known-junction fraction (reads) | >=80% | 60-80% | <60% (suspect or interesting) | RSeQC convention |
+| Junctions with >=10 anchored reads | >=50% | 30-50% | <30% | convention; depends on depth (11% on a 50k-pair chrX sample) |
+| Strandedness (dominant direction) | >=90% | 70-90% | <70% (treat as unstranded) | RSeQC convention |
+
+Splice-site MaxEnt, rRNA and Picard cut-offs are in their own sections.
 
 ## Troubleshooting Low Event Detection
 
 | Issue | Possible causes | Solutions |
 |-------|-----------------|-----------|
-| Few events called | Low depth; short reads; SE; wrong strand | Increase depth; use PE150; verify libType |
+| Few events called | Low depth; short reads; SE; wrong strand | Increase depth; use PE150; verify `--libType` |
 | High novel junctions | Annotation gaps; mapping artifacts; biology (TDP-43, SF3B1) | Update annotation; check 2-pass; consider biology |
 | Low IR detection | poly(A) library | Use rRNA depletion |
-| Microexons missing | Default aligner anchors too long | VAST-TOOLS, MicroExonator, or long-read |
-| Many weak splice sites | Cryptic splicing | Validate with MaxEnt + SpliceAI; consider RNA-seq from secondary tissue |
-| FDR uncalibrated at low n | n=2 vs n=2 | Use leafcutter or Shiba; avoid SUPPA2 alone |
-| PSI variance high across replicates | Library prep / RIN inconsistency | Check RIN; consider RNA degradation |
-| Sashimi plot mismatch with PSI | Junction-imbalance bias in rMATS | Run Shiba; or filter by overhang distribution |
-
-## Common Pitfalls
-
-- **Skipping STAR 2-pass** — loses ~14% of novel junctions; matters for any non-canonical organism or condition.
-- **Per-sample 2-pass instead of cohort-style** — produces inconsistent junction sets; differential splicing calls don't replicate.
-- **poly(A) library for IR analysis** — biases toward mature transcripts; depletes pre-mRNA / nascent / detained intron signal.
-- **PE 50nt single-end** — junction-spanning reads need >=8nt overhang on both sides; biases toward shorter exons.
-- **Wrong `--libType`** — halves usable junctions; always verify with `infer_experiment.py`.
-- **Using basic GENCODE for DTU** — basic excludes putative/rare isoforms; DTU pipelines may underdetect.
-- **Using MaxEntScan alone for variant interpretation** — misses context-dependent regulation; pair with SpliceAI.
-- **Treating high novel% as artifact reflexively** — could be biology (TDP-43, SF3B1, non-model organism); investigate.
+| Many weak splice sites | Cryptic splicing | Validate with MaxEnt + SpliceAI |
+| PSI variance high across replicates | Library prep / RIN inconsistency | Check RIN; check 3' bias (Picard) |
 
 ## Related Skills
 
@@ -465,7 +385,7 @@ samtools view -c -L rRNA_intervals.bed sample.bam | awk '{print "rRNA:",$0}'
 - read-qc/quality-reports - General sequencing QC (FastQC, MultiQC)
 - read-qc/contamination-screening - rRNA / adapter / cross-species contamination
 - splice-variant-prediction - SpliceAI / Pangolin for variant impact
-- long-read-splicing - When short-read QC is fundamentally limiting (microexons, complex isoforms)
+- long-read-splicing - When short-read QC is fundamentally limiting (complex isoforms)
 - differential-splicing - Downstream tool that requires QC pass
 
 ## References
