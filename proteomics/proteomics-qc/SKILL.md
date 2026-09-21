@@ -133,6 +133,8 @@ def contaminant_fraction(protein_groups, intensity_cols, flag_col='Potential con
 
 Read the boxplots before normalizing, but apply the loading rule to TOTAL raw signal and ID count, not the boxplot median: a sample with total signal >=2x below its group median, or an ID count more than 15-20% below it, is a loading/injection failure to exclude, not to rescale. Left-censoring removes a low-loaded sample's weakest values, so its median looks less shifted than it is (synthetic test: 0.41x total but 0.62x median). Judge the contaminant fraction against the lab's own baseline for that sample type and check whether it differs between groups; there is no universal cutoff (PTXQC's 1% threshold belongs to its user-defined special-contaminant plot, not the general contaminant score). Keratin and trypsin autolysis dominate LOW-INPUT samples (single-cell, IPs, gel bands) because they are a roughly fixed absolute amount whose fractional share explodes as load shrinks.
 
+Record every sample this rule flags, and every one you keep despite a flag, in the exclusion log (`references/qc-report-template.md`): the metric and value, the threshold, the decision, and who approved it.
+
 With ONE run per condition the within-group form of this rule is inert -- every sample is its own group median, so `fold_total_vs_group` is exactly 1.0 and nothing can flag. The function above falls back to the all-sample median and prints a warning; report that fallback, and report that a loading difference which tracks condition is not separable from biology in that design.
 
 ## Replicate Correlation on log2
@@ -288,7 +290,7 @@ def pca_batch_check(normalized_log2, sample_info, batch_col='batch'):
     return coords, pcs.explained_variance_ratio_, pd.DataFrame(tests)  # tests.status: tested / not_testable
 ```
 
-The third return value `tests` carries the per-PC status (`tested` / `not_testable`); a `not_testable` row is never evidence of no batch effect. A sample isolated from its group is a removal/re-run candidate, but a high-missing sample is judged by `raw_sample_qc`, not by PCA. If batch is PC1, keep batch in the design matrix for the differential test (preferred when batch and condition are balanced), and use `limma::removeBatchEffect` (or ComBat) only on the matrix used for PCA/plots to re-inspect biology; do not test on a batch-corrected matrix and also model batch. If batch is FULLY confounded with condition (every batch level holds exactly one condition) nothing can be corrected: batch and condition are the same variable, and removing one removes the other -- on a fully confounded synthetic set the mean |log2FC| of 104 truly-changed proteins went from 1.55 to 0.00 after batch removal. Report the design as non-identifiable and stop; do not correct, and do not test. Document and justify every exclusion, and re-run the downstream check with and without borderline samples. Stop and ask before excluding samples, when n < 5 per group makes PCA unstable, or when no un-normalized column is available for the loading check. Visualization of the projection routes to data-visualization/dimensionality-reduction-plots.
+The third return value `tests` carries the per-PC status (`tested` / `not_testable`); a `not_testable` row is never evidence of no batch effect. A sample isolated from its group is a removal/re-run candidate, but a high-missing sample is judged by `raw_sample_qc`, not by PCA. If batch is PC1, keep batch in the design matrix for the differential test (preferred when batch and condition are balanced), and use `limma::removeBatchEffect` (or ComBat) only on the matrix used for PCA/plots to re-inspect biology; do not test on a batch-corrected matrix and also model batch. If batch is FULLY confounded with condition (every batch level holds exactly one condition) nothing can be corrected: batch and condition are the same variable, and removing one removes the other -- on a fully confounded synthetic set the mean |log2FC| of 104 truly-changed proteins went from 1.55 to 0.00 after batch removal. Report the design as non-identifiable and stop; do not correct, and do not test. Document and justify every exclusion, and re-run the downstream check with and without borderline samples (`references/qc-report-template.md` has the exclusion log and the with/without table). Stop and ask before excluding samples, when n < 5 per group makes PCA unstable, or when no un-normalized column is available for the loading check. Visualization of the projection routes to data-visualization/dimensionality-reduction-plots.
 
 ## TMT Channel Balance Within Each Plex
 
@@ -308,6 +310,8 @@ def tmt_channel_balance(plex_matrices):
     balance['investigate'] = np.abs(np.log2(balance['fold_vs_plex_median'])) > 1  # > 2x; flag > 3-4x
     return balance
 ```
+
+A channel with `investigate` True is a row in the exclusion log (`references/qc-report-template.md`, section 3): the value, the threshold that fired, and the decision. The `investigate` band (> 2x from the plex median, flag > 3-4x) lives in this function and in the Quantitative Thresholds table only.
 
 ## Level-1 Run Metrics From a DIA-NN Report
 
