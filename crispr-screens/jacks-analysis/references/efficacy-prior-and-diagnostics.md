@@ -24,30 +24,11 @@ def extract_efficacy_prior(reference_jacks_results):
 
 **Approach:** Examine the distribution of inferred efficacies; guides below 0.3 are likely non-functional and should be excluded from re-designed libraries.
 
-```python
-import pandas as pd
-
-def efficacy_summary(grna_results_path, guidemap_path, low_threshold=0.3,
-                     sgrna_hdr='sgRNA', gene_hdr='Gene'):
-    '''Summarise per-sgRNA efficacy. The grna file has only sgrna/X1/X2, so genes come from the guide map.'''
-    df = pd.read_csv(grna_results_path, sep='\t')
-    guidemap = pd.read_csv(guidemap_path, sep='\t', usecols=[sgrna_hdr, gene_hdr])
-    df = df.merge(guidemap, left_on='sgrna', right_on=sgrna_hdr, how='left')
-    unmapped = df[gene_hdr].isna().sum()
-    if unmapped:
-        raise ValueError(f'{unmapped} sgRNAs in the results are absent from the guide map; check naming')
-    df['low_eff'] = df['X1'] < low_threshold
-    summary = {
-        'total_guides': len(df),
-        'low_efficacy_count': int(df['low_eff'].sum()),
-        'low_efficacy_pct': df['low_eff'].mean() * 100,
-        'median_efficacy': df['X1'].median(),
-        'q25_q75': (df['X1'].quantile(0.25), df['X1'].quantile(0.75)),
-    }
-    # Per-gene proportion of low-efficacy guides
-    by_gene = df.groupby(gene_hdr)['low_eff'].mean().sort_values(ascending=False)
-    summary['genes_with_all_low_eff'] = int((by_gene == 1).sum())  # genes where every guide is weak
-    return summary, by_gene
+```bash
+python scripts/efficacy_summary.py jacks_out_grna_JACKS_results.txt guidemap.txt --low 0.3 --out low_eff_by_gene.tsv
+# or: from efficacy_summary import efficacy_summary; summary, by_gene = efficacy_summary(grna_path, guidemap_path)
 ```
+
+The grna file has only `sgrna`, `X1`, `X2`, so genes come from the guide map; the script raises `ValueError` if any result guide is absent from the map (naming mismatch). It reports total guides, low-efficacy count and percentage, median and quartiles of `X1`, and the per-gene fraction of low-efficacy guides.
 
 **Critical:** Genes where every guide is low-efficacy will show no signal regardless of biology. Filter from interpretation; flag for re-design with updated rules (Brunello / TKOv3). For a v2 library, drop the bottom 25% of guides by efficacy; every gene should end with all guides at efficacy >0.4 (Brunello v2 / Avana v2 convention).

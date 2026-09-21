@@ -69,41 +69,30 @@ Initialisation is fixed (efficacy = 1, gene effect = median LFC) and nothing in 
 
 **Approach:** Provide a count matrix with all samples across all screens, a replicate map identifying which samples belong to which screen and condition, and a sgRNA-to-gene map. JACKS learns guide efficacy shared across screens and gene effects per screen.
 
-```python
-# Programmatic invocation
-from jacks.jacks_io import runJACKS
+Input files (all tab-separated):
 
-# Input file paths
-counts_path = 'counts.txt'                    # rows=sgRNA; first cols 'sgRNA' (or custom), then sample counts
-replicate_map_path = 'replicatemap.txt'       # tab-separated with header: Replicate, Sample, Control
-guide_map_path = 'guidemap.txt'               # tab-separated with header: sgRNA, Gene (the count matrix itself works if it has both columns; point sgrna_hdr/gene_hdr at them)
+- `counts.txt`: rows = sgRNA; first column `sgRNA` (or custom, see `--sgrna_hdr`), then one column per sample.
+- `replicatemap.txt`: WITH header `Replicate`, `Sample`, `Control`; column names match the header flags below.
+- `guidemap.txt`: WITH header `sgRNA`, `Gene` (the count matrix itself works if it has both columns; point `sgrna_hdr`/`gene_hdr` at them).
 
-# Replicate map format (tab-separated WITH header; column names match flags below)
-# Replicate                Sample          Control
-# Screen1_T1               Screen1_T       Screen1_C
-# Screen1_T2               Screen1_T       Screen1_C
-# Screen1_C1               Screen1_C       Screen1_C
-# Screen2_T1               Screen2_T       Screen2_C
-# Screen2_T2               Screen2_T       Screen2_C
-# Screen2_C1               Screen2_C       Screen2_C
-
-runJACKS(
-    countfile=counts_path,
-    replicatefile=replicate_map_path,
-    guidemappingfile=guide_map_path,
-    rep_hdr='Replicate',
-    sample_hdr='Sample',
-    ctrl_sample_hdr='Control',                # per-sample control specification
-    sgrna_hdr='sgRNA',
-    gene_hdr='Gene',
-    outprefix='jacks_out',
-    apply_w_hp=False,                         # the default and the tool's recommendation; see the variant below
-    # For a p-value file add ctrl_genes='NEGv1.txt' AND n_pseudo=2000: the Python API defaults
-    # n_pseudo=0 (the CLI defaults to 2000), and with n_pseudo=0 no p-value file is written.
-)
+```
+Replicate                Sample          Control
+Screen1_T1               Screen1_T       Screen1_C
+Screen1_T2               Screen1_T       Screen1_C
+Screen1_C1               Screen1_C       Screen1_C
+Screen2_T1               Screen2_T       Screen2_C
+Screen2_T2               Screen2_T       Screen2_C
+Screen2_C1               Screen2_C       Screen2_C
 ```
 
-**Variant: hierarchical gene-effect prior (deliberate use only).** `apply_w_hp=True` (CLI `--apply_w_hp`) re-fits the gene-effect prior to each gene's effects across conditions, shrinking them towards each other. The JACKS help marks it "not recommended, use with caution", and it changes rankings materially: on JACKS' own 13-cell-line Project Score example, per-line Spearman rho between the two settings was 0.75-0.89. Use it only when you intend cross-condition shrinkage, and report which setting you used.
+```bash
+# Programmatic run through jacks.jacks_io.runJACKS (apply_w_hp stays off; see the variant below)
+python scripts/run_jacks_joint.py counts.txt replicatemap.txt guidemap.txt --outprefix jacks_out
+# p-value file: add --ctrl-genes NEGv1.txt --n-pseudo 2000 (the Python API defaults n_pseudo=0, the CLI 2000;
+# with n_pseudo=0 no p-value file is written). Reproducible p-values: PYTHONHASHSEED=1 ... --seed 1
+```
+
+**Variant: hierarchical gene-effect prior (deliberate use only).** `apply_w_hp=True` (CLI `--apply_w_hp`, script `--apply-w-hp`) re-fits the gene-effect prior to each gene's effects across conditions, shrinking them towards each other. The JACKS help marks it "not recommended, use with caution", and it changes rankings materially: on JACKS' own 13-cell-line Project Score example, per-line Spearman rho between the two settings was 0.75-0.89. Use it only when you intend cross-condition shrinkage, and report which setting you used.
 
 ```bash
 # Equivalent CLI run (run from JACKS/jacks/ after clone; --apply_w_hp stays off)
@@ -162,6 +151,7 @@ python run_JACKS.py \
 - `references/efficacy-prior-and-diagnostics.md` - read to build a `--reffile` efficacy prior from a reference panel, or to flag low-efficacy guides and genes for library re-design (`scripts/` holds the runnable helpers).
 - `references/failure-modes.md` - read when efficacy collapses, results look noisy across cell lines, genes hit the iteration cap, genes go missing, or a `--reffile` raises or seems wrong; holds the CRISPRi hyperparameter and `n_iter` overrides.
 - `references/tool-comparison.md` - read to compare JACKS with MAGeCK/BAGEL2 or to reconcile hits where the tools disagree.
+- `scripts/run_jacks_joint.py` (Python-API joint run) and `scripts/efficacy_summary.py` (low-efficacy guide/gene summary); `examples/run_jacks.py` wraps the CLI run and the result analysis and plots.
 
 ## References
 
