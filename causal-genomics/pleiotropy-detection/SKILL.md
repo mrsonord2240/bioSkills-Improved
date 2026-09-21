@@ -109,6 +109,8 @@ Methodology evolves; verify against the Burgess & Thompson textbook (2nd ed 2021
 
 **Fix:** Apply SIMEX correction (Bowden 2016 IJE 45:1961; Cook & Stefanski 1994 JASA 89:1314 SIMEX framework) using the `simex` package on the Egger regression, treating beta.exposure SE as measurement error. See examples/simex_egger_correction.R. Alternative: use MR-RAPS, which models the exposure-effect error explicitly via profile likelihood and does not suffer the NOME failure.
 
+**Caveat:** SIMEX removes a known bias direction but its extrapolation step is noisy in small samples, so the corrected slope is not guaranteed to be closer to the truth than the naive one (in a 20-SNP audit run with I^2_GX 0.70 and planted effect 0.3, naive Egger 0.666 became SIMEX 0.854, while IVW 0.314 and contamination mixture 0.343 sat near truth). Report the naive and SIMEX-corrected slopes side by side with CIs and read them against IVW / median / mode; do not present the corrected value as strictly superior.
+
 ### MR-PRESSO majority-outlier breakdown
 
 **Trigger:** More than 50% of instruments are pleiotropic (UHP), e.g. when instrument set was loosely selected (genome-wide significant but unfiltered).
@@ -205,6 +207,7 @@ LCV gcp interpretation thresholds (0, 0.5, 0.6, 1) are tabulated in the LCV sect
 library(TwoSampleMR)
 library(MRPRESSO)
 
+set.seed(42)  # seed once, before the whole battery: mr()'s weighted-median/mode bootstrap SEs and mr_presso()'s global/outlier tests are all Monte-Carlo
 methods <- c('mr_ivw', 'mr_egger_regression', 'mr_weighted_median', 'mr_weighted_mode')
 res_mr <- mr(dat, method_list = methods)
 
@@ -216,7 +219,6 @@ steiger <- directionality_test(dat)
 isq <- Isq(dat$beta.exposure, dat$se.exposure)
 nome_pass <- isq >= 0.9
 
-set.seed(42)  # mr_presso()'s global/outlier tests are Monte-Carlo; seed for a reproducible p-value
 presso <- mr_presso(
     BetaOutcome='beta.outcome', BetaExposure='beta.exposure',
     SdOutcome='se.outcome', SdExposure='se.exposure',
