@@ -70,9 +70,9 @@ Both depend on accurate sampling covariance. MTAG fails (MaxFDR > 5%) under the 
 |----------|-------------|-----|
 | Multi-trait GWAS power boost for one focal trait | MTAG | Optimized for per-trait marginal power |
 | Common-factor architecture hypothesized | GenomicSEM `commonfactorGWAS` | Tests SNP -> factor; reports Q_SNP heterogeneity |
-| Heterogeneous architecture (>1 latent factor) | ESEM, then confirmatory `usermodel` | Exploratory first, then confirm |
+| Heterogeneous architecture (>1 latent factor) | ESEM, then confirmatory `usermodel` (`references/advanced-models.md`) | Exploratory first, then confirm |
 | Confirming a pre-specified factor structure | `usermodel` with lavaan syntax | Confirmatory factor analysis |
-| Partition heritability of factor across annotations | Stratified GenomicSEM | Combines sLDSC + factor model |
+| Partition heritability of factor across annotations | Stratified GenomicSEM (`references/stratified-genomicsem.md`) | Combines sLDSC + factor model |
 | Mediation in a SEM framework | `usermodel` with indirect path | Path coefficients + delta-method SE |
 | Sample overlap unknown or any-overlap suspected | Always use `ldsc()` output as input | V matrix off-diagonals absorb overlap |
 | Cross-ancestry common-factor analysis | Run per-ancestry, compare loadings; no published cross-ancestry SEM as of 2026 | Method not yet validated for mixed-ancestry V |
@@ -222,75 +222,15 @@ user_fit <- usermodel(covstruc = ldsc_results, model = model_syntax, estimation 
 
 The standardized loading is `Standardized_Est` in one and `STD_Genotype` in the other; `cf_fit$results[, 'STD_Genotype']` on a `commonfactor()` fit fails. `commonfactorGWAS()` and `userGWAS()` return per-SNP data frames with no standardized column (columns under their sections below).
 
-### ESEM (Exploratory Factor Structure)
+## Reference Files
 
-When the factor structure is unknown, fit `usermodel()` with all loadings free across all factors, then apply a rotation post-fit. Rotation choices: **geomin oblique** (default; allows factor correlation), **target rotation** (Browne 2001 Multivariate Behav Res 36:111; uses a hypothesized loading template), **quartimin** (orthogonal; assumes factors are uncorrelated).
+Read the file only when the task needs it; the rest of this skill is enough for a common-factor GWAS.
 
-```r
-model_esem <- '
-    F1 =~ NA*trait1 + trait2 + trait3 + trait4
-    F2 =~ NA*trait1 + trait2 + trait3 + trait4
-    F1 ~~ 1*F1
-    F2 ~~ 1*F2
-    F1 ~~ F2
-'
-esem_fit <- usermodel(covstruc = ldsc_results, model = model_esem, estimation = 'DWLS')
-# Rotate post-fit via GPArotation::GPForth/GPFoblq or lavaan::rotate()
-```
-
-**Decision:** ESEM for K-factor exploration when structure is unknown; CFA via `usermodel()` once a structure is confirmed. Report rotation sensitivity (geomin vs target vs quartimin) and treat as exploratory.
-
-**Cross-loadings.** Cross-loadings (one trait loads on > 1 factor) are common in psychiatric and behavioral GWAS. Brown 2015 *Confirmatory Factor Analysis for Applied Research* recommends allowing cross-loadings first and using modification indices to guide simplification. Allow a cross-loading when constraining residual variance otherwise forces a Heywood case. Constrain when CFI < 0.9 and modification indices instead suggest a correlated residual between two indicators (which is the more parsimonious fix).
-
-### userGWAS for Custom Path Models
-
-`userGWAS()` fits arbitrary lavaan-syntax SNP regressions and is the right tool when the SNP needs to be tested on multiple paths simultaneously (e.g. factor-mediated effect AND a direct effect on one indicator).
-
-```r
-# Test SNP -> F path + SNP -> trait1 direct path simultaneously
-model <- '
-    F =~ NA*trait1 + trait2 + trait3
-    F ~~ 1*F
-    F ~ SNP
-    trait1 ~ SNP    # direct effect on trait1, partialed out of F
-'
-user_results <- userGWAS(covstruc = ldsc_results,
-                         SNPs = ss,
-                         estimation = 'DWLS',
-                         model = model,
-                         sub = c('F~SNP', 'trait1~SNP'),
-                         parallel = TRUE,
-                         cores = 8)
-# Output (one data frame per SNP set; checked on 0.0.5): SNP, CHR, BP, MAF, A1, A2, lhs, op, rhs,
-# free, label, est, SE, Z_Estimate, Pval_Estimate, chisq, chisq_df, chisq_pval, AIC, error, warning.
-# There is NO Q_pval column: chisq / chisq_pval is the fit of the whole SNP-augmented model, so a
-# small chisq_pval means unmodelled SNP paths remain (a third path may be needed).
-```
-
-### Higher-Order / Bifactor / p-Factor Models
-
-Use case: psychiatric genetics p-factor (Caspi 2014 Clin Psychol Sci 2:119; Grotzinger 2022 Nat Genet 54:548 cross-disorder), cognitive g-factor (de la Fuente 2021 Nat Hum Behav 5:49).
-
-Hierarchical template -- first-order factors load on a single second-order p-factor:
-
-```r
-model_pfactor <- '
-    # First-order factors
-    INT =~ NA*trait_anx + trait_dep + trait_neuro       # internalizing
-    EXT =~ NA*trait_adhd + trait_alc + trait_subst       # externalizing
-    THT =~ NA*trait_scz + trait_bp                       # thought-disorder
-    # Second-order p-factor
-    p =~ NA*INT + EXT + THT
-    INT ~~ 1*INT
-    EXT ~~ 1*EXT
-    THT ~~ 1*THT
-    p ~~ 1*p
-'
-```
-
-The second-order p-factor follows the same rule as any factor: it needs >= 3 first-order factors to identify. With only 2 first-order factors, `usermodel()` returns chi-square ~ 0 and warns that the information matrix could not be inverted, so SEs are NaN (checked on 0.0.5 + lavaan 0.6.19, DWLS); drop the second-order factor or add a third first-order factor.
-
-Bifactor alternative: `p =~` all traits directly, with `INT`/`EXT`/`THT` as orthogonal residual factors. Bifactor typically gives tighter CFI/RMSEA but the substantive interpretation of the residual factors is harder; bifactor is also prone to over-fitting at modest trait counts (Bonifay W & Cai L 2017 Multivariate Behav Res 52:465). Cite Grotzinger 2022 Nat Genet 54:548 and Karlsson Linner R, Mallard TT et al 2021 Nat Neurosci 24:1367 for the canonical psychiatric implementations.
+| Need | File |
+|------|------|
+| ESEM (exploratory factor structure), `userGWAS()` custom SNP path models, higher-order / bifactor / p-factor models | `references/advanced-models.md` |
+| Run MTAG beside GenomicSEM, or reconcile the two when they disagree | `references/mtag-comparison.md` |
+| Stratified GenomicSEM (`enrich()`, partitioned heritability of the factor) | `references/stratified-genomicsem.md` |
 
 ## Common-Factor GWAS with Q_SNP
 
@@ -345,65 +285,6 @@ cfgwas$Q_pval_ML <- cfgwas_ml$Q_pval[match(cfgwas$SNP, cfgwas_ml$SNP)]
 cfgwas$factor_only <- cfgwas$factor_sig & !cfgwas$qsnp_sig & cfgwas$Q_pval_ML > (0.05 / sum(cfgwas$factor_sig))
 ```
 
-## MTAG Comparison
-
-**Goal:** Cross-check GenomicSEM common-factor results against MTAG per-trait shrunk z-scores.
-
-**Approach:** Run MTAG CLI on the same input sumstats; compare top hits with GenomicSEM factor hits. Report MaxFDR.
-
-```bash
-# MTAG CLI (Python)
-python mtag.py \
-    --sumstats trait1.txt,trait2.txt,trait3.txt \
-    --n_min 0 \
-    --out mtag_results
-# MTAG uses the signed Z by default; --use_beta_se was disabled upstream (raises a
-# RuntimeError since Dec 2021 due to beta-se bugs), so supply a Z column and omit it.
-
-# Check MaxFDR per trait
-grep -iE 'max ?fdr' mtag_results.log   # matches both the section header and the 'Max FDR of Trait' value lines
-# Each per-trait MTAG file: mtag_results_trait_<k>.txt
-```
-
-If MaxFDR > 0.05 for any trait, MTAG results for that trait are unreliable; GenomicSEM with Q_SNP filtering is the more defensible report.
-
-## Stratified GenomicSEM (Partitioned Heritability of Factor)
-
-For partitioning the heritability of the latent factor across functional annotations, use `s_ldsc()` (stratified LDSC inside GenomicSEM) and pass the multi-annotation output to a stratified model fit.
-
-```r
-# Stratified LDSC across baseline + custom annotations
-s_results <- s_ldsc(
-    traits = traits,
-    sample.prev = c(0.5, 0.5, NA),
-    population.prev = c(0.05, 0.05, NA),
-    ld = 'baselineLD_v2.2.',
-    wld = 'weights.hm3_noMHC.',
-    frq = '1000G.EUR.QC.',
-    trait.names = trait_names
-)
-
-# enrich() inventory:
-#   params: lavaan syntax of the parameter under enrichment (loading, residual var, or F~~F latent var)
-#   fix='regressions': hold regression paths fixed at the genome-wide estimate during stratified fit
-#   std.lv=FALSE: do not standardize the latent variance
-#   rm_flank=TRUE: drop flanking-window contributions (default)
-#   tau=FALSE: use the baseline-annotation S/V matrices (TRUE switches to the V_Tau/S_Tau tau parametrization)
-#   base=TRUE: include baseline annotation contributions in the partition
-#   toler=NULL: matrix-inversion tolerance (let GenomicSEM choose; supply a small value when S is near-singular)
-strat_factor <- enrich(s_covstruc = s_results,
-                       model = '',
-                       params = 'F =~ trait1',
-                       fix = 'regressions',
-                       std.lv = FALSE,
-                       rm_flank = TRUE,
-                       tau = FALSE,
-                       base = TRUE,
-                       toler = NULL)
-```
-
-The output gives per-annotation enrichment of the factor h2 -- the analog of cell-type S-LDSC for the latent factor (Grotzinger AD et al 2022 Nat Genet 54:548).
-
 ## Computational Footprint
 
 | Step | Runtime | Hardware |
@@ -416,20 +297,6 @@ The output gives per-annotation enrichment of the factor h2 -- the analog of cel
 | MTAG over 6-8M SNPs | 1-2h | laptop or cluster |
 
 Cluster runs of `commonfactorGWAS()` / `userGWAS()` should use `MPI=TRUE` when submitting via mpirun; GenomicSEM detects the OS internally (via `Sys.info()[['sysname']]`) and selects FORK (Linux/Mac) vs PSOCK (Windows) cluster types automatically -- there is no `Operating=` user argument. On a Mac/Windows workstation, reduce `cores` to the physical-core count to avoid PSOCK fork failures.
-
-## Reconciliation: When GenomicSEM and MTAG Disagree
-
-| Pattern | Likely cause | Action |
-|---------|--------------|--------|
-| GenomicSEM factor SNP sig, MTAG sig for all traits | Genuine common-factor SNP | Report; high confidence |
-| GenomicSEM factor SNP sig, MTAG sig in only 1 trait | Q_SNP heterogeneity likely; one-trait-dominant | Check Q_SNP; if sig, this is NOT a factor SNP |
-| MTAG sig, GenomicSEM factor null, Q_SNP sig | Trait-specific SNP captured by MTAG shrinkage | Report as trait-specific, not common-factor |
-| Both null but per-trait univariate sig | Power loss from multivariate parameterization | Re-check sample overlap V matrix |
-| GenomicSEM and MTAG both sig but opposite direction | Sample-overlap mis-specification OR sign error in munging | Re-munge with same allele convention; re-run `ldsc()` |
-| MTAG MaxFDR > 5%, GenomicSEM with Q_SNP works | MTAG assumption violated | Prefer GenomicSEM as primary |
-| One-trait GWAS sig but common-factor not | Trait-specific architecture | Don't force into common-factor frame |
-
-**Operational rule for publication:** A common-factor SNP claim requires (1) factor p < 5e-8, (2) Q_SNP p > 0.05 / N_factor_SNPs (non-heterogeneous), and (3) replication in an independent set of traits or cohorts. Trait-specific SNPs from MTAG require MaxFDR < 5% for the trait. Reporting only the factor effect without Q_SNP is the most common reviewer-flagged error.
 
 ## Common Errors
 
