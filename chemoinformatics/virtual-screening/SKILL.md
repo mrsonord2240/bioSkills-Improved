@@ -33,7 +33,20 @@ Screen chemical libraries against protein targets via molecular docking. Vina is
 
 For pose physical-validity QC, see `chemoinformatics/pose-validation`. For ML-driven docking + rescoring, see `chemoinformatics/ml-docking-rescoring`. For covalent docking, see `chemoinformatics/covalent-design`. For affinity calculations (FEP), see `chemoinformatics/free-energy-calculations`.
 
-**Handoff caveat:** converting a docked PDBQT pose to SDF for PoseBusters or another downstream tool can lose formal bond order/charge for charged ligands (PDBQT does not encode bond order; reconstructing it from atom types and coordinates is unreliable for charged or aromatic-adjacent groups), causing an RDKit sanitization failure even when the pose's spatial placement is valid. Where possible, carry the original RDKit `Mol` (with correct formal charges, from `prepare_ligand`) alongside the docked PDBQT instead of reconstructing bonds from the pose alone.
+**Handoff caveat:** Open Babel's PDBQT -> SDF conversion (`obabel out.pdbqt -O pose.sdf`) loses formal bond order and charge for charged ligands (PDBQT encodes neither), so RDKit sanitization fails and PoseBusters passes only 3/12 checks even when the pose is spatially valid. Rebuild the pose from the SMILES that meeko writes into the PDBQT instead (Vina keeps the `REMARK SMILES` lines in its output). Verified on benzamidine docked to trypsin (3PTB): `obabel` route 3/12, meeko route 12/12 on all 5 poses (meeko 0.8.0, RDKit 2026.03.6, PoseBusters 0.6.5, Vina 1.2.7):
+
+```python
+from meeko import PDBQTMolecule, RDKitMolCreate
+from rdkit import Chem
+
+pm = PDBQTMolecule.from_file('out.pdbqt', skip_typing=True)   # Vina output, all poses
+mol = RDKitMolCreate.from_pdbqt_mol(pm)[0]                    # one Mol, one conformer per pose
+with Chem.SDWriter('poses.sdf') as w:
+    for cid in range(mol.GetNumConformers()):
+        w.write(mol, confId=cid)
+```
+
+Then `bust poses.sdf --outfmt short`. This needs the ligand PDBQT to come from meeko (`prepare_ligand`), which writes the `REMARK SMILES` lines; a PDBQT from another writer has none, so carry the original RDKit `Mol` alongside it instead.
 
 ## Docking Tool Taxonomy
 
@@ -97,7 +110,7 @@ def prepare_receptor(repaired_pdb, pdbqt_out, pH=7.4):
 
 **Common pitfall:** Forgetting to add hydrogens at protein pH (7.4) but using pH 7.0 ligand charges. Hist mistakenly protonated. Use PROPKA + manual review of catalytic residues.
 
-**Common pitfall:** Feeding pdb2pqr's default `.pqr` output straight into `mk_prepare_receptor --read_pqr`. meeko 0.8.0's PQR reader assumes an all-integer residue-number column and raises `ValueError: invalid literal for int() with base 10` on any residue with a PDB insertion code (e.g. `184A`). Chymotrypsin-numbered serine proteases (trypsin, chymotrypsin, and relatives -- a standard docking-benchmark family) hit this on real structures, not just edge cases. Use `pdb2pqr --pdb-output` and `mk_prepare_receptor --read_pdb` as above; verified on PDB 3PTB (trypsin, insertion-code residues 184A/188A/221A).
+**Common pitfall:** Feeding pdb2pqr's default `.pqr` output straight into `mk_prepare_receptor --read_pqr`. meeko 0.8.0's PQR reader assumes an all-integer residue-number column and raises `ValueError: invalid literal for int() with base 10` on any residue with a PDB insertion code (e.g. `184A`). Any PDB deposition with insertion-code residues triggers it, not one protein family: chymotrypsin-numbered serine proteases (trypsin 3PTB: 184A/188A/221A; elastase 1EAI) are common examples and hit it on real structures, not just edge cases. Use `pdb2pqr --pdb-output` and `mk_prepare_receptor --read_pdb` as above; verified on PDB 3PTB (trypsin, insertion-code residues 184A/188A/221A).
 
 ## Ligand Preparation
 
@@ -357,11 +370,12 @@ Lyu et al. (2019) screened 170 million make-on-demand compounds against AmpC and
 | GNINA hangs | GPU OOM | Reduce concurrent work and, if fewer output poses are acceptable, use `--num_modes 5` |
 | All affinities very poor (-3 to -5) | Wrong protonation; ligand too large for box | Re-check pKa; expand box |
 | Identical affinity across ligands | Receptor grid not computed | Call `v.compute_vina_maps()` before dock |
+| PoseBusters passes only ~3/12 on a docked charged ligand; `Explicit valence ... is greater than permitted` | `obabel` PDBQT -> SDF dropped bond orders/charges | Rebuild with meeko `RDKitMolCreate.from_pdbqt_mol` (see Handoff caveat) |
 | Pose poses make no sense | Receptor and ligand in different frames | Ensure same coordinate origin |
 | Metal-coordination pose is wrong | The selected scoring/preparation protocol lacks a validated model for that metal geometry | Use a metal-specific validated workflow; the Vina executable can use AutoDock4Zn maps with `--scoring ad4` for zinc, while other metals require separately supported parameters/protocols |
 | GPU mode slow | Vina is CPU-only; only GNINA is GPU | Use GNINA for GPU; if using a third-party GPU port of Vina, benchmark it on the same hardware, target, library tranche, and search settings before adopting it |
 | `mk_prepare_receptor.py: command not found` | meeko's pip-installed console-script has no `.py` suffix | Call `mk_prepare_receptor` (no `.py`), as in the code above |
-| `ValueError: invalid literal for int() with base 10: '184A'` from `mk_prepare_receptor --read_pqr` | pdb2pqr's default `.pqr` output has no room for insertion-code residue numbers (e.g. chymotrypsin-numbered serine proteases); meeko's PQR reader can't parse them | Use `pdb2pqr --pdb-output` + `mk_prepare_receptor --read_pdb` instead of `--read_pqr` |
+| `ValueError: invalid literal for int() with base 10: '184A'` from `mk_prepare_receptor --read_pqr` | Any residue with a PDB insertion code (e.g. chymotrypsin-numbered serine proteases such as trypsin, elastase): meeko's PQR reader assumes an all-integer residue-number column | Use `pdb2pqr --pdb-output` + `mk_prepare_receptor --read_pdb` instead of `--read_pqr` |
 | `pip install vina` fails with "Boost library location was not found" | No Windows wheel for the `vina` PyPI package | Use the Vina CLI via `subprocess` instead of `from vina import Vina` |
 
 ## References
