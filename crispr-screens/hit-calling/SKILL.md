@@ -27,13 +27,15 @@ The primary hit-calling methods cover non-overlapping niches; the decision is no
 |--------------------|----------------|-----|------------------|
 | Two-condition essentiality, one cell line, no CN concerns | MAGeCK RRA | Robust, fast, gold-standard for ranked analysis | BAGEL2 (Bayes factor on same data) |
 | Time course (3+ timepoints) | MAGeCK MLE | RRA cannot model multi-condition | JACKS (efficacy-aware) |
-| Multi-cell-line panel (cancer dependency) | Chronos | Models CN bias + screen quality jointly | MAGeCK MLE per line + meta-analysis |
+| Multi-cell-line panel (cancer dependency) | Chronos | Models CN bias + screen quality jointly | MAGeCK MLE per line + meta-analysis (run per line first, pool downstream; a joint MLE without per-line indicator covariates dilutes per-line signal) |
 | Drug screen (vehicle vs drug) | drugZ | Bidirectional Z; vehicle-anchored | MAGeCK MLE with dose covariate |
 | Multi-screen joint, same library | JACKS | Shared efficacy; enables ~2.5x smaller screens | MAGeCK MLE; results should converge |
 | Essentiality classification with reference sets | BAGEL2 | Bayes factor with CEGv2/NEGv1 calibration | MAGeCK RRA |
 | Combinatorial / paired guide | MAGeCK MLE with GI scoring | Models interaction term; see [[combinatorial-screens]] | Custom GI scoring |
 | Single-cell perturbation (Perturb-seq) | SCEPTRE | NB GLM + permutation; see [[perturb-seq-analysis]] | Mixscape pre-filter |
 | Cancer-line copy-number screen | Chronos (preferred) or CERES | Joint CN-bias + gene-effect modeling; see [[copy-number-correction]] | CRISPRcleanR pre-hoc + MAGeCK |
+| Cancer line + multi-batch | Chronos | Models CN and batch jointly | MAGeCK MLE with batch covariate |
+| Variant function (base / prime editing) | Custom + CRISPResso2 | Editing outcomes, not guide dropout; see [[base-editing-analysis]] | -- |
 
 ## Statistical Models Compared
 
@@ -218,9 +220,10 @@ to make both statistics increase with essentiality").
 3. Run screen at MOI 0.3, 500x coverage
 4. Sequence endpoint
 5. Run mageck count                            <- generates raw + normalized counts
-6. Screen QC (see screen-qc)                   <- gates downstream method choice
+6. Screen QC (see screen-qc)                   <- gates downstream method choice; run the CEGv2/NEGv1 PR-AUC first
+                                                  (PR-AUC <0.5 = no signal however many hits MAGeCK calls; >0.7 to interpret)
 7. Copy-number correction if cancer line       <- CRISPRcleanR or Chronos; see copy-number-correction
-8. Batch correction if multi-batch             <- see batch-correction
+8. Batch correction if multi-batch             <- see batch-correction; batch covariates in MAGeCK MLE, or Chronos
 9. Hit calling (this skill)                    <- choose method by design
 10. Consensus across 2-3 methods               <- for high-stakes hits
 11. Orthogonal validation                      <- arrayed; different chemistry
