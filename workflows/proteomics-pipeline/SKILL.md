@@ -94,6 +94,8 @@ Sample4,Treatment,2,B2
 
 **Approach:** Strip bookkeeping rows, log2 and inspect the RAW per-sample distributions (dropping failed loads before normalization can hide them), median-center, filter on per-group completeness, then test the OBSERVED values with moderated limma using treat() for a minimum fold change and batch as a covariate -- nothing is imputed. Upgrade to proDA when the dropout itself has to be modeled.
 
+TMT/iTRAQ, SILAC, DIA-NN `report.parquet` and MSstats feature-level input have their own routes: see Reference Files below.
+
 ```r
 library(limma)
 library(ggplot2)
@@ -303,50 +305,6 @@ for (cn in colnames(contrast)) {                       # per-contrast breakdown 
 write.csv(results, 'proteomics_results.csv', row.names = FALSE)
 ```
 
-## MSstats Workflow
-
-```r
-library(MSstats)
-
-# From MaxQuant. quote = '' and comment.char = '' are REQUIRED: MaxQuant text fields contain
-# apostrophes (5'-nucleotidase) and '#', and the read.table defaults silently truncate the table
-# with nothing but an 'EOF within quoted string' warning -- here 2954 of 10369 evidence rows and
-# 62 of 296 proteins. Check the row count; do not trust the warning to stop you.
-evidence <- read.table('evidence.txt', sep = '\t', header = TRUE, quote = '', comment.char = '')
-proteinGroups <- read.table('proteinGroups.txt', sep = '\t', header = TRUE, quote = '', comment.char = '')
-stopifnot(nrow(evidence) == length(readLines('evidence.txt')) - 1,
-          nrow(proteinGroups) == length(readLines('proteinGroups.txt')) - 1)
-annotation <- read.csv('annotation.csv')
-
-# Convert to MSstats format
-msstats_input <- MaxQtoMSstatsFormat(evidence = evidence,
-                                      proteinGroups = proteinGroups,
-                                      annotation = annotation)
-
-# Process data. 'equalizeMedians' carries the SAME symmetry assumption as the median centering in
-# the limma block: most proteins unchanged, and the changes roughly balanced up and down. On the
-# 296-protein set above (44 up, 26 down) it left every true null shifted -0.19 log2 (t vs 0,
-# p = 2e-55) and MSstats then correctly called 21 of the 179 true nulls at BH 5%, all negative.
-# For a one-sided design use normalization = FALSE with an externally normalized input, or
-# normalization = 'globalStandards' with globalStandardName = <spike-in / unchanged protein set>.
-# Always check the null centre: mean log2FC over proteins you expect not to move should be ~0.
-processed <- dataProcess(msstats_input, normalization = 'equalizeMedians',
-                         summaryMethod = 'TMP', censoredInt = 'NA')
-
-# Comparison. +1 on the numerator: Treatment=+1, Control=-1 so log2FC = Treatment - Control
-# (positive = up in Treatment), matching the label and the limma makeContrasts(Treatment-Control) path.
-# Columns must be ALL the Condition levels in sorted order, one ROW per contrast -- for three
-# conditions sorted Control/HighDose/LowDose that is a 2 x 3 matrix, e.g.
-#   rbind(HighDose_vs_Control = c(-1, 1, 0), LowDose_vs_Control = c(-1, 0, 1))
-# with colnames c('Control','HighDose','LowDose'); groupComparison adjusts within each row, so
-# adjust across the rows yourself (p.adjust on the pooled pvalue) when you report several.
-comparison <- matrix(c(-1, 1), nrow = 1)
-rownames(comparison) <- 'Treatment_vs_Control'
-colnames(comparison) <- c('Control', 'Treatment')
-
-results <- groupComparison(contrast.matrix = comparison, data = processed)
-```
-
 ## QC Checkpoints
 
 | Stage | Check | Action if Failed |
@@ -358,148 +316,16 @@ results <- groupComparison(contrast.matrix = comparison, data = processed)
 | Design | >= 3 biological replicates per condition | Do not run a per-protein test; report as exploratory or add replicates |
 | Stats | FC/FDR pre-specified | Verify thresholds were pre-specified; inspect the volcano for downshift-imputation 'anchor arms' |
 
-## Workflow Variants
+## Reference Files
 
-### TMT/iTRAQ Isobaric Labeling
-Reporter extraction is a spectra-level step, not a text-matrix read. Within a single plex the channels are co-isolated/co-fragmented in the same MS2 event, so relative ratios are stable; but MULTI-batch TMT CANNOT be compared across plexes without an IRS bridge (a pooled reference channel in every plex; Plubell 2017). Route to proteomics/quantification for the mechanics.
-```r
-library(MSnbase)
+The main path above (limma on a MaxQuant `proteinGroups.txt` matrix) is the default. Read a reference file only when the request needs its route:
 
-# Extract reporter ions from spectra (NOT readMSnSet, which loads an existing text matrix)
-raw <- readMSData('tmt.mzML', mode = 'onDisk')
-tmt_data <- quantify(raw, reporters = TMT10, method = 'max')
-# Correct isobaric impurity cross-talk with the LOT-SPECIFIC matrix from the reagent CoA.
-# makeImpuritiesMatrix(x = 10, edit = FALSE) returns a MANUFACTURER TEMPLATE, not an identity
-# matrix -- its diagonal runs 0.928-0.965 and 5% of 126 lands in 127C. It is a shape check only;
-# the numbers are lot-specific. (edit = TRUE, the default, opens an editor and blocks in scripts.)
-# Do NOT use makeImpuritiesMatrix(filename = ...) for TMT10/TMTpro: it reads a CoA laid out by
-# Da OFFSET and places each column k POSITIONS away in the reporter list, which is only correct
-# for non-interleaved reagents (TMT6, iTRAQ). TMT10/TMTpro interleave N and C, so the +1 Da
-# neighbour of 126 is 127C -- TWO positions away -- and the filename route silently writes the
-# bleed into 127N instead. Build the matrix by CHANNEL NAME and hand it to purityCorrect:
-# tmt10_coa.csv: a square percentage matrix, rows = SOURCE reagent, columns = OBSERVED channel,
-# both labelled with the channel names (126, 127N, 127C, ...); diagonal = the lot's purity.
-coa <- as.matrix(read.csv('tmt10_coa.csv', row.names = 1, check.names = FALSE))
-stopifnot(nrow(coa) == ncol(coa), setequal(rownames(coa), reporterNames(TMT10)))
-coa <- coa[reporterNames(TMT10), reporterNames(TMT10)]   # force the quant's channel order
-# ORIENTATION CHECK. A transposed sheet has the right channel names, the right shape and produces
-# NO negative values, so the negative-count check below never sees it -- yet it makes the
-# correction 2.7x worse than the correct orientation (median relative error 0.0015 vs 0.0006 on
-# the TMT10 template), still better than doing nothing and therefore silent. Test the orientation
-# directly: a ROW is one reagent's isotopic envelope and sums to 100% by construction (minus what
-# falls off the ends of the channel list); a COLUMN sums over different reagents and has no such
-# constraint. If the columns fit 100 better than the rows, the sheet is the wrong way round.
-row_dev <- sum((rowSums(coa) - 100)^2); col_dev <- sum((colSums(coa) - 100)^2)
-if (col_dev < row_dev)
-    stop('CoA looks TRANSPOSED: column sums fit 100% better than row sums (', round(col_dev, 1),
-         ' vs ', round(row_dev, 1), '). Rows must be the SOURCE reagent, columns the OBSERVED ',
-         'channel -- transpose the sheet or re-read the lot certificate.')
-stopifnot(all(diag(coa) == apply(coa, 1, max)),   # each reagent's own channel must dominate its row
-          all(diag(coa) > 50))                    # a CoA is percentages; < 50 means fractions were read
-impurities <- coa / 100                                  # CoA percentages -> fractions
-tmt_data <- purityCorrect(tmt_data, impurities)
-stopifnot(sum(exprs(tmt_data) < 0, na.rm = TRUE) == 0)   # negatives = a grossly wrong matrix (NOT a transposition test; see above)
-
-```
-
-Multi-plex TMT (the common case: two or more plexes) -- do NOT concatenate plexes directly. MSstatsTMT applies the reference-channel (IRS-style) bridge during summarization. MaxQuant route, checked on MSstatsTMT 2.14.2 against its bundled 5-plex `evidence` / `proteinGroups` / `annotation.mq`.
-```r
-library(MSstatsTMT)
-
-# Multi-plex TMT from MaxQuant. Each plex (Mixture) carries a pooled reference channel, annotated
-# Condition = 'Norm' (MSstatsTMT requires that exact label); that channel is the bridge. annotation.csv has one row per (Run, Channel) with
-# columns Run, Fraction, TechRepMixture, Channel, Condition, Mixture, BioReplicate.
-# quote = '' / comment.char = '' as in the MSstats block above.
-evidence <- read.table('evidence.txt', sep = '\t', header = TRUE, quote = '', comment.char = '')
-proteinGroups <- read.table('proteinGroups.txt', sep = '\t', header = TRUE, quote = '', comment.char = '')
-stopifnot(nrow(evidence) == length(readLines('evidence.txt')) - 1,
-          nrow(proteinGroups) == length(readLines('proteinGroups.txt')) - 1)
-annotation <- read.csv('annotation.csv')
-stopifnot('Norm' %in% annotation$Condition)   # no reference channel = nothing to bridge plexes with
-
-tmt_input <- MaxQtoMSstatsTMTFormat(evidence, proteinGroups, annotation, use_log_file = FALSE,
-                                     verbose = FALSE)
-
-# Summarize to protein level. Within-plex global median normalization is followed by reference-channel
-# normalization: every plex is rescaled to its own 'Norm' channel, which is the cross-plex (IRS-style)
-# bridge, and the Norm channel is then dropped. Do not concatenate plexes before this step.
-summ <- proteinSummarization(tmt_input, method = 'msstats', global_norm = TRUE, reference_norm = TRUE,
-                             remove_norm_channel = TRUE, use_log_file = FALSE, verbose = FALSE)
-
-# Contrasts: one row per comparison, columns = the Condition levels that survive (Norm is removed),
-# in sorted order -- built from the levels, against the first one, as in the limma block.
-lv <- sort(setdiff(unique(as.character(annotation$Condition)), 'Norm'))
-comparison <- t(sapply(lv[-1], function(l) as.numeric(lv == l) - as.numeric(lv == lv[1])))
-colnames(comparison) <- lv
-rownames(comparison) <- paste0(lv[-1], '_vs_', lv[1])
-# moderated = TRUE borrows variance across proteins (limma-style); groupComparisonTMT adjusts within
-# each contrast, so adjust ACROSS the rows yourself when you report several (as for MSstats above).
-tmt_res <- groupComparisonTMT(summ, contrast.matrix = comparison, moderated = TRUE,
-                              adj.method = 'BH', use_log_file = FALSE, verbose = FALSE)$ComparisonResult
-tmt_res$adj.pvalue.global <- p.adjust(tmt_res$pvalue, method = 'BH')
-print(table(tmt_res$Label, tmt_res$adj.pvalue < 0.05))
-```
-
-### SILAC Workflow
-Caveat: heavy-Arg -> heavy-Pro metabolic conversion biases ratios for proline-containing peptides (under-counts the heavy channel), and labeling efficiency must be checked (residual light reads as down-regulation). Route to proteomics/quantification for the mechanics.
-```r
-library(limma)
-
-# SILAC ratios from MaxQuant (quote/comment.char as in the MSstats block above)
-silac <- read.delim('proteinGroups.txt', quote = '', comment.char = '')
-ratio_cols <- grep('Ratio.H.L.normalized', colnames(silac), value = TRUE)
-
-# Log2 transform ratios. MaxQuant leaves NaN (and 0 for an absent channel) wherever it could not
-# form a ratio, so log2 produces NaN/-Inf; coerce every non-finite cell to NA before testing.
-silac_log2 <- log2(as.matrix(silac[, ratio_cols]))
-silac_log2[!is.finite(silac_log2)] <- NA
-rownames(silac_log2) <- silac$Majority.protein.IDs   # without this the result table has no identity
-
-# Keep proteins with >= 2 finite ratios. apply(t.test) over the raw matrix STOPS the whole script
-# with "not enough 'x' observations" on the first protein quantified in one replicate only.
-keep <- rowSums(!is.na(silac_log2)) >= 2
-cat('proteins tested:', sum(keep), 'of', nrow(silac_log2), '\n')
-
-# One-sample moderated test against log2 ratio 0 (no change): an intercept-only limma fit borrows
-# variance across proteins, which an unmoderated per-protein t-test at n = 3 cannot. Report the
-# BH-adjusted p-value -- a raw p-value per protein controls nothing across thousands of tests.
-fit <- eBayes(lmFit(silac_log2[keep, , drop = FALSE]), trend = TRUE, robust = TRUE)
-results <- topTable(fit, coef = 1, number = Inf, adjust.method = 'BH')
-# Proteins dropped by `keep` are an on/off presence table, not a fold change (quantification).
-```
-
-### DIA-NN Workflow
-DIA-NN 1.9+ defaults to report.parquet (the only default in 2.0); read it with arrow, not read.delim. Filter on q-values BEFORE pivoting, or low-confidence rows enter the matrix. Route to proteomics/dia-analysis for the mechanics.
-```r
-library(arrow)
-library(dplyr)
-library(tidyr)
-
-diann <- read_parquet('report.parquet')
-
-# Filter to 1% FDR at precursor AND protein-group level before pivoting.
-# Use the GLOBAL protein-group q-value for the cross-run matrix (per-run min(Q.Value) is anti-conservative).
-# When MBR is ON, MBR has its own FDR: add the Lib.* q-values (Lib.Q.Value, Lib.PG.Q.Value <= 0.01).
-diann_filt <- diann %>%
-    filter(Q.Value <= 0.01 & PG.Q.Value <= 0.01 & Global.PG.Q.Value <= 0.01)
-
-# PG.MaxLFQ is ALREADY cross-run MaxLFQ-normalized at report generation. Re-normalizing it
-# double-normalizes -- go straight to log2 + limma with no further normalization. To apply the
-# skill's own median-centering instead, pivot raw PG.Quantity here, not PG.MaxLFQ.
-protein_matrix <- diann_filt %>%
-    select(Protein.Group, Run, PG.MaxLFQ) %>%
-    distinct() %>%
-    pivot_wider(names_from = Run, values_from = PG.MaxLFQ)
-
-# PG.MaxLFQ path: log2-transform and go straight to limma (no re-normalization). DIA-NN writes 0
-# for "not quantified in this run", so 0 -> NA FIRST: log2(0) is -Inf, and -Inf cells propagate
-# silently until eBayes stops with "missing value where TRUE/FALSE needed".
-m <- as.matrix(protein_matrix[, -1])
-rownames(m) <- protein_matrix$Protein.Group
-m[m == 0] <- NA
-log2_matrix <- log2(m)
-stopifnot(!any(is.infinite(log2_matrix)))
-```
+| Route | Read | When |
+|-------|------|------|
+| MSstats feature-level model | `references/msstats.md` | peptide/feature-level input (`evidence.txt`), feature-level mixed models, contrast matrices for 3+ conditions |
+| TMT / iTRAQ | `references/tmt-isobaric.md` | isobaric reporter data; CoA impurity correction; multi-plex experiments (reference-channel bridge via MSstatsTMT) |
+| SILAC | `references/silac.md` | MaxQuant SILAC H/L ratios |
+| DIA-NN | `references/dia-nn.md` | DIA-NN `report.parquet` instead of `proteinGroups.txt` |
 
 ## Common Errors
 
