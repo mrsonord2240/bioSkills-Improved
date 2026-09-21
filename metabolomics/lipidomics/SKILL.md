@@ -26,6 +26,7 @@ package and adapt the example to match the actual API rather than retrying.
 - R: `lipidr::read_skyline()` / `as_lipidomics_experiment()`, `de_analysis()`, `lsea()`
 - Nomenclature: `pygoslin` (Python) or `rgoslin` (R) for parsing/canonicalization
 - Identification: MS-DIAL 5 (open) or LipidSearch (commercial) upstream
+- Install: `BiocManager::install('lipidr')`; `pip install pygoslin`. Inputs: a quantified lipid table (Skyline, MS-DIAL or LipidSearch export) with sample-group annotations, and which internal standards were spiked and when.
 
 ## The Single Most Important Insight -- A Lipid Name Is a Structural-Resolution Claim the Software Usually Overstates
 
@@ -183,16 +184,13 @@ parser = LipidParser()
 lipid = parser.parse('PC 16:0/18:1')      # a slash-claimed name from a tool export
 
 claimed_level = lipid.lipid.info.level    # LipidLevel enum the string asserts
-# GUARD: never request a target level MORE specific than what was actually parsed.
-# get_lipid_string() has no chain/sn data to invent for a name parsed at a coarser level
-# (e.g. a sum-composition or ether/plasmalogen name parsed at SPECIES has no chains to report
-# at MOLECULAR_SPECIES) and raises an unhandled RuntimeException instead of degrading gracefully
-# -- verified on 'PC 34:1', 'TG 52:3', 'PC O-34:1', 'PC P-34:1' with pygoslin 2.2.5. Cap the
-# target at whichever is coarser: the honest ceiling or what was actually parsed.
+# GUARD: never request a target level MORE specific than what was parsed (see Common Errors: RuntimeException).
 target_level = min(LipidLevel.MOLECULAR_SPECIES, claimed_level, key=lambda l: l.value)
 honest_name = lipid.get_lipid_string(target_level)   # 'PC 16:0_18:1' here; unchanged (e.g. 'PC 34:1') for a name that never carried chain detail
 sum_name = lipid.get_lipid_string(LipidLevel.SPECIES) if claimed_level.value >= LipidLevel.SPECIES.value else honest_name
 ```
+
+Report identification counts together with the resolution level and confidence grade; a bare "N lipids identified" is a vanity metric.
 
 ## Per-Method Failure Modes
 
@@ -212,7 +210,7 @@ sum_name = lipid.get_lipid_string(LipidLevel.SPECIES) if claimed_level.value >= 
 - **Trigger:** One global internal standard, or comparing molar abundances across classes after only within-class normalization.
 - **Mechanism:** ESI response is head-group-dominated; a PC and a PE at equal moles give signal differing by factors that can exceed an order of magnitude.
 - **Symptom:** "Class A is N-fold class B" statements; a single IS used for the whole lipidome.
-- **Fix:** One isotope-labeled IS per class; report semi-quantitative within-class unless per-class (and per-adduct) response factors were independently calibrated.
+- **Fix:** One isotope-labeled IS per class (Quantitative Thresholds); report semi-quantitative within-class unless per-class (and per-adduct) response factors were independently calibrated.
 
 ### Ether vs plasmalogen (O-/P-) mis-call
 - **Trigger:** Reporting `P-` (plasmalogen) from a sum composition.
@@ -228,7 +226,7 @@ sum_name = lipid.get_lipid_string(LipidLevel.SPECIES) if claimed_level.value >= 
 | EquiSPLASH = 13 deuterated IS at equal 100 µg/mL | Avanti product spec | equimolar comparative use; SPLASH LIPIDOMIX uses unequal physiological concentrations |
 | Spike IS before extraction | Köfeler 2021 | only a co-extracted IS corrects class-biased recovery (Folch/Bligh-Dyer/MTBE differ for polar minor classes) |
 | MS-DIAL 5 EAD ~14 eV; 96.4% standards delineated, 78.0% sn/OH/C=C correct >1 µM | Takeda 2024 | structural lipidomics yield even with the modern method is incomplete and concentration-dependent |
-| ~half of single-software species-level IDs need orthogonal evidence | Köfeler 2021 (Nat Commun) | 510/1108 features, 130/301 PCs & 55/171 TGs violated the ECN/RT model in an audited published set |
+| ~half of single-software species-level IDs need orthogonal evidence | Köfeler 2021 (Nat Commun) | 510/1108 features, 130/301 PCs & 55/171 TGs violated the ECN/RT model in an audited published set; validate with ECN/RT consistency, a second adduct/polarity, CCS, or manual MS/MS |
 | LipidSearch grades: keep A/B/C, drop D | LipidSearch grade definitions | D = mass-only; A = class + all chains = molecular-species level, NOT sn/C=C resolved |
 | Shotgun infusion below the aggregation regime | Han/Gross protocol literature | above it lipids aggregate, ESI response goes nonlinear, the IS-ratio assumption collapses |
 
@@ -241,7 +239,7 @@ sum_name = lipid.get_lipid_string(LipidLevel.SPECIES) if claimed_level.value >= 
 | `lsea(type = 'chain')` errors | no `type` argument | `lsea` tests class/length/unsat sets automatically; rank with `rank.by = c('logFC','P.Value','adj.P.Val')` |
 | `de_results$FDR` is NULL | wrong column name | `de_analysis` returns limma columns: `adj.P.Val`, `P.Value`, `logFC` |
 | pygoslin `LipidLevel.MOLECULAR_SUBSPECIES` AttributeError | pre-2.0 enum name | current enum is `SPECIES` / `MOLECULAR_SPECIES` / `SN_POSITION` / `STRUCTURE_DEFINED` / `FULL_STRUCTURE` / `COMPLETE_STRUCTURE` |
-| `get_lipid_string(LipidLevel.MOLECULAR_SPECIES)` raises `RuntimeException: LipidSpecies does not know how to create a lipid string for level ...` | requested a target level more specific than what was actually parsed (a sum-composition, ether, or plasmalogen name parsed at `SPECIES` has no chains to invent) | cap the target at `min(MOLECULAR_SPECIES, claimed_level, key=lambda l: l.value)` before calling `get_lipid_string` (see Honest Annotation-Level Assignment code above) |
+| `get_lipid_string(LipidLevel.MOLECULAR_SPECIES)` raises `RuntimeException: LipidSpecies does not know how to create a lipid string for level ...` | requested a target level more specific than what was actually parsed (a sum-composition, ether, or plasmalogen name parsed at `SPECIES` has no chains to invent; reproduced on `PC 34:1`, `TG 52:3`, `PC O-34:1`, `PC P-34:1` with pygoslin 2.2.5) | cap the target at `min(MOLECULAR_SPECIES, claimed_level, key=lambda l: l.value)` before calling `get_lipid_string` (see Honest Annotation-Level Assignment code above) |
 | A sphingolipid name imports with `Class = NA` / lipidr's "couldn't be parsed" warning | lipidr's importer expects the old `d18:1`/`m18:1`/`t18:1` sphingoid prefix, not the `;O2`/`;O1`/`;O3` suffix this Skill documents | rewrite `;O1`/`;O2`/`;O3` to `m`/`d`/`t` before `as_lipidomics_experiment()`/`read_skyline()`; the post-import Class = NA check (see Load/Normalize code above) names any that remain |
 | Elevated LPC reported from shotgun data | in-source fragmentation with no RT to flag it | add the in-source-fragment caveat; confirm with LC-MS RT co-elution before claiming lyso biology |
 
