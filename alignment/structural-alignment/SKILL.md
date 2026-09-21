@@ -128,29 +128,13 @@ For multi-chain complex search over thousands of complexes or more, US-align is 
 
 **Approach:** Use when residue equivalence is already established (e.g. same sequence, different conformations). For unknown correspondence, prefer TM-align / US-align. Pair CA atoms by (chain, residue number, insertion code) over standard residues of the first model. Selecting every atom named `CA` also picks up Ca2+ ions, and pairing by list position then matches ions to residues: apo/holo calmodulin (1CFD/1CLL) printed 13.38 A that way instead of the true 10.83 A over 144 pairs, with no warning because both files had 148 "CA" atoms.
 
-```python
-from Bio.PDB import PDBParser, Superimposer
-
-parser = PDBParser(QUIET=True)
-mobile = parser.get_structure('mobile', 'mobile.pdb')
-reference = parser.get_structure('ref', 'reference.pdb')
-
-def ca_by_residue(structure):
-    return {(c.id, r.id[1], r.id[2]): (r.get_resname(), r['CA']) for c in structure[0] for r in c
-            if r.id[0] == ' ' and 'CA' in r}     # ' ' = standard residue: no waters, ions, ligands
-
-ca_m, ca_r = ca_by_residue(mobile), ca_by_residue(reference)
-keys = sorted(set(ca_m) & set(ca_r))
-assert keys, 'no shared (chain, number, icode): not co-numbered; use TMalign / USalign'
-n_diff = sum(ca_m[k][0] != ca_r[k][0] for k in keys)
-assert n_diff <= 0.2 * len(keys), f'{n_diff}/{len(keys)} paired residues differ in name: offset numbering; use TMalign / USalign'
-sup = Superimposer()
-sup.set_atoms([ca_r[k][1] for k in keys], [ca_m[k][1] for k in keys])
-sup.apply(list(mobile.get_atoms()))
-print(f'RMSD: {sup.rms:.3f} A over {len(keys)} CA pairs')
+```bash
+python examples/biopython_superimposer.py reference.pdb mobile.pdb   # writes mobile_superposed.pdb
 ```
 
-Modified residues written as HETATM (selenomethionine `MSE`, phosphorylated residues; 1-4% of residues in the six real entries checked) are skipped by `r.id[0] == ' '`; they are missing from the pairing, not mis-paired. `examples/biopython_superimposer.py` adds the second refusal: fewer than half the shorter chain paired.
+From Python, `from biopython_superimposer import superpose_ca` and call `superpose_ca(reference_structure, mobile_structure)`; it returns the `Superimposer`, the pair count and the number of pairs with different residue names.
+
+The script refuses two cases: fewer than half the shorter chain paired, or more than 20% of paired residue names differing (offset numbering; `1MBN` vs `1A3N` paired by number would otherwise print 7.5 A over 141 pairs). Modified residues written as HETATM (selenomethionine `MSE`, phosphorylated residues; 1-4% of residues in the six real entries checked) are skipped by `residue.id[0] == ' '`; they are missing from the pairing, not mis-paired.
 
 ## Structural Search at Scale: Foldseek
 
