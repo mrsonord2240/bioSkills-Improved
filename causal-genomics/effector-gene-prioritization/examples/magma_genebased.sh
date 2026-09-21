@@ -33,8 +33,8 @@ magma --bfile "$REF_BFILE" \
     --out "${OUT_PREFIX}_gene"
 
 # Windows note: MAGMA 1.10 on Windows writes "<prefix>.genes.out.txt" (extra .txt)
-# instead of "<prefix>.genes.out" -- the same mismatch documented in SKILL.md's "PoPS
-# Polygenic Priority Score" section for pops.py. Resolve it here too, since the
+# instead of "<prefix>.genes.out" -- the same mismatch documented in
+# references/pops.md for pops.py. Resolve it here too, since the
 # Bonferroni/top-50 steps below read .genes.out directly (verified: this script fails
 # with "No such file or directory" on Windows without this).
 GENES_OUT="${OUT_PREFIX}_gene.genes.out"
