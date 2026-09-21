@@ -109,7 +109,7 @@ universe_ids <- unique(bg_map$ENTREZID)
 
 **Goal:** Collapse the redundant ancestor lineage so one biological signal is one entry, not a dozen.
 
-**Approach:** `simplify()` removes terms whose semantic similarity to a kept term exceeds the cutoff. It operates on ONE ontology (GOSemSim defines similarity within a single DAG), so run BP/MF/CC separately and simplify each - it does NOT de-redundify an `ont='ALL'` object.
+**Approach:** `simplify()` removes terms whose semantic similarity to a kept term exceeds the cutoff. Similarity is defined within ONE ontology (a single DAG), never across BP/MF/CC. Calling it on an `ont='ALL'` object is fine: `simplify()` dispatches on `x@ontology == 'GOALL'` to clusterProfiler's internal `simplify_ALL()`, which splits by `ONTOLOGY`, simplifies each ontology separately and rbinds them (checked on clusterProfiler 4.14.6: a 36-term BP15/CC13/MF8 object came back as 15 terms spanning all three, BP7/CC4/MF4). On an older version, confirm with `selectMethod('simplify', 'enrichResult')` and `exists('simplify_ALL', asNamespace('clusterProfiler'))` before relying on it; if it is absent, split by ontology and simplify each.
 
 ```r
 ego_bp <- enrichGO(gene_list, universe = universe_ids, OrgDb = org.Hs.eg.db, keyType = 'ENTREZID', ont = 'BP', readable = TRUE)
@@ -163,7 +163,7 @@ Swap the OrgDb: `org.Mm.eg.db` (mouse), `org.Dr.eg.db` (zebrafish), `org.Sc.sgd.
 ## Per-Method Failure Modes
 
 ### Whole-genome or default universe
-**Trigger:** omitting `universe=`, or passing the genome when the assay measured fewer genes. **Mechanism:** N defaults to all annotated genes, inflating the denominator with genes that never could have been selected. **Symptom:** a confident table where tissue-restricted / lowly-expressed-gene terms dominate. **Fix:** set `universe=` to the tested-gene set, map foreground and universe identically, report N.
+**Trigger:** omitting `universe=`, or passing the genome when the assay measured fewer genes. **Mechanism:** N defaults to all annotated genes, inflating the denominator with genes that never could have been selected. **Symptom:** spurious terms for tissue-restricted / lowly-expressed genes; the effect scales with list size and background mismatch - on null 150-gene lists against a 12k-gene universe, omitting `universe=` added at most one marginal term (p.adjust 0.033) and often none (checked on clusterProfiler 4.14.6), and the bias grows with the mismatch between the genome and the tested set. **Fix:** set `universe=` to the tested-gene set, map foreground and universe identically, report N.
 
 ### p read without fold enrichment (term-size trap)
 **Trigger:** ranking results by p.adjust alone. **Mechanism:** a 2000-gene term has enormous power at tiny fold enrichment; p scales with term size. **Symptom:** vague broad terms ("cellular process") top the list, specific terms buried. **Fix:** read the `FoldEnrichment` column ((k/n)/(M/N)) alongside p.adjust; trim extremes with minGSSize=10, maxGSSize=500.
@@ -179,9 +179,6 @@ Swap the OrgDb: `org.Mm.eg.db` (mouse), `org.Dr.eg.db` (zebrafish), `org.Sc.sgd.
 
 ### pvalueCutoff misread as raw-p filter
 **Trigger:** concluding "no significant terms" when strong raw p exists. **Mechanism:** `pvalueCutoff` filters p.adjust, not pvalue. **Symptom:** an empty table despite plausible signal. **Fix:** inspect with `pvalueCutoff=1, qvalueCutoff=1`, then judge on p.adjust.
-
-### simplify on ont='ALL'
-**Trigger:** calling `simplify()` on an `ont='ALL'` object. **Mechanism:** semantic similarity is defined within ONE ontology, not across BP/MF/CC. **Symptom:** no error and no warning - `simplify()` silently returns only the first ontology's terms (BP) and drops MF/CC entirely (checked on clusterProfiler 4.14.6: a 36-term BP+CC+MF object came back as 15 terms, all BP). **Fix:** run BP/MF/CC separately and simplify each.
 
 ## Quantitative Thresholds
 
@@ -204,7 +201,6 @@ Swap the OrgDb: `org.Mm.eg.db` (mouse), `org.Dr.eg.db` (zebrafish), `org.Sc.sgd.
 | Empty result table | `pvalueCutoff` filters p.adjust; or universe too large; or IDs lost | set cutoffs to 1 to inspect; fix the universe; check conversion rate |
 | Vague broad terms dominate | ranking by p alone (term-size trap) | read fold enrichment; trim with minGSSize/maxGSSize |
 | Many redundant ancestor terms | GO-DAG true-path propagation | `simplify()` per ontology, or topGO weight01 |
-| simplify silently returns BP only on an `ont='ALL'` object | similarity is per-ontology; no error is raised, MF/CC are dropped | run BP/MF/CC separately |
 | Description column shows IDs not names | not readable | `readable=TRUE` or `setReadable(ego, OrgDb, 'ENTREZID')` |
 | Tested MF when expecting BP | enrichGO default `ont='MF'` | set `ont` explicitly every call |
 

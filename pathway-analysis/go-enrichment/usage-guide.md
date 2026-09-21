@@ -82,7 +82,6 @@ Fold enrichment = GeneRatio / BgRatio, returned directly as `FoldEnrichment` (ch
 ## Tips
 - Always pass the universe (the tested genes, not the genome); this is the deepest ORA error. The genome is defensible only when every gene truly could have been detected.
 - Read the `FoldEnrichment` column, not just p-values: a 2000-gene term beats a 12-gene term on p at a fraction of the effect size.
-- simplify() works on one ontology at a time (semantic similarity is defined within a single DAG); run BP, MF, CC separately and simplify each. On an ont='ALL' object it raises no error - it silently keeps only the first ontology's terms (BP) and drops MF/CC.
 - enrichGO's default ont is 'MF'; set ont explicitly to avoid silently testing the wrong ontology.
 - pvalueCutoff filters the adjusted p; if no terms appear, set pvalueCutoff=1 and qvalueCutoff=1 to inspect everything before loosening real thresholds.
 - After bitr(), deduplicate one-to-many maps and report the conversion rate; flag results when more than ~15% of genes are lost.
