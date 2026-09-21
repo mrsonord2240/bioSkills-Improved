@@ -1,6 +1,6 @@
 ---
 name: bio-reference-operations
-description: Generate consensus sequences and manage reference files using samtools. Use when creating consensus from alignments, indexing references, or creating sequence dictionaries.
+description: Generate consensus sequences and manage reference files using samtools. Use when creating consensus from alignments, indexing references, creating sequence dictionaries, extracting regions, renaming or matching contig names (chr22 vs 22, GRCh38 flavours), or resolving CRAM references.
 tool_type: cli
 primary_tool: samtools
 license: MIT
@@ -41,6 +41,7 @@ Create index for random access to reference sequences.
 samtools faidx reference.fa
 # Creates reference.fa.fai
 ```
+A `.gz` FASTA must be bgzip-compressed; plain gzip (Ensembl/NCBI downloads) fails with `Cannot index files compressed with gzip, please use bgzip`. Recompress with `gunzip -c ref.fa.gz | bgzip > ref.bgz.fa.gz`.
 
 ### Fetch Region from Reference
 ```bash
@@ -95,7 +96,7 @@ Create SAM header dictionary for reference (used by GATK, Picard).
 samtools dict reference.fa -o reference.dict
 ```
 
-GATK and Picard look for `<name>.dict`, where `<name>` is the FASTA file name minus `.gz` and minus its last extension: `genome.fasta` -> `genome.dict`, `ref.fa.gz` -> `ref.dict`. A `genome.fasta.dict` is ignored (GATK 4.6.2.0: `Fasta dict file .../genome.dict for reference .../genome.fasta does not exist`). `examples/prepare_reference.sh` derives the name for any of `.fa`, `.fasta`, `.fna`, `.gz`.
+GATK and Picard look for `<name>.dict`, where `<name>` is the FASTA file name minus `.gz` and minus its last extension: `genome.fasta` -> `genome.dict`, `ref.fa.gz` -> `ref.dict`. GATK ignores `genome.fasta.dict` (GATK 4.6.2.0 HaplotypeCaller: `Fasta dict file .../genome.dict for reference .../genome.fasta does not exist`); Picard 3.5.0 accepts both names, so `<name>.dict` is the safe one for both. `examples/prepare_reference.sh` derives the name for any of `.fa`, `.fasta`, `.fna`, `.gz`.
 
 ### With Assembly Info
 ```bash
@@ -105,9 +106,10 @@ samtools dict -a GRCh38 -s "Homo sapiens" reference.fa -o reference.dict
 ### Dictionary Format
 ```
 @HD VN:1.0 SO:unsorted
-@SQ SN:chr1 LN:248956422 M5:6aef897c3d6ff0c78aff06ac189178dd UR:file:reference.fa
-@SQ SN:chr2 LN:242193529 M5:f98db672eb0993dcfdabafe2a882905c UR:file:reference.fa
+@SQ SN:chr1 LN:248956422 M5:6aef897c3d6ff0c78aff06ac189178dd UR:file:///abs/path/to/reference.fa
+@SQ SN:chr2 LN:242193529 M5:f98db672eb0993dcfdabafe2a882905c UR:file:///abs/path/to/reference.fa
 ```
+`UR` is the absolute `file:///` path of the FASTA (`-u` overrides it). `examples/toy.fa` and `examples/toy.expected.dict` are a two-contig check: `samtools dict -u toy.fa toy.fa | diff - toy.expected.dict` prints nothing.
 
 The `M5:` (MD5) tag is the only definitive reference-identity check -- two references named "GRCh38" with different decoy/alt content have different M5s. CRAM enforces M5 match on read-back. See alignment-validation for BAM-vs-reference M5 cross-check.
 
@@ -151,18 +153,18 @@ samtools dict ref.fa | head -3
 Renaming is a header-only change: BAM records store a contig index, so `samtools reheader` gives records identical to the input except the name. Only do it when the sequences are the same (compare `LN`, and `M5` where the BAM header has it -- a UCSC hg19 `chrM` is not GRCh37 `MT`).
 ```bash
 # map.tsv: old<TAB>new, one contig per line (e.g. chr22<TAB>22, chrM<TAB>MT), or UCSC -> RefSeq from the assembly report:
-grep -v '^#' GCF_000001405.40_GRCh38.p14_assembly_report.txt | tr -d '\r' | awk -F'\t' '$10!="na"{print $10 "\t" $7}' > map.tsv
+grep -v '^#' GCF_000001405.40_GRCh38.p14_assembly_report.txt | tr -d '\r' | awk -F'\t' '$10!="na" && $7!="na"{print $10 "\t" $7}' > map.tsv   # a few UCSC contigs (chrUn_KI270752v1) have no RefSeq accession ("na"): reheader stops with "Duplicate entry na" if they stay
 samtools view -H sample.bam | awk -F'\t' -v OFS='\t' 'NR==FNR{m[$1]=$2; next}
     /^@SQ/{for(i=2;i<=NF;i++) if($i~/^SN:/){n=substr($i,4); if(n in m) $i="SN:" m[n]}} {print}' map.tsv - > renamed.hdr
-samtools reheader renamed.hdr sample.bam > renamed.bam && samtools index renamed.bam
+samtools reheader renamed.hdr sample.bam > renamed.bam.tmp && mv renamed.bam.tmp renamed.bam && samtools index renamed.bam   # a failed reheader leaves no renamed.bam
 
-# UCSC -> Ensembl for the primary chromosomes only (hg38/GRCh38, not hg19):
-samtools view -H sample.bam | sed -e 's/^\(@SQ\tSN:\)chrM/\1MT/' -e 's/^\(@SQ\tSN:\)chr/\1/' > renamed.hdr
+# UCSC -> Ensembl for the primary chromosomes only (hg38/GRCh38, not hg19); chr1_KI..._alt, chrUn_... etc. keep their names
+samtools view -H sample.bam | sed -E -e 's/^(@SQ\tSN:)chrM\t/\1MT\t/' -e 's/^(@SQ\tSN:)chr([0-9]+|X|Y)\t/\1\2\t/' > renamed.hdr
 
 # Check: contig names and lengths now equal the reference's
 diff <(samtools view -H renamed.bam | awk '/^@SQ/{print $2, $3}') <(awk '{print "SN:"$1, "LN:"$2}' ref.fa.fai) && echo OK
 ```
-`SA:Z:`, `XA:Z:` and `OA:Z:` tags hold contig names as text and keep the old names; drop them with `samtools view -b -x SA -x XA renamed.bam` if a downstream tool reads them. `samtools reheader` also accepts a CRAM (checked on 1.24; it warns `Failed to populate reference` when no `REF_PATH`/cache holds the renamed reference, and the decode with `-T` is identical). For VCF use `bcftools annotate --rename-chrs map.tsv`.
+`SA:Z:`, `XA:Z:` and `OA:Z:` tags hold contig names as text and keep the old names; drop them with `samtools view -b -x SA -x XA renamed.bam` if a downstream tool reads them. `samtools reheader` also accepts a CRAM (checked on 1.24: exit 0, header `M5` kept, records decode identically with `-T` the renamed reference; decoding without `-T` needs a `REF_PATH`/cache entry for that `M5`). For VCF use `bcftools annotate --rename-chrs map.tsv`.
 
 ## samtools consensus - Generate Consensus
 
@@ -227,9 +229,10 @@ samtools consensus --config r10.4_sup  input.bam -o consensus.fa   # ONT R10.4+ 
 samtools consensus --config ultima     input.bam -o consensus.fa   # Ultima Genomics
 samtools consensus --config hiseq      input.bam -o consensus.fa   # Illumina
 
-# Report ref base where consensus unavailable (low coverage; -T added in samtools 1.22; bases keep the FASTA's case)
+# Report the ref base at columns with no reads (depth 0; -T added in samtools 1.22; bases keep the FASTA's case)
 samtools consensus -T ref.fa input.bam -o consensus.fa
 ```
+`-T` fills only depth-0 columns: columns below `-d` and ambiguous columns stay `N` (planted 450-`N` result at `-d 3`: 300 zero-depth columns filled, 150 below `-d` stay `N`).
 
 ### samtools consensus vs bcftools consensus
 
@@ -289,10 +292,11 @@ pysam coordinates are 0-based half-open; samtools regions are 1-based inclusive 
 regions = [('chr1', 0, 10000), ('chr2', 5000, 15000)]
 with pysam.FastaFile('reference.fa') as ref:
     for chrom, start, end in regions:
-        end = min(end, ref.get_reference_length(chrom))
-        if start >= end:
-            print(f'skip {chrom}:{start + 1}-{end}: outside the contig')
+        length = ref.get_reference_length(chrom)
+        if start >= length:
+            print(f'skip {chrom}:{start + 1}-{end}: outside the contig ({length} bp)')
             continue
+        end = min(end, length)
         seq = ref.fetch(chrom, start, end)
         print(f'>{chrom}:{start + 1}-{end}')
         for i in range(0, len(seq), 60):
@@ -326,7 +330,7 @@ The Python majority-vote consensus below is illustrative, NOT production. `samto
 
 `pileup()` filters before the vote (pysam 0.24.1 defaults): bases with quality < 13, unmapped / secondary / QC-fail / duplicate reads, and orphan reads are dropped, and overlapping mates are counted once. `max_depth` defaults to 8000 (deeper columns are subsampled), so raise it.
 
-`build_consensus` returns exactly `end - start` characters, so index `i` is reference position `start + i`. `pileup()` skips uncovered columns; the function starts from all-`N` and fills only the columns it sees. Building the string by appending per pileup column shifts everything after the first coverage gap (581 false differences vs 1 true on the real chr22 slice).
+`build_consensus` returns exactly `end - start` characters, so index `i` is reference position `start + i`. `pileup()` skips uncovered columns; the function starts from all-`N` and fills only the columns it sees. Building the string by appending per pileup column shifts everything after the first coverage gap (581 false differences vs 1 true on the real chr22 slice). A column deleted in every read counts no base, so it is `N`; insertions are ignored.
 
 ```python
 import pysam
@@ -361,7 +365,7 @@ def compare_to_ref(bam_path, ref_path, chrom, start, end, min_depth=3):
             for i, (c, r) in enumerate(zip(consensus, reference))
             if c != 'N' and c != r]
 ```
-Ties (50/50 columns) go to the first base counted; `samtools consensus` calls them `N` (or an IUPAC code with `--ambig`) and weights bases by quality, so expect a few different calls at het columns and at shallow, low-quality columns (chr22 slice: 1 difference by majority vote and by `-m simple --call-fract 0.5 --min-BQ 13`, 2 by the default Bayesian mode).
+A reference `N` or IUPAC code never equals a called base, so those positions are listed as differences (a 30-base `N` run gave 30 entries). Ties (50/50 columns) go to the first base counted; `samtools consensus` calls them `N` (or an IUPAC code with `--ambig`) and weights bases by quality, so expect a few different calls at het columns and at shallow, low-quality columns (chr22 slice 1952-4617 at `-d 3`: 1 difference by majority vote and by `-m simple --call-fract 0.5 --min-BQ 13`, 2 by the default Bayesian mode; at the default `-d 1`: 5 and 4).
 
 ### Header Dict for Writing a BAM (not a .dict file)
 `pysam.AlignmentFile(..., 'wb', header=header)` takes this dict. It has no `M5`, so it is not a sequence dictionary: use `samtools dict` for that.
