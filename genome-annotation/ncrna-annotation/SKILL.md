@@ -4,6 +4,7 @@ description: Identifies non-coding RNAs (tRNA, rRNA, snoRNA, snRNA, riboswitches
 tool_type: cli
 primary_tool: Infernal
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

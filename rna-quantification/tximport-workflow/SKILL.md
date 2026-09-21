@@ -4,6 +4,7 @@ description: Import transcript-level quantifications from Salmon/kallisto/RSEM i
 tool_type: r
 primary_tool: tximport
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Rank and prioritize neoantigen/epitope candidates by likely T-cell 
 tool_type: python
 primary_tool: NeoFox
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

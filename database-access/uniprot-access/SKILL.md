@@ -4,6 +4,7 @@ description: Query UniProt's REST API (post-2022 endpoint at rest.uniprot.org) f
 tool_type: python
 primary_tool: requests
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Comprehensive quality control for CLIP-seq libraries (eCLIP, iCLIP,
 tool_type: mixed
 primary_tool: preseq
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Read biological sequence files (FASTA, FASTQ, GenBank, EMBL, ABI, S
 tool_type: python
 primary_tool: Bio.SeqIO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

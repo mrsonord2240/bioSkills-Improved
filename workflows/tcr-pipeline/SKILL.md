@@ -16,6 +16,7 @@ qc_checkpoints:
   - after_assemble: "Clonotype count plausible; report UMI/molecule counts, not reads, on UMI libraries"
   - before_diversity: "All samples downsampled to a common depth, else diversity/overlap are confounded by library size"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

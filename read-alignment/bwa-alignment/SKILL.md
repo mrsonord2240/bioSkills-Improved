@@ -4,6 +4,7 @@ description: Aligns DNA short reads (paired- or single-end) to a reference genom
 tool_type: cli
 primary_tool: bwa-mem2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

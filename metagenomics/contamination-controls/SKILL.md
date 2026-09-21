@@ -4,6 +4,7 @@ description: Cleans a shotgun metagenome of everything that is not the target co
 tool_type: mixed
 primary_tool: decontam
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

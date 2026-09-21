@@ -4,6 +4,7 @@ description: Estimates time-scaled phylogenies, molecular-clock rates, effective
 tool_type: mixed
 primary_tool: BEAST2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

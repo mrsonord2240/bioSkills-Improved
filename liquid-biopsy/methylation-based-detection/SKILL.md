@@ -4,6 +4,7 @@ description: Detects cancer and infers tissue-of-origin from cfDNA methylation b
 tool_type: mixed
 primary_tool: MethylDackel
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

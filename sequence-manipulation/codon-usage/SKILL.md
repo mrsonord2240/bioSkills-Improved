@@ -4,6 +4,7 @@ description: Analyze codon usage and calculate CAI (Codon Adaptation Index), RSC
 tool_type: python
 primary_tool: Bio.SeqUtils.CodonAdaptationIndex
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

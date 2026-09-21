@@ -4,6 +4,7 @@ description: Resolve the architecture of focal oncogene amplifications — extra
 tool_type: cli
 primary_tool: AmpliconArchitect
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

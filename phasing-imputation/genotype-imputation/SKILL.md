@@ -4,6 +4,7 @@ description: Imputes untyped genotypes against a phased reference panel with Bea
 tool_type: cli
 primary_tool: Beagle
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

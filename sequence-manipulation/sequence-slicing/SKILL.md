@@ -4,6 +4,7 @@ description: Slice, extract, and concatenate biological sequences and annotated 
 tool_type: python
 primary_tool: Bio.Seq
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

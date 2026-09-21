@@ -4,6 +4,7 @@ description: Predicts and prioritizes miRNA target genes with seed-based tools (
 tool_type: mixed
 primary_tool: miRanda
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

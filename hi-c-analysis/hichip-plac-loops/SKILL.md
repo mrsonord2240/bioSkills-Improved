@@ -4,6 +4,7 @@ description: Calls significant loops from protein-directed and targeted 3C assay
 tool_type: mixed
 primary_tool: fithichip
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

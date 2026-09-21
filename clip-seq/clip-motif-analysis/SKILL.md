@@ -4,6 +4,7 @@ description: Discover RBP binding motifs from CLIP-seq peaks or single-nucleotid
 tool_type: mixed
 primary_tool: HOMER
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

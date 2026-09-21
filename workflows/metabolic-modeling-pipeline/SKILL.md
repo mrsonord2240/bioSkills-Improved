@@ -17,6 +17,7 @@ qc_checkpoints:
   - after_fba: "Realistic growth rate, major pathways active"
   - after_essentiality: "Core essential genes match literature >70%"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

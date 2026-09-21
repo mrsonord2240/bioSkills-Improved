@@ -22,6 +22,7 @@ qc_checkpoints:
   - after_peaks: "FRiP >0.2, TSS enrichment >5 (ENCODE v3; v4 thresholds differ, do not mix)"
   - after_consensus: "Fixed-width (Corces 501 bp) consensus built before counting for differential"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

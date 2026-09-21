@@ -4,6 +4,7 @@ description: Annotate copy number variant segments with overlapping genes, dosag
 tool_type: mixed
 primary_tool: bedtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

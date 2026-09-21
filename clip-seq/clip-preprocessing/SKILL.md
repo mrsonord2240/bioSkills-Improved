@@ -4,6 +4,7 @@ description: Preprocess CLIP-seq reads (eCLIP, iCLIP, iCLIP2, iCLIP3, irCLIP, PA
 tool_type: cli
 primary_tool: umi_tools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

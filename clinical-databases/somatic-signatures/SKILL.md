@@ -4,6 +4,7 @@ description: Extracts and assigns COSMIC v3.4 mutational signatures (86 SBS / 11
 tool_type: mixed
 primary_tool: SigProfilerAssignment
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

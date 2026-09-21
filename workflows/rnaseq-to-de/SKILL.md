@@ -21,6 +21,7 @@ qc_checkpoints:
   - after_import: "tx2gene release matches the Salmon index; ID conversion loses few transcripts"
   - after_de: "Dispersion trend sane, PCA separates condition not batch, no Cook's outliers"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: "Models continuous temporal trajectories from BULK or time-resolved
 tool_type: mixed
 primary_tool: mgcv
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

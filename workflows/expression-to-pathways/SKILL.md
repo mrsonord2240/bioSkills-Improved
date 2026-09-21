@@ -16,6 +16,7 @@ qc_checkpoints:
   - generation_choice: "ORA-vs-GSEA fork decided BEFORE running; a ranking for all genes -> GSEA, a pre-selected list -> ORA"
   - reproducibility: "Tool + database version/date, ranking metric, p-adjust method, and universe recorded; set.seed for GSEA"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Queries PharmGKB / CPIC / DPWG for drug-gene interactions; calls CY
 tool_type: mixed
 primary_tool: PharmCAT
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

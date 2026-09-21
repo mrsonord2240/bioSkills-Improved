@@ -4,6 +4,7 @@ description: Identify differentially bound regions across CLIP-seq conditions (k
 tool_type: r
 primary_tool: DEWSeq
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

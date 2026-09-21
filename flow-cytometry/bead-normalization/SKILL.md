@@ -4,6 +4,7 @@ description: Bead-based signal normalization and cross-batch harmonization for C
 tool_type: r
 primary_tool: CATALYST
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

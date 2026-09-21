@@ -4,6 +4,7 @@ description: Discovers shared and view-specific latent factors across bulk multi
 tool_type: r
 primary_tool: MOFA2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

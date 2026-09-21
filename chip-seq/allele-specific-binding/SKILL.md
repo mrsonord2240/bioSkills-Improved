@@ -4,6 +4,7 @@ description: Detects allele-specific transcription factor or histone modificatio
 tool_type: mixed
 primary_tool: WASP
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Compares how a rhythm CHANGES between conditions, genotypes, treatm
 tool_type: r
 primary_tool: limorhyde
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

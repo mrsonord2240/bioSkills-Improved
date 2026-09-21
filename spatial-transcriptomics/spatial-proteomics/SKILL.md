@@ -4,6 +4,7 @@ description: Analyzes multiplexed antibody-imaging data (CODEX/PhenoCycler, MIBI
 tool_type: python
 primary_tool: scimap
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

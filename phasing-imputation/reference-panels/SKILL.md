@@ -4,6 +4,7 @@ description: Selects and prepares the reference panel that phasing/imputation co
 tool_type: cli
 primary_tool: bcftools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

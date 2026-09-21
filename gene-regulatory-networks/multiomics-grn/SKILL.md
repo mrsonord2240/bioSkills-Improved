@@ -4,6 +4,7 @@ description: Build enhancer-driven gene regulatory networks (eGRNs) by integrati
 tool_type: python
 primary_tool: SCENIC+
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

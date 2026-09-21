@@ -4,6 +4,7 @@ description: Assign cell types from marker expression in IMC/MIBI data using clu
 tool_type: python
 primary_tool: scanpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -14,6 +14,7 @@ qc_checkpoints:
   - after_activity_scoring: "AUCell scores separate known cell types"
   - after_perturbation: "Predicted shifts match known biology"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Calculate assembly and sequence statistics (N50/L50, auN, NG50/NGA5
 tool_type: python
 primary_tool: Bio.SeqIO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

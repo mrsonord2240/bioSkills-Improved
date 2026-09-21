@@ -4,6 +4,7 @@ description: Treats a ctDNA assay as a molecule-counting experiment at the Poiss
 tool_type: python
 primary_tool: scipy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

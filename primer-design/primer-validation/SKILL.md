@@ -4,6 +4,7 @@ description: Validates chosen PCR/qPCR oligos for intramolecular thermodynamic l
 tool_type: python
 primary_tool: primer3-py
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

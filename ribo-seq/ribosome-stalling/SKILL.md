@@ -4,6 +4,7 @@ description: Detect ribosome pausing and stalling at codon resolution from Ribo-
 tool_type: python
 primary_tool: Plastid
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

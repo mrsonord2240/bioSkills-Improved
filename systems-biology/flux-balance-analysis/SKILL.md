@@ -4,6 +4,7 @@ description: Performs flux balance analysis (FBA), flux variability analysis (FV
 tool_type: python
 primary_tool: cobrapy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: "Align V(D)J reads and assemble TCR/BCR clonotypes with MiXCR, driv
 tool_type: cli
 primary_tool: MiXCR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

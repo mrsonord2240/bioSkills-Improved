@@ -17,6 +17,7 @@ qc_checkpoints:
   - after_peaks: "DRACH enrichment P-value <1e-50 on the peak SET (sanity check, never a per-peak filter)"
   - after_metagene: "Guitar metagene shows the stop-codon/3'UTR-proximal peak; else STOP (IP failure)"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

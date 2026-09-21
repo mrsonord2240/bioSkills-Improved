@@ -4,6 +4,7 @@ description: Generate consensus FASTA sequences by applying VCF variants onto a 
 tool_type: cli
 primary_tool: bcftools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

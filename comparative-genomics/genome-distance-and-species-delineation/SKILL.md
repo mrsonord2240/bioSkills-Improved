@@ -4,6 +4,7 @@ description: Compute genome-to-genome distances (ANI, AAI, dDDH, k-mer Mash) and
 tool_type: cli
 primary_tool: skani
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

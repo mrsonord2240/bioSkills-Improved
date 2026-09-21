@@ -4,6 +4,7 @@ description: Call germline SNPs and indels from a BAM/CRAM with bcftools mpileup
 tool_type: cli
 primary_tool: bcftools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

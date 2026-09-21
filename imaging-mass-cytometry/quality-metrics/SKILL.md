@@ -4,6 +4,7 @@ description: Quality control for IMC/MIBI data across pixel, channel, image, sli
 tool_type: mixed
 primary_tool: CATALYST
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

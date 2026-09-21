@@ -4,6 +4,7 @@ description: Calculate nucleotide and protein sequence properties (GC content, G
 tool_type: python
 primary_tool: Bio.SeqUtils
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

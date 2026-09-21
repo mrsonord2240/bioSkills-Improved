@@ -4,6 +4,7 @@ description: Create and manipulate Seq, MutableSeq, and SeqRecord objects using 
 tool_type: python
 primary_tool: Bio.Seq
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

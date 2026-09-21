@@ -4,6 +4,7 @@ description: Classify constitutional (germline) copy number variants for clinica
 tool_type: mixed
 primary_tool: ClassifyCNV
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

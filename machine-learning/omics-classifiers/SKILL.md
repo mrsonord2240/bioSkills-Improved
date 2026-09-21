@@ -4,6 +4,7 @@ description: Builds diagnostic and prognostic classifiers on omics feature matri
 tool_type: python
 primary_tool: sklearn
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

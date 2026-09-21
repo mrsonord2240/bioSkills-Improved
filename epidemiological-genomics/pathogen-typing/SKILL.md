@@ -4,6 +4,7 @@ description: Assigns isolate identity at the right resolution for the question -
 tool_type: mixed
 primary_tool: chewBBACA
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

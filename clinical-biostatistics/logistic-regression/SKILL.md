@@ -4,6 +4,7 @@ description: Performs logistic regression for clinical trial outcomes (binary, o
 tool_type: python
 primary_tool: statsmodels
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

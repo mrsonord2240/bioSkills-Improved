@@ -4,6 +4,7 @@ description: Detects TAD boundaries from balanced Hi-C contact matrices via the 
 tool_type: mixed
 primary_tool: cooltools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

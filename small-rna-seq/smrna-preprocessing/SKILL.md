@@ -4,6 +4,7 @@ description: Trims kit-specific 3' adapters, strips UMIs or 4N degenerate ends, 
 tool_type: cli
 primary_tool: cutadapt
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

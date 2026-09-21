@@ -4,6 +4,7 @@ description: Identify direct miRNA-target interactions from AGO HITS-CLIP, AGO-C
 tool_type: mixed
 primary_tool: chimeric-eCLIP
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

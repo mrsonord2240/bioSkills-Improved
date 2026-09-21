@@ -4,6 +4,7 @@ description: Estimates haplotype phase from population linkage disequilibrium wi
 tool_type: cli
 primary_tool: SHAPEIT5
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

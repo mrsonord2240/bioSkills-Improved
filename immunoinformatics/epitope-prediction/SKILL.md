@@ -4,6 +4,7 @@ description: Predict B-cell and T-cell epitopes for vaccine antigen design and e
 tool_type: python
 primary_tool: BepiPred
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

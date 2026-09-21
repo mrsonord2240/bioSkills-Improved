@@ -4,6 +4,7 @@ description: Predicts protein and complex structures with deep-learning models (
 tool_type: python
 primary_tool: ESMFold
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

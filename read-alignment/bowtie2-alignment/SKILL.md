@@ -4,6 +4,7 @@ description: Aligns DNA short reads to a reference with Bowtie2, choosing end-to
 tool_type: cli
 primary_tool: bowtie2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

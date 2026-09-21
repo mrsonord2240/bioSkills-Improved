@@ -4,6 +4,7 @@ description: Tests individual CpG sites for differential methylation (DMC/DMP) f
 tool_type: mixed
 primary_tool: limma
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

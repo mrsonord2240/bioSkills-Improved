@@ -4,6 +4,7 @@ description: Authors portable, strongly-typed bioinformatics pipelines in the Co
 tool_type: cli
 primary_tool: cwltool
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Estimates per-spot cell type composition of spatial transcriptomics
 tool_type: python
 primary_tool: cell2location
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

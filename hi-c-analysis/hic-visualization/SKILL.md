@@ -4,6 +4,7 @@ description: Renders Hi-C contact matrices honestly and reproducibly with matplo
 tool_type: python
 primary_tool: matplotlib
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

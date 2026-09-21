@@ -4,6 +4,7 @@ description: Detects contamination in sequencing reads - cross-species (FastQ Sc
 tool_type: cli
 primary_tool: fastq_screen
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

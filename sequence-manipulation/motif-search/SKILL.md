@@ -4,6 +4,7 @@ description: Find sequence motifs, degenerate IUPAC patterns, and transcription-
 tool_type: python
 primary_tool: Bio.motifs
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Infer or annotate TCR antigen specificity by unsupervised clusterin
 tool_type: python
 primary_tool: tcrdist3
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

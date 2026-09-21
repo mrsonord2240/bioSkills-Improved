@@ -4,6 +4,7 @@ description: Creates DE-specific diagnostic and result visualizations using DESe
 tool_type: r
 primary_tool: DESeq2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

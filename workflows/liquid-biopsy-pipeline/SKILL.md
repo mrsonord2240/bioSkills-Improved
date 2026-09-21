@@ -20,6 +20,7 @@ qc_checkpoints:
   - after_tf: "TF above the ~3% ichorCNA LoD to trust the value (below = below detection, not low burden)"
   - after_mutation: "VarDict -f 0.005 is a reporting floor, NOT a detection threshold: confirm each call against a per-locus background-error model (PoN or smCounter2) before reporting; CHIP-subtracted against matched WBC"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

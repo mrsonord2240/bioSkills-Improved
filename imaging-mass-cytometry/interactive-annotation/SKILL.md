@@ -4,6 +4,7 @@ description: Interactive cell annotation and image QC for IMC/MIBI using napari,
 tool_type: python
 primary_tool: napari
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

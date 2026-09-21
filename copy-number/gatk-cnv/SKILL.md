@@ -4,6 +4,7 @@ description: Call copy number variants with the GATK best-practices workflows â€
 tool_type: cli
 primary_tool: gatk
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

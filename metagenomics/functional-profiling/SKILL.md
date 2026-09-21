@@ -4,6 +4,7 @@ description: Profiles the functional potential of shotgun metagenomes with HUMAn
 tool_type: cli
 primary_tool: HUMAnN
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Profiles a genome from raw reads BEFORE assembly with a k-mer spect
 tool_type: cli
 primary_tool: GenomeScope2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Judges whether a macromolecular model (or a region of it) is reliab
 tool_type: python
 primary_tool: Bio.PDB
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

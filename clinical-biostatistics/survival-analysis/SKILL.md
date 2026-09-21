@@ -4,6 +4,7 @@ description: Performs time-to-event analysis for clinical trials including Cox p
 tool_type: mixed
 primary_tool: lifelines
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

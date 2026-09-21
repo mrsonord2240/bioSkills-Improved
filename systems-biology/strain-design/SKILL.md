@@ -4,6 +4,7 @@ description: Computes metabolic-engineering strain designs on genome-scale model
 tool_type: python
 primary_tool: straindesign
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

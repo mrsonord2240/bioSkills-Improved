@@ -4,6 +4,7 @@ description: Analyzes time-series and longitudinal RNA-seq for differential expr
 tool_type: r
 primary_tool: DESeq2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

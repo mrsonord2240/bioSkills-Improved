@@ -16,6 +16,7 @@ qc_checkpoints:
   - after_diversity: "Sampling depth declared; dropped-sample list reported"
   - after_da: "Consensus of >=2 CoDA tools on unrarefied counts; tools named"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

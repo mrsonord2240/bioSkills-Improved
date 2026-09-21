@@ -5,6 +5,7 @@ tool_type: mixed
 primary_tool: viridis
 goal_approach_exempt: true
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

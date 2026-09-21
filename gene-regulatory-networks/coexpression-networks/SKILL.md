@@ -4,6 +4,7 @@ description: Build weighted gene co-expression networks to identify modules of c
 tool_type: r
 primary_tool: WGCNA
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

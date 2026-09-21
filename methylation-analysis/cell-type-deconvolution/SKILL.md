@@ -4,6 +4,7 @@ description: Estimates cell-type composition from bulk DNA methylation and uses 
 tool_type: r
 primary_tool: EpiDISH
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

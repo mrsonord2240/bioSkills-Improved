@@ -4,6 +4,7 @@ description: Identifies super-enhancers from H3K27ac, MED1, or BRD4 ChIP-seq usi
 tool_type: mixed
 primary_tool: ROSE
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

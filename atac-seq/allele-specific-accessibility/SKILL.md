@@ -4,6 +4,7 @@ description: Detect allele-specific chromatin accessibility from ATAC-seq using 
 tool_type: mixed
 primary_tool: WASP
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

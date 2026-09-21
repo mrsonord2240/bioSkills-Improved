@@ -4,6 +4,7 @@ description: Build sequence logos from aligned DNA, RNA, or protein motifs using
 tool_type: mixed
 primary_tool: ggseqlogo
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

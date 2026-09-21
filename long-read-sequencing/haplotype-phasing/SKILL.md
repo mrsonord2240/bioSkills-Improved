@@ -4,6 +4,7 @@ description: Phases small variants, SVs, and methylation from Oxford Nanopore an
 tool_type: cli
 primary_tool: whatshap
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

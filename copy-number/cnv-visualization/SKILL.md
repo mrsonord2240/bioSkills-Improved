@@ -4,6 +4,7 @@ description: Visualize copy number profiles, segments, allele-specific tracks, a
 tool_type: mixed
 primary_tool: matplotlib
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

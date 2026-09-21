@@ -4,6 +4,7 @@ description: Detects and removes contamination in genome assemblies via two disj
 tool_type: cli
 primary_tool: CheckM2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

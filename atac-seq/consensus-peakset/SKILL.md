@@ -4,6 +4,7 @@ description: Build a differential-ready consensus peakset from per-replicate ATA
 tool_type: mixed
 primary_tool: bedtools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

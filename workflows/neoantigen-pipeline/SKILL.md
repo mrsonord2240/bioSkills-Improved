@@ -18,6 +18,7 @@ qc_checkpoints:
   - after_neoantigen: "Expressed (RNA-confirmed); clonality via CCF from purity+CN, not raw VAF"
   - after_scoring: "Top candidates are a tier-1 hypothesis list for MS + T-cell validation"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

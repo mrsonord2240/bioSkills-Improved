@@ -4,6 +4,7 @@ description: Calls HLA class I and class II alleles at 2/4/6/8-field resolution 
 tool_type: cli
 primary_tool: T1K
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

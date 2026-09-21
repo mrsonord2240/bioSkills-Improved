@@ -4,6 +4,7 @@ description: Identify spatially coherent tissue domains (regions like cortical l
 tool_type: python
 primary_tool: squidpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

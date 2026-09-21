@@ -20,6 +20,7 @@ qc_checkpoints:
   - after_atac_qc: "TSS enrichment >2, nucleosome signal <4"
   - after_wnn: "Joint embedding separates cell types"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

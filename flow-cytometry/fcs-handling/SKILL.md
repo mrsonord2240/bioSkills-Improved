@@ -4,6 +4,7 @@ description: Reads, inspects, and writes Flow Cytometry Standard (FCS) files fro
 tool_type: mixed
 primary_tool: flowCore
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

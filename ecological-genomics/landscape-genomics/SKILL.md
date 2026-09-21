@@ -4,6 +4,7 @@ description: Tests genotype-environment associations and identifies adaptive loc
 tool_type: r
 primary_tool: LEA
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

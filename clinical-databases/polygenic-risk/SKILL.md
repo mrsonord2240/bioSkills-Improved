@@ -4,6 +4,7 @@ description: Constructs and validates polygenic risk scores using LDpred2-auto, 
 tool_type: mixed
 primary_tool: PGS Catalog Calculator
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Reconstructs single cells from sub-cellular spatial capture units (
 tool_type: python
 primary_tool: bin2cell
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

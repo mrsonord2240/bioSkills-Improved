@@ -19,6 +19,7 @@ qc_checkpoints:
   - after_balance: "balance=True returns finite weights; masked bins are NaN by design"
   - after_analysis: "Eigenvector sign phased by GC; feature scale matches the resolution"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

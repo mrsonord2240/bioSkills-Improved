@@ -4,6 +4,7 @@ description: Runs all-in-one FASTQ preprocessing with fastp in a single pass - a
 tool_type: cli
 primary_tool: fastp
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

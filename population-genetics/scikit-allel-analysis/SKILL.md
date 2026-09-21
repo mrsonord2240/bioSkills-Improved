@@ -4,6 +4,7 @@ description: "In-memory Python population genetics with scikit-allel - GenotypeA
 tool_type: python
 primary_tool: scikit-allel
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

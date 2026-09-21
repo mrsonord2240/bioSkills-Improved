@@ -4,6 +4,7 @@ description: "Infers and describes population structure with PCA (plink2 --pca, 
 tool_type: mixed
 primary_tool: plink2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

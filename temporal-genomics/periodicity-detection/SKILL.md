@@ -4,6 +4,7 @@ description: Discovers a periodic signal of UNKNOWN period in time-series omics 
 tool_type: python
 primary_tool: scipy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Infer integer allele-specific copy number, tumor purity, and ploidy
 tool_type: mixed
 primary_tool: ascat
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -5,6 +5,7 @@ tool_type: r
 primary_tool: RBesT
 goal_approach_exempt: true
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Build genome-browser-style multi-track figures with pyGenomeTracks 
 tool_type: mixed
 primary_tool: pyGenomeTracks
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

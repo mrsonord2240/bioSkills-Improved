@@ -4,6 +4,7 @@ description: Builds tissue-, cell-type-, and condition-specific metabolic models
 tool_type: python
 primary_tool: cobrapy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

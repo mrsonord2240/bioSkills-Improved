@@ -17,6 +17,7 @@ qc_checkpoints:
   - before_rhythm_detection: "GATE: design covers >=2 full cycles AND >=6-8 samples/cycle at ~even spacing AND collection order was randomized; else SKIP rhythm detection"
   - after_enrichment: "At least 3 clusters with significant GO terms at FDR <0.05; background = temporal genes, not the genome"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

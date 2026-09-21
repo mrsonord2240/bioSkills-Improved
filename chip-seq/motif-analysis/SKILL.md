@@ -4,6 +4,7 @@ description: Discovers de novo motifs and tests known motif enrichment in ChIP-s
 tool_type: cli
 primary_tool: HOMER
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

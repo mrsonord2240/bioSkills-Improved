@@ -4,6 +4,7 @@ description: Detects putative ligand-binding pockets and druggable cavities de n
 tool_type: mixed
 primary_tool: fpocket
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

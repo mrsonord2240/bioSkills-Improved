@@ -24,6 +24,7 @@ qc_checkpoints:
   - after_scaffolding: "Contact map shows clean diagonal; off-diagonal blocks inspected/broken before calling chromosome-scale"
   - final_three_axis_qc: "Contiguity (auN/NG50 vs profiled size) + completeness (BUSCO/compleasm) + correctness (Merqury QV) all reported; never N50 alone"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

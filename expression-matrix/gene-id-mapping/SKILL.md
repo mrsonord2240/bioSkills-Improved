@@ -4,6 +4,7 @@ description: Maps between gene identifier systems (Ensembl, Entrez, HGNC symbol,
 tool_type: mixed
 primary_tool: biomaRt
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Balances Hi-C contact matrices (ICE via cooler.balance_cooler, KR/S
 tool_type: python
 primary_tool: cooler
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

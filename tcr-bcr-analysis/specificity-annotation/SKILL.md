@@ -4,6 +4,7 @@ description: Maps TCR/BCR receptor sequences toward candidate antigen specificit
 tool_type: mixed
 primary_tool: tcrdist3
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

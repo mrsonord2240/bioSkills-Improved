@@ -4,6 +4,7 @@ description: "Performs probe filtering and sample-level QC on Illumina Infinium 
 tool_type: r
 primary_tool: minfi
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

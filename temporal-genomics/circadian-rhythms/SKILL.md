@@ -4,6 +4,7 @@ description: Tests and estimates rhythmicity at a PRE-SPECIFIED period (canonica
 tool_type: mixed
 primary_tool: CosinorPy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

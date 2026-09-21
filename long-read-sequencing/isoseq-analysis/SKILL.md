@@ -5,6 +5,7 @@ tool_type: mixed
 primary_tool: SQANTI3
 goal_approach_exempt: true
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

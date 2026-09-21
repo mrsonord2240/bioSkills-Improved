@@ -18,6 +18,7 @@ qc_checkpoints:
   - after_diversity: "Hill numbers reported as effective species counts (not raw Shannon); coverage-based rarefaction at C=0.95; extrapolation bounded at 2x reference (doubling rule); sample completeness >80%"
   - after_ordination: "PERMANOVA + PERMDISP reported TOGETHER (Anderson & Walsh 2013); if betadisper significant, location conclusion is not supported"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

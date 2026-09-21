@@ -20,6 +20,7 @@ qc_checkpoints:
   - after_structure: "No population stratification bias"
   - after_association: "Lambda ~1.0, expected QQ plot"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

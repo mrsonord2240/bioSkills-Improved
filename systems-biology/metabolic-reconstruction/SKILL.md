@@ -4,6 +4,7 @@ description: Builds draft genome-scale metabolic models from an annotated genome
 tool_type: cli
 primary_tool: CarveMe
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

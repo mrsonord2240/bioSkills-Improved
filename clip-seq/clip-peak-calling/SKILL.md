@@ -4,6 +4,7 @@ description: Call protein-RNA binding sites from CLIP-seq BAM with CLIPper, Pure
 tool_type: cli
 primary_tool: CLIPper
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

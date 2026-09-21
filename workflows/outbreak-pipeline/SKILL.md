@@ -16,6 +16,7 @@ qc_checkpoints:
   - after_phylodynamics: "Root-to-tip R2 >=0.3, clock rate plausible"
   - after_transmission: "Transmission pairs consistent with epi data"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

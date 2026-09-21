@@ -4,6 +4,7 @@ description: Maps protein-protein and protein-ligand interfaces with Bio.PDB, co
 tool_type: python
 primary_tool: Bio.PDB
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

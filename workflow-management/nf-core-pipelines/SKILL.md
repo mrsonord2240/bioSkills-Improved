@@ -4,6 +4,7 @@ description: Runs and configures curated nf-core community Nextflow pipelines (r
 tool_type: cli
 primary_tool: nf-core
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Sequence-based deep learning for ATAC-seq using chromBPNet, BPNet, 
 tool_type: python
 primary_tool: chrombpnet
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

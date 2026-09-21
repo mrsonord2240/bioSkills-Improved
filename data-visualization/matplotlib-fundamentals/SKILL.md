@@ -5,6 +5,7 @@ tool_type: python
 primary_tool: matplotlib
 goal_approach_exempt: true
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

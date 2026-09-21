@@ -4,6 +4,7 @@ description: Decides how to preprocess plasma cfDNA sequencing data so the recov
 tool_type: mixed
 primary_tool: fgbio
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

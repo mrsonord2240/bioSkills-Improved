@@ -4,6 +4,7 @@ description: Profiles RNA-binding protein targets without antibody or UV crossli
 tool_type: mixed
 primary_tool: STAMP
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

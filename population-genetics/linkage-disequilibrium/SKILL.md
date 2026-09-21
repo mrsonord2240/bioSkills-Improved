@@ -4,6 +4,7 @@ description: Computes linkage disequilibrium (r2, D', composite Rogers-Huff r2),
 tool_type: mixed
 primary_tool: plink2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

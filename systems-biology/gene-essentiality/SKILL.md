@@ -4,6 +4,7 @@ description: Performs in-silico single and double gene deletions, condition-depe
 tool_type: python
 primary_tool: cobrapy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

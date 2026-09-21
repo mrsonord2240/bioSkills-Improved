@@ -4,6 +4,7 @@ description: "Computes DNA methylation age (DNAm age) and pace of aging by apply
 tool_type: r
 primary_tool: methylclock
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

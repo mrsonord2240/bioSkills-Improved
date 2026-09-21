@@ -4,6 +4,7 @@ description: Query the Ensembl REST API for gene/transcript/protein lookup, sequ
 tool_type: python
 primary_tool: requests
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

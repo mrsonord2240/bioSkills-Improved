@@ -18,6 +18,7 @@ qc_checkpoints:
   - after_filtering: "FilterMutectCalls PASS fraction sane; FFPE/oxoG orientation-bias artifacts removed via --ob-priors"
   - after_interpretation: "Variants tiered by AMP/ASCO/CAP + oncogenicity (never germline ACMG); drivers vs passengers separated"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

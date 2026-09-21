@@ -4,6 +4,7 @@ description: Prepares a deposited or predicted structure for docking, molecular 
 tool_type: python
 primary_tool: PDBFixer
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

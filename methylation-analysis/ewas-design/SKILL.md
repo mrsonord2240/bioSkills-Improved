@@ -4,6 +4,7 @@ description: Designs and defends an epigenome-wide association study (EWAS) on 4
 tool_type: mixed
 primary_tool: meffil
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

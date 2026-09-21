@@ -21,6 +21,7 @@ qc_checkpoints:
   - after_peaks: "FRiP >1% (TF) or >5% (sharp histone; broad marks run lower); NSC >1.05; RSC >0.8; fingerprint separates IP from input"
   - after_idr: "IDR rescue ratio max(Np,Nt)/min and self-consistency ratio max(N1,N2)/min both <=2 (ENCODE); IDR run on PER-REPLICATE peaks"
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

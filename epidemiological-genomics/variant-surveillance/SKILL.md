@@ -4,6 +4,7 @@ description: Assigns pathogen lineages (SARS-CoV-2 Pangolin UShER mode; Nextclad
 tool_type: mixed
 primary_tool: Pangolin
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

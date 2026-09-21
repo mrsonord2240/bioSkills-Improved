@@ -4,6 +4,7 @@ description: Calls DNA base modifications (5mC, 5hmC, 6mA, 4mC) directly from Ox
 tool_type: cli
 primary_tool: modkit
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

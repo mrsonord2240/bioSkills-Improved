@@ -4,6 +4,7 @@ description: Differential abundance (DA) and differential state (DS) analysis fo
 tool_type: r
 primary_tool: diffcyt
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

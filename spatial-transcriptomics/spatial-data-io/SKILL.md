@@ -4,6 +4,7 @@ description: Loads spatial transcriptomics data from Visium, Visium HD, Xenium, 
 tool_type: python
 primary_tool: spatialdata
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

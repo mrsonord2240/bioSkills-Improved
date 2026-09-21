@@ -4,6 +4,7 @@ description: Handle paired-end FASTQ files (R1/R2) using Biopython while keeping
 tool_type: python
 primary_tool: Bio.SeqIO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

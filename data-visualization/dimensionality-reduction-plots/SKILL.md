@@ -4,6 +4,7 @@ description: Produce and interpret PCA, t-SNE, UMAP, and PHATE plots for high-di
 tool_type: mixed
 primary_tool: scanpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

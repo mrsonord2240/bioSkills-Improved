@@ -4,6 +4,7 @@ description: Detects A/B chromatin compartments from balanced Hi-C contact matri
 tool_type: python
 primary_tool: cooltools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

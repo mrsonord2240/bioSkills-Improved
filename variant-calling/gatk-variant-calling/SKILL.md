@@ -4,6 +4,7 @@ description: Call germline SNPs and indels with GATK HaplotypeCaller and the GVC
 tool_type: cli
 primary_tool: gatk
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

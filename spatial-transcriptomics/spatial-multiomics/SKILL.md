@@ -4,6 +4,7 @@ description: Integrates spatial RNA with a second modality (protein, ATAC, or hi
 tool_type: python
 primary_tool: muon
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

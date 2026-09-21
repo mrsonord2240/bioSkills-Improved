@@ -4,6 +4,7 @@ description: Extracts cfDNA fragmentomics features (DELFI genome-wide short/long
 tool_type: python
 primary_tool: FinaleToolkit
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

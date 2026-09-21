@@ -4,6 +4,7 @@ description: Detect horizontal gene transfer (HGT / LGT) using compositional met
 tool_type: mixed
 primary_tool: HGTector
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: "Performs ML-based protein-ligand pose prediction and scoring using
 tool_type: python
 primary_tool: DiffDock
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

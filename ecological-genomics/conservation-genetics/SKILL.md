@@ -4,6 +4,7 @@ description: Assesses genetic health of populations for conservation with Ne est
 tool_type: mixed
 primary_tool: hierfstat
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

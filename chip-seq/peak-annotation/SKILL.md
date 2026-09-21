@@ -4,6 +4,7 @@ description: Annotates ChIP-seq peaks to genomic features, nearest genes, ENCODE
 tool_type: mixed
 primary_tool: ChIPseeker
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Normalize read-depth copy-ratio profiles and segment them into copy
 tool_type: mixed
 primary_tool: DNAcopy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

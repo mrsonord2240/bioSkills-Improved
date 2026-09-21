@@ -4,6 +4,7 @@ description: Filter and select sequences by criteria (length, ID, GC content, N 
 tool_type: python
 primary_tool: Bio.SeqIO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Detects focal chromatin loops (point interactions / corner-dots) in
 tool_type: mixed
 primary_tool: cooltools
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

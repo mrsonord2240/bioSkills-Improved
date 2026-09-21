@@ -4,6 +4,7 @@ description: Designs and ranks guide RNAs (sgRNAs) for CRISPR-Cas9/Cas12a gene k
 tool_type: python
 primary_tool: CRISPOR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

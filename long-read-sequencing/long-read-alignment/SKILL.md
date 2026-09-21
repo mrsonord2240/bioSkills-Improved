@@ -4,6 +4,7 @@ description: Aligns Oxford Nanopore and PacBio long reads (and assemblies) to a 
 tool_type: cli
 primary_tool: minimap2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

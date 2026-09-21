@@ -4,6 +4,7 @@ description: Build circular genome visualizations using circlize (R), pyCirclize
 tool_type: mixed
 primary_tool: circlize
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

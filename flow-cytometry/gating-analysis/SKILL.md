@@ -4,6 +4,7 @@ description: Defines cell populations in flow and spectral cytometry through man
 tool_type: r
 primary_tool: flowWorkspace
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

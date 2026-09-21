@@ -4,6 +4,7 @@ description: Profiles shotgun metagenomes to species/SGB relative abundance with
 tool_type: cli
 primary_tool: MetaPhlAn
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

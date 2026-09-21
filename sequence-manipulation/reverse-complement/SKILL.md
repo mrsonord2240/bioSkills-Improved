@@ -4,6 +4,7 @@ description: Generate reverse complements and complements of DNA/RNA sequences u
 tool_type: python
 primary_tool: Bio.Seq
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

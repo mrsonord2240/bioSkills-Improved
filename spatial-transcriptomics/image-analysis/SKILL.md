@@ -4,6 +4,7 @@ description: Segments cells/nuclei and extracts image features from imaging spat
 tool_type: python
 primary_tool: squidpy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Resolve subclonal copy number, whole-genome doubling, and copy-numb
 tool_type: mixed
 primary_tool: battenberg
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

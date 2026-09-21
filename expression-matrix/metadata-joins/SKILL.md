@@ -4,6 +4,7 @@ description: Aligns sample metadata with count matrices and constructs design ma
 tool_type: mixed
 primary_tool: pandas
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

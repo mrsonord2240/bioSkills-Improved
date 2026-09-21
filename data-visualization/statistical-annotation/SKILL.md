@@ -4,6 +4,7 @@ description: Add p-value brackets, significance asterisks, and effect-size annot
 tool_type: mixed
 primary_tool: ggpubr
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

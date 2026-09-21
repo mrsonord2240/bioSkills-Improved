@@ -4,6 +4,7 @@ description: Calls m6A peaks from MeRIP-seq / m6A-seq paired IP-vs-input data us
 tool_type: mixed
 primary_tool: exomePeak2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

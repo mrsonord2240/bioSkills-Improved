@@ -4,6 +4,7 @@ description: Clusters temporally variable genes by expression-profile SHAPE (not
 tool_type: mixed
 primary_tool: Mfuzz
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Enumerates virtual chemical libraries via reaction SMARTS transform
 tool_type: python
 primary_tool: RDKit
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

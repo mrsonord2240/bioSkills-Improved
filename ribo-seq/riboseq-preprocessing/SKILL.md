@@ -4,6 +4,7 @@ description: Preprocess ribosome profiling reads with UMI handling, adapter trim
 tool_type: cli
 primary_tool: STAR
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

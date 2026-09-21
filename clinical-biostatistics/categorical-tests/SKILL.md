@@ -4,6 +4,7 @@ description: Tests associations between categorical variables in clinical data u
 tool_type: python
 primary_tool: scipy
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

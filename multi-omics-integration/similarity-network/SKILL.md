@@ -4,6 +4,7 @@ description: Stratifies patients into multi-omics subtypes by building one patie
 tool_type: r
 primary_tool: SNFtool
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

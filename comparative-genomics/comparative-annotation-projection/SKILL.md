@@ -4,6 +4,7 @@ description: Project gene annotations across genomes using TOGA (Kirilenko 2023 
 tool_type: cli
 primary_tool: TOGA
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

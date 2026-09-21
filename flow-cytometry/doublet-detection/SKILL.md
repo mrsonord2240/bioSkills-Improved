@@ -4,6 +4,7 @@ description: Detects and removes doublets/aggregates from flow, spectral, and ma
 tool_type: r
 primary_tool: flowCore
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

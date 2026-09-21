@@ -4,6 +4,7 @@ description: Select restriction enzymes for cloning or diagnostics using Biopyth
 tool_type: python
 primary_tool: Bio.Restriction
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

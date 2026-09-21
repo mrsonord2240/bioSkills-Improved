@@ -4,6 +4,7 @@ description: Prepares statistical reports for clinical trials following CONSORT 
 tool_type: python
 primary_tool: tableone
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

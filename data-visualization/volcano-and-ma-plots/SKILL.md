@@ -4,6 +4,7 @@ description: Build volcano and MA plots from differential-expression / associati
 tool_type: mixed
 primary_tool: ggplot2
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

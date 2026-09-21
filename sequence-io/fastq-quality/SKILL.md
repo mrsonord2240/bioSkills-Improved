@@ -4,6 +4,7 @@ description: Work with FASTQ quality scores using Biopython - access Phred score
 tool_type: python
 primary_tool: Bio.SeqIO
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Aggregates per-tool QC metrics (FastQC, fastp, alignment, quantific
 tool_type: cli
 primary_tool: multiqc
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

@@ -4,6 +4,7 @@ description: Build UpSet plots to visualize set intersections beyond 4 sets (whe
 tool_type: mixed
 primary_tool: ComplexUpset
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility

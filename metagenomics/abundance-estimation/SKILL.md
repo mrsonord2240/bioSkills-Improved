@@ -4,6 +4,7 @@ description: Turns shotgun classifier output into a defensible abundance table w
 tool_type: mixed
 primary_tool: Bracken
 license: MIT
+author: GPTomics
 ---
 
 ## Version Compatibility
