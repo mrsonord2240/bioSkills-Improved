@@ -11,7 +11,8 @@ TMP_DIR="${3:-foldseek_tmp}"
 mkdir -p "${DB_DIR}" "${TMP_DIR}"
 
 # Download AFDB Swiss-Prot subset (smaller, faster than full AlphaFoldDB).
-if [ ! -d "${DB_DIR}/afdb_sp" ]; then
+# foldseek databases writes files (afdb_sp, afdb_sp.dbtype, ...), not a directory: test the .dbtype file.
+if [ ! -f "${DB_DIR}/afdb_sp.dbtype" ]; then
     echo "Downloading AlphaFoldDB Swiss-Prot subset..."
     foldseek databases Alphafold/Swiss-Prot "${DB_DIR}/afdb_sp" "${TMP_DIR}"
 fi
