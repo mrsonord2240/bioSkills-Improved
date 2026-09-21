@@ -9,7 +9,7 @@ author: GPTomics
 
 ## Version Compatibility
 
-The two shipped scripts (`examples/protac_enumerate.py`, `examples/ternary_geometry_screen.py`,
+The three shipped scripts (`examples/protac_enumerate.py`, `examples/ternary_geometry_screen.py`,
 `examples/cooperativity_dc50.py`) need only RDKit, numpy, and scipy -- checked on RDKit 2026.03.6,
 numpy 2.x, scipy 1.18. RDKit 2024.09+ should also work via the introspect-and-adapt pattern below.
 
@@ -139,8 +139,11 @@ In cellular assays:
 Runnable: `examples/cooperativity_dc50.py` fits DC50/Dmax with a 3-parameter Hill curve, flags a
 hook effect from a >15-percentage-point downturn after the peak, and -- when a hook is flagged --
 restricts the DC50/Dmax fit to the ascending arm rather than fitting a monotonic sigmoid to
-non-monotonic data. It ships a seeded synthetic dose-response curve and checks the fit recovers
-the curve's own planted DC50/Dmax within tolerance.
+non-monotonic data. When the peak sits under 10x the fitted DC50 (hook onset close to DC50), the
+ascending arm never reaches its plateau and Dmax is underestimated (15 pp on a noise-free
+synthetic curve); `fit_dc50()` then returns `plateau_reached=False` and a `caveat` -- report Dmax as
+a lower bound. It ships a seeded synthetic dose-response curve and checks the fit recovers
+the curve's own planted DC50/Dmax within tolerance, and that a narrow-separation hook is caveated.
 
 ## Ternary Complex Modeling Workflow
 
