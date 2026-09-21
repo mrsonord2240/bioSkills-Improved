@@ -44,15 +44,15 @@ Standard `samtools markdup` is the right tool for some assays and actively harmf
 | CUT&RUN / CUT&Tag | MARK, do not remove | Same |
 | ATAC-seq | YES, BEFORE Tn5 +4/-5 shift | Then shift coords for footprinting |
 | Bulk RNA-seq (no UMIs) | **NO** | Duplicates are biological at highly-expressed loci; removing them biases DE proportional to expression |
-| Bulk RNA-seq (with UMIs) | NO | umi_tools dedup |
+| Bulk RNA-seq (with UMIs) | NO | umi_tools dedup (`references/umi-dedup.md`) |
 | scRNA (10x, STARsolo, drop-seq) | **NO** | umi_tools dedup with CB+UB tags, or rely on Cell Ranger UMI counts |
-| ctDNA / liquid biopsy / deep panel (UMI) | NO | fgbio GroupReadsByUmi `--strategy=paired` -> CallDuplexConsensusReads (see "UMI-Aware Deduplication") |
-| Twist / IDT / Roche UMI capture | NO | fgbio or Picard UmiAwareMarkDuplicatesWithMateCigar |
+| ctDNA / liquid biopsy / deep panel (UMI) | NO | fgbio GroupReadsByUmi `--strategy=paired` -> CallDuplexConsensusReads (see `references/umi-dedup.md`) |
+| Twist / IDT / Roche UMI capture | NO | fgbio or Picard UmiAwareMarkDuplicatesWithMateCigar (`references/umi-dedup.md`) |
 | Amplicon / hotspot panel (no UMI) | **NO** | Every read is a "duplicate" by coordinate; markdup erases the dataset. Use `samtools ampliconclip` instead -- see alignment-amplicon-clipping. |
 | Amplicon / hotspot panel (UMI) | NO | fgbio consensus |
 | Long-read native (ONT, PacBio HiFi unamplified) | NO | No PCR step; markdup is meaningless |
-| PacBio HiFi amplicon | YES (rare) | `pbmarkdup` |
-| Ancient DNA (aDNA) | YES + mapDamage | Run markdup, then mapDamage `--rescale` before variant calling |
+| PacBio HiFi amplicon | YES (rare) | `pbmarkdup` (`references/alternative-markers.md`) |
+| Ancient DNA (aDNA) | YES + mapDamage | Run markdup, then mapDamage `--rescale` before variant calling (`references/alternative-markers.md`) |
 | Microbiome 16S/ITS | NO | Read counts encode community structure |
 
 If the BAM came from 10x Cell Ranger / STARsolo and `samtools markdup` produces a 50-95% duplicate rate, it is the wrong tool, not a bug.
@@ -227,55 +227,7 @@ A high rate means low library complexity, over-amplification or low input DNA. O
 
 ## pysam Python Alternative
 
-### Full Pipeline
-```python
-import pysam
-
-# Sort by name
-pysam.sort('-n', '-o', 'namesort.bam', 'input.bam')
-
-# Fixmate
-pysam.fixmate('-m', 'namesort.bam', 'fixmate.bam')
-
-# Sort by coordinate
-pysam.sort('-o', 'coordsort.bam', 'fixmate.bam')
-
-# Mark duplicates
-pysam.markdup('coordsort.bam', 'marked.bam')
-
-# Index
-pysam.index('marked.bam')
-```
-
-### Check Duplicate Flag
-```python
-import pysam
-
-with pysam.AlignmentFile('marked.bam', 'rb') as bam:
-    total = 0
-    duplicates = 0
-    for read in bam:
-        if read.is_secondary or read.is_supplementary:
-            continue
-        total += 1
-        if read.is_duplicate:
-            duplicates += 1
-
-    print(f'Total: {total}')
-    print(f'Duplicates: {duplicates}')
-    print(f'Rate: {duplicates/total*100:.2f}%')
-```
-
-### Filter Out Duplicates
-```python
-import pysam
-
-with pysam.AlignmentFile('marked.bam', 'rb') as infile:
-    with pysam.AlignmentFile('nodup.bam', 'wb', header=infile.header) as outfile:
-        for read in infile:
-            if not read.is_duplicate:
-                outfile.write(read)
-```
+The pysam full pipeline (`sort` -> `fixmate` -> `sort` -> `markdup` -> `index`), the duplicate-rate snippet and the filter-out-duplicates snippet are in `references/pysam.md`.
 
 ### Production Tools, Not Hand-Rolled
 
@@ -283,97 +235,11 @@ For real BAMs, always use a production marker. A naive Python implementation key
 
 ## Alternative: From Aligner
 
-Some aligners can mark duplicates directly during streaming:
-
-### BWA-MEM2 with samblaster
-```bash
-# -R sets the @RG line that Picard MarkDuplicates needs (see Common Errors)
-bwa-mem2 mem -R '@RG\tID:s1\tSM:s1\tLB:lib1\tPL:ILLUMINA' ref.fa R1.fq R2.fq | \
-    samblaster | \
-    samtools sort -o marked.bam
-```
-
-### Picard MarkDuplicates
-```bash
-java -jar picard.jar MarkDuplicates \
-    I=input.bam \
-    O=marked.bam \
-    M=metrics.txt \
-    OPTICAL_DUPLICATE_PIXEL_DISTANCE=2500
-```
-Picard reports READ_PAIR_DUPLICATES in pairs (samtools counts reads: 50 pairs = 100 reads). Input does not need fixmate.
-
-### biobambam2, sambamba
-```bash
-# Coordinate-sorted input; no fixmate step. Metrics use Picard's column names
-bammarkduplicates2 I=input.bam O=marked.bam M=metrics.txt
-sambamba markdup -t 4 input.bam marked.bam
-```
-
-### Ancient DNA: mapDamage rescale after markdup
-```bash
-# Needs mapDamage 2.2.x (2.1.x rejects paired-end BAMs). The Bayesian rescaling step takes minutes even on small BAMs.
-mapDamage -i marked.bam -r ref.fa --rescale -d mapdamage_out   # writes mapdamage_out/marked.rescaled.bam
-```
-
-### pbmarkdup (PacBio HiFi amplicons, unaligned BAM/FASTQ)
-```bash
-# Writes duplicate flags (0x400) into the BAM; --rmdup drops them, --dup-file keeps them in a separate file
-pbmarkdup -j 4 hifi.bam marked.bam
-```
+Streaming and non-samtools markers (`samblaster` after `bwa-mem2`, Picard `MarkDuplicates`, `bammarkduplicates2`, `sambamba markdup`, mapDamage `--rescale` for aDNA, `pbmarkdup` for PacBio HiFi amplicons) are in `references/alternative-markers.md`. Picard reports READ_PAIR_DUPLICATES in pairs (samtools counts reads: 50 pairs = 100 reads).
 
 ## UMI-Aware Deduplication
 
-For UMI libraries (10x scRNA, ctDNA panels, Twist/IDT/Roche UMI capture), naive markdup destroys information. Use UMI-aware tools:
-
-### umi_tools dedup
-
-Input must be **coordinate-sorted and indexed**.
-Pass `--paired` for paired-end libraries: without it the mates are deduplicated independently and the output is silently wrong (5689 vs 2805 records on a paired-end capture BAM). Add `--random-seed=1` for a reproducible output: umi_tools picks among tied reads at random, so without it the count moves by about 1 between runs (5688 or 5689 here).
-
-```bash
-# 10x / scRNA -- group by cell barcode + UMI. Check the tags exist first: with absent CB/UB,
-# --per-cell writes an EMPTY BAM and still exits 0
-samtools view cellranger_possorted.bam | head -1000 | grep -c 'CB:Z:'    # must be > 0
-umi_tools dedup --stdin=cellranger_possorted.bam --stdout=dedup.bam \
-    --extract-umi-method=tag --umi-tag=UB --cell-tag=CB \
-    --per-cell --method=directional --random-seed=1
-test "$(samtools view -c dedup.bam)" -gt 0
-
-# Bulk UMI, paired-end (UMI in the RX tag)
-samtools sort -o sorted.bam raw.bam && samtools index sorted.bam
-umi_tools dedup --stdin=sorted.bam --stdout=dedup.bam --paired \
-    --extract-umi-method=tag --umi-tag=RX --method=directional --random-seed=1
-```
-
-### fgbio consensus (bulk UMI / ctDNA, best practice for low-VAF detection)
-
-`GroupReadsByUmi` needs the mate mapping-quality (`MQ`) tag on every read (see Common Errors). `samtools fixmate -m` on name-grouped input adds it; alternatively `fgbio SetMateInformation` on queryname-sorted input. Consensus reads are written **unmapped**; re-align them before variant calling. Single-strand and duplex use different grouping strategies and are separate branches:
-
-```bash
-# If the UMI is in a separate FASTQ instead of the RX tag, annotate first and use annotated.bam below:
-#   fgbio AnnotateBamWithUmis -i raw.bam -f umi.fastq -o annotated.bam
-samtools sort -n -o qn.bam raw.bam
-samtools fixmate -m qn.bam mated.bam        # or: fgbio SetMateInformation -i qn.bam -o mated.bam
-
-# Single-strand molecular consensus
-fgbio GroupReadsByUmi -i mated.bam -o grouped.bam --strategy=adjacency --edits=1 --raw-tag=RX
-fgbio CallMolecularConsensusReads -i grouped.bam -o consensus.bam --min-reads=1
-
-# Duplex (xGen-Prism, NEBNext duplex): needs --strategy=paired, which requires RX as two UMIs joined by '-'
-# (UMI1-UMI2; a single-UMI RX fails with IllegalArgumentException; single-UMI libraries use the adjacency
-# branch above) and writes MI tags with /A /B strand suffixes. CallDuplexConsensusReads on adjacency-grouped reads crashes (StringIndexOutOfBoundsException).
-fgbio GroupReadsByUmi -i mated.bam -o grouped_duplex.bam --strategy=paired --edits=1 --raw-tag=RX
-fgbio CallDuplexConsensusReads -i grouped_duplex.bam -o duplex.bam --min-reads 1 1 0
-```
-
-### Picard UMI-aware marking
-```bash
-picard UmiAwareMarkDuplicatesWithMateCigar I=coordsort_fixmate.bam O=marked.bam M=metrics.txt \
-    UMI_METRICS=umi_metrics.txt UMI_TAG_NAME=RX
-```
-
-`--method=directional` is the default and correct -- do not use `--method=unique`, which treats single-base UMI errors as different molecules. `samtools markdup --barcode-tag RX` (UMI/barcode handling added in samtools 1.16) does exact-match UMI grouping; adequate for IDT xGen Duplex but insufficient for single-UMI applications where 1-edit errors are common.
+For UMI libraries (10x scRNA, ctDNA panels, Twist/IDT/Roche UMI capture), naive markdup destroys information. `umi_tools dedup` (sorted + indexed input, `--paired`, `--random-seed=1`), the fgbio single-strand and duplex consensus branches and Picard `UmiAwareMarkDuplicatesWithMateCigar` are in `references/umi-dedup.md`.
 
 ## Duplicate FLAG
 
@@ -412,6 +278,14 @@ Messages verbatim from samtools 1.24. Each stops the tool (exit 1); a partial ou
 ## Lossy Operations
 
 `samtools markdup -r` (remove duplicates) is irreversible -- the records are dropped. Default to marking, not removing; downstream tools can filter on FLAG 1024. Removing pre-emptively destroys data needed for re-running QC, library complexity estimation, or switching dedup strategies.
+
+## Reference Files
+
+| File | Read when |
+|------|-----------|
+| `references/umi-dedup.md` | The decision table says UMI: `umi_tools dedup`, fgbio single-strand / duplex consensus, Picard UmiAware |
+| `references/alternative-markers.md` | The user wants samblaster, Picard, biobambam2, sambamba, PacBio HiFi `pbmarkdup`, or mapDamage for aDNA |
+| `references/pysam.md` | The user wants the workflow, the duplicate rate or a duplicate filter in Python |
 
 ## Related Skills
 
