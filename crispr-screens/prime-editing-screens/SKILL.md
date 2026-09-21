@@ -85,6 +85,7 @@ reverse complement = `GCTTACAGATCGCCATGA`. PBS genomic window (13 nt, upstream o
 ## CRISPResso2 for PE Quantification
 
 ```bash
+# --quantification_window_size 25 widens the window to cover the edit
 CRISPResso \
     --fastq_r1 pe_sample.fq.gz \
     --amplicon_seq <amplicon_seq> \
@@ -92,7 +93,7 @@ CRISPResso \
     --prime_editing_pegRNA_spacer_seq <spacer> \
     --prime_editing_pegRNA_extension_seq <RTT-revcomp + PBS-revcomp, RTT first> \
     --prime_editing_pegRNA_scaffold_seq <scaffold> \
-    --quantification_window_size 25 \              # widen to cover edit
+    --quantification_window_size 25 \
     --output_folder pe_results \
     --name sample_id
 

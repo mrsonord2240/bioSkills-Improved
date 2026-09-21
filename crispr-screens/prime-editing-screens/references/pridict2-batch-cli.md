@@ -8,10 +8,10 @@ Moved verbatim from SKILL.md. Read when running PRIDICT2 (single or batch), pars
 
 ```bash
 # PRIDICT2 is invoked via CLI: pridict2_pegRNA_design.py
-# Single sequence input:
+# Single sequence input (parens in --sequence = intended edit):
 python pridict2_pegRNA_design.py single \
     --sequence-name BRCA1_c5135 \
-    --sequence "AGCAGCCT(C/T)CTGAATGCCC...60nt_context" \    # parens = intended edit
+    --sequence "AGCAGCCT(C/T)CTGAATGCCC...60nt_context" \
     --output-dir predictions/ \
     --use_5folds                                              # 5-fold ensemble averaging
 
@@ -21,8 +21,9 @@ python pridict2_pegRNA_design.py single \
 # --summarize (it lists existing .csv files there first; a missing directory raises FileNotFoundError).
 mkdir -p input predictions
 mv variants_to_design.csv input/
+# CSV columns: sequence_name, editseq (NOT "sequence" -- see SKILL.md Failure Modes)
 python pridict2_pegRNA_design.py batch \
-    --input-fname variants_to_design.csv \                    # CSV: sequence_name, editseq (NOT "sequence" -- see below)
+    --input-fname variants_to_design.csv \
     --output-dir predictions/ \
     --cores 4 \
     --summarize K562                                          # takes a cell-line value ('K562' or 'HEK'); a bare flag crashes argparse
