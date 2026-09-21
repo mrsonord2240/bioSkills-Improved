@@ -26,12 +26,12 @@ print(gene_to_refseq_proteins('672'))  # BRCA1
 
 **Goal:** Get linked proteins for a list of <200 gene IDs in one call.
 
-**Approach:** Comma-join IDs; one linkset per input in the response.
+**Approach:** Pass the IDs as a list (Biopython sends one `id=` per element); one linkset per input in the response. A comma-joined string would return a single merged linkset (the union), losing which gene each protein belongs to.
 
 **Reference (BioPython 1.83+):**
 ```python
 def batch_gene_protein(gene_ids):
-    h = Entrez.elink(dbfrom='gene', db='protein', id=','.join(gene_ids), linkname='gene_protein_refseq')
+    h = Entrez.elink(dbfrom='gene', db='protein', id=gene_ids, linkname='gene_protein_refseq')
     r = Entrez.read(h); h.close()
     out = {}
     for linkset in r:

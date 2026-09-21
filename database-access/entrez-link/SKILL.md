@@ -47,7 +47,7 @@ Entrez.api_key = 'optional_api_key'  # raises rate to 10 req/sec
 3. For unfamiliar (`dbfrom`, `db`) pairs, run `cmd='acheck'` first to enumerate linknames.
 4. Pick a `linkname` deliberately — prefer curated variants (`*_refseq`, `*_rif`, `*_swissprot`) for analyses; use the umbrella `gene_protein` only for exploration. Per-pair linknames for other databases: `references/link_catalog.md`.
 5. For >200 source IDs, EPost first and ELink with `cmd='neighbor_history'` (code: `references/code_patterns.md`, or `examples/chain_links.py`).
-6. Iterate the response as one LinkSet per input UID — never assume a single LinkSetDb covers all inputs.
+6. Pass source IDs as a Python **list** to get one LinkSet per input UID (a comma-joined string returns a single merged LinkSet, the union), and iterate the response — never assume a single LinkSetDb covers all inputs.
 7. Guard for empty `LinkSetDb` before indexing.
 8. Document the asymmetry of round-trip queries when results matter for publication.
 
@@ -150,11 +150,11 @@ If round-trip consistency matters (e.g. "every gene mentioned in this paper, the
 - **Symptom:** A valid WebEnv/QueryKey and no error, but the linked set covers only the final chunk.
 - **Fix:** Union the chunk keys before linking: `Entrez.esearch(db=dbfrom, term='#1 OR #2', WebEnv=webenv, usehistory='y', retmax=0)` and link from the returned `QueryKey` (implemented in `examples/chain_links.py`, `link_batch_via_history`). Check the set size with `esearch(db=target, term='#<key>', WebEnv=..., retmax=0)['Count']`.
 
-### One linkset per input ID, indexing confusion
-- **Trigger:** Sending 5 IDs, then accessing `record[0]['LinkSetDb'][0]['Link']` expecting the union.
-- **Mechanism:** ELink returns one `LinkSet` per input UID, indexed by position.
-- **Symptom:** Only the first input's links are processed; rest are dropped.
-- **Fix:** Iterate `for linkset in record:` and map by `linkset['IdList'][0]`.
+### Comma-joined vs list `id`, indexing confusion
+- **Trigger:** Sending several IDs, then reading `record[0]['LinkSetDb'][0]['Link']` as if it covered all of them, or mapping results back to inputs after a comma-joined call.
+- **Mechanism:** `id=['672','7157']` (list) sends one `id=` per UID and returns one `LinkSet` per input, in input order. `id='672,7157'` (comma-joined string) returns a single `LinkSet` whose `IdList` holds both UIDs and whose links are the union. Live 2026-09-21: list -> 2 linksets (368 and 25 proteins); comma-joined -> 1 linkset (393).
+- **Symptom:** List form read as one set: only the first input's links are processed, the rest are dropped. Comma-joined form read per input: `linkset['IdList'][0]` is only the first UID and the others' links are attributed to it.
+- **Fix:** For per-input results pass a list, iterate `for linkset in record:` and map by `linkset['IdList'][0]`. Use the comma-joined form only when the union is what you want.
 
 ### Invalid linkname (HTTP 400)
 - **Trigger:** A `linkname` that does not exist for the (`dbfrom`, `db`) pair.
