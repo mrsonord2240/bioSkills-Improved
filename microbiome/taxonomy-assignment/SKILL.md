@@ -56,7 +56,7 @@ ITS (the fungal barcode) is the exception: it resolves to species far more relia
 | Have primers but no pre-trained artifact for them | extract-reads -> fit-classifier-naive-bayes (RESCRIPt) | builds the matched reference; full-length underperforms |
 | Known habitat, best species accuracy | weighted/clawback classifier | habitat prior cuts species error (Kaehler 2019) |
 | scikit-learn version error / no retraining wanted | classify-consensus-vsearch | stores no pickled model; immune to version pinning |
-| Conservative, novelty-aware, minimize over-calls | IDTAXA (DECIPHER) | learned per-node refusal to over-descend |
+| Conservative, novelty-aware, minimize over-calls | IDTAXA (DECIPHER) - `references/decipher-idtaxa.md` | learned per-node refusal to over-descend |
 | Unify 16S with shotgun on one tree | Greengenes2 (q2-greengenes2) | single genome-backbone tree, GTDB-harmonized; closed-reference |
 | Environmental / under-named bacteria | GTDB SSU reference (via RESCRIPt) | genome-based, rank-normalized, polyphyly-pruned |
 | Fungal ITS | UNITE (species hypotheses) + NB or vsearch | formal fungal barcode; species-resolved; never position-trim ITS |
@@ -108,70 +108,7 @@ The reference FASTA must be DADA2-formatted (rank-labelled headers) AND ideally 
 
 ## DECIPHER IDTAXA
 
-**Goal:** Get a conservative, novelty-aware classification that refuses to descend into a clade the query likely does not belong to.
-
-**Approach:** Convert ASV sequences to a DNAStringSet, classify with a pre-trained DECIPHER trainingSet, then flatten the per-rank output to a matrix, mapping IDTAXA's "unclassified_" placeholders to NA.
-
-```r
-library(DECIPHER)
-load('SILVA_SSU_r138_2019.RData')  # provides the trainingSet object, if you have a pre-trained one
-
-# No pre-trained .RData for your marker/region? Train one directly from a reference FASTA +
-# matching "Root;domain;phylum;...;genus;" taxonomy strings (one per sequence, same order).
-# LearnTaxa() tunes its tree-descent k-mer sampling with repeated random subsamples (its own
-# documentation: "this process is repeated with 100 random subsamples") -- inherently stochastic,
-# same class of bug as IdTaxa() below. Verified: two unseeded LearnTaxa() calls on identical input
-# produce non-identical trainingSet objects; set.seed() before EVERY LearnTaxa() call makes the
-# trainingSet object itself reproducible (identical() TRUE).
-# refseqs <- readDNAStringSet('region-matched-ref.fasta')
-# reftax  <- readLines('region-matched-ref-taxonomy.txt')  # e.g. "Root;Bacteria;Firmicutes;...;"
-# set.seed(100)
-# trainingSet <- LearnTaxa(refseqs, taxonomy = reftax)
-# MEMORY: LearnTaxa() against a full, un-subsampled reference (400K+ sequences) needs tens of GB
-# of RAM and can crash on constrained hardware; subsample the reference (e.g. ~60,000 sequences)
-# if it does.
-# LearnTaxa's OPTIONAL rank= argument (a 5-column Index/Name/Parent/Level/Rank data.frame, rarely
-# available outside DECIPHER's own pre-built .RData sets) is not required to train or classify --
-# see the flattening note below for why it matters anyway.
-
-dna <- DNAStringSet(getSequences(seqtab_nochim))
-
-# IdTaxa() descends its classification tree with an internal stochastic step -- inherently
-# stochastic, same as assignTaxonomy() above, and by a LARGER margin (verified: unseeded, two
-# back-to-back calls on the identical trainingSet and identical query set differ at ~3-4% of
-# genus calls). set.seed() before EVERY IdTaxa() call -- without it, repeated runs on the same
-# input differ at the genus call for ~3-4% of ASVs. Verified: with set.seed() before each call,
-# repeated runs are bit-identical at every rank including genus, in both the default
-# multithreaded (processors=NULL) and single-threaded (processors=1) configurations; any fixed
-# integer works, 100 is just a convention here (matches the assignTaxonomy() seed above).
-set.seed(100)
-
-# threshold 60 = DECIPHER default confidence cutoff; raise for stricter calls. IDTAXA's
-# tree-descent stops (leaves the rank unclassified) when the query likely belongs to a taxon
-# absent from the reference - this is the intended anti-over-classification behaviour.
-ids <- IdTaxa(dna, trainingSet, strand = 'both', threshold = 60, processors = NULL)
-
-ranks <- c('domain', 'phylum', 'class', 'order', 'family', 'genus', 'species')
-
-# Flatten POSITIONALLY, not by name. x$rank is populated ONLY when trainingSet was built with
-# LearnTaxa's rank= data.frame (see above) -- absent that, x$rank is NULL for every result, and
-# match(ranks, x$rank) silently returns all-NA with no error or warning (confirmed empirically
-# against a real LearnTaxa()-trained set: 100% NA at every rank, no exception raised). x$taxon[1]
-# is always "Root"; the remaining entries are domain..genus/species in taxonomic order regardless
-# of whether rank= was supplied, so index positionally instead.
-taxa_idtaxa <- t(sapply(ids, function(x) {
-    taxa <- x$taxon[-1]                    # drop "Root"
-    taxa[startsWith(taxa, 'unclassified_')] <- NA
-    length(taxa) <- length(ranks)          # pad/truncate to the fixed rank depth above
-    taxa
-}))
-colnames(taxa_idtaxa) <- ranks
-
-# Sanity check: a wrong-region or wrong-marker training set, or a flattening bug, gives all-NA
-# calls with no error. To confirm reproducibility, repeat set.seed(100) + IdTaxa() once and
-# compare identical(ids, ids_again).
-if (all(is.na(taxa_idtaxa[, 'genus']))) stop('IdTaxa returned no genus calls: check the trainingSet marker/region and the flattening')
-```
+Full workflow (pre-trained or from-scratch `LearnTaxa()`, seeded `IdTaxa()`, positional flattening, sanity check): `references/decipher-idtaxa.md`. Seed `set.seed()` before every `LearnTaxa()` and `IdTaxa()` call.
 
 ## QIIME2 classify-sklearn + Region-Specific Training
 
@@ -227,27 +164,14 @@ qiime feature-classifier classify-consensus-vsearch \
 
 ## Filtering Host Organelle and Off-Target Features
 
-**Goal:** Remove host mitochondrial 16S, chloroplast/plastid 16S, and domain-unassigned features BEFORE diversity and differential abundance - universal 16S primers amplify host organelle rRNA, and leaving it in inflates the feature table and deflates every real taxon by compositional closure.
+Remove Mitochondria/Chloroplast/domain-unassigned features after assignment and before diversity/DA: `references/organelle-filtering.md` (QIIME2 `taxa filter-table`/`filter-seqs` and phyloseq forms).
 
-**Approach:** Use the taxonomy just assigned to exclude the Mitochondria and Chloroplast lineages (the labels enable the filter), then carry the filtered table and sequences forward.
+## Reference Files
 
-```bash
-# QIIME2: exclude mitochondria + chloroplast (case-insensitive substring match on the lineage)
-qiime taxa filter-table --i-table table.qza --i-taxonomy taxonomy.qza \
-    --p-exclude mitochondria,chloroplast \
-    --o-filtered-table table-no-organelle.qza
-qiime taxa filter-seqs --i-data rep-seqs.qza --i-taxonomy taxonomy.qza \
-    --p-exclude mitochondria,chloroplast \
-    --o-filtered-data rep-seqs-no-organelle.qza
-```
-
-```r
-# phyloseq (SILVA ranks: Order 'Chloroplast', Family 'Mitochondria'); the is.na guard keeps unranked taxa
-ps <- subset_taxa(ps, is.na(Order)  | Order  != 'Chloroplast')
-ps <- subset_taxa(ps, is.na(Family) | Family != 'Mitochondria')
-```
-
-Organelle contamination is heaviest in plant, rhizosphere, and host-tissue/biopsy samples (often the majority of reads); inspect per-sample read retention after filtering. Exception: in phototroph-focused, aquatic, or microbial-mat communities, Chloroplast-binned 16S can be the signal of interest (cyanobacterial vs algal-plastid 16S are hard to separate) - inspect what falls in the Chloroplast bin before excluding it. The phyloseq rank-equality form is SILVA-138-specific (Chloroplast at Order, Mitochondria at Family); for GTDB/Greengenes2/RDP verify the rank (`get_taxa_unique(ps, 'Order')`) or use the QIIME2 substring exclude, which is reference-robust.
+| File | Read when |
+|------|-----------|
+| `references/decipher-idtaxa.md` | classifying with DECIPHER IDTAXA, or training a `LearnTaxa()` set for a marker/region with no pre-trained `.RData` |
+| `references/organelle-filtering.md` | the table is host-associated/plant, or a large read fraction is labelled Mitochondria/Chloroplast |
 
 ## Per-Method Failure Modes
 
@@ -267,7 +191,7 @@ Organelle contamination is heaviest in plant, rhizosphere, and host-tissue/biops
 **Trigger:** running classify-sklearn at 0.7 or assignTaxonomy at the default, then reporting whatever rank comes out without stating the threshold. **Mechanism:** the threshold trades sensitivity for specificity - lowering it over-classifies (deeper but wronger), raising it truncates to shallower-but-reliable ranks. **Symptom:** either an over-deep label list or silently dropped/force-filled Unassigned features. **Fix:** state the threshold, tune to region/DB, and keep the truncated ("unassigned at rank X") output honestly - do not drop or force-fill it.
 
 ### Host organelle reads not filtered
-**Trigger:** running diversity/DA on a host-associated or plant sample without removing Mitochondria/Chloroplast features. **Mechanism:** universal 16S primers amplify host mitochondrial and plastid 16S; classifiers label them `f__Mitochondria`/`o__Chloroplast`, and compositional closure then deflates every real taxon. **Symptom:** a large read fraction labelled Mitochondria/Chloroplast; diversity/DA tracks host content. **Fix:** filter them (the Filtering section above) after assignment, before diversity/DA.
+**Trigger:** running diversity/DA on a host-associated or plant sample without removing Mitochondria/Chloroplast features. **Mechanism:** universal 16S primers amplify host mitochondrial and plastid 16S; classifiers label them `f__Mitochondria`/`o__Chloroplast`, and compositional closure then deflates every real taxon. **Symptom:** a large read fraction labelled Mitochondria/Chloroplast; diversity/DA tracks host content. **Fix:** filter them (`references/organelle-filtering.md`) after assignment, before diversity/DA.
 
 ## Quantitative Thresholds
 
@@ -293,9 +217,9 @@ Organelle contamination is heaviest in plant, rhizosphere, and host-tissue/biops
 | All Unassigned at domain level | off-target ASVs (host, chimera, primer artifact) or wrong-orientation reads | filter off-target; leave read-orientation on `auto`; document, do not force-fill |
 | Large read fraction labelled Mitochondria/Chloroplast | host organelle 16S amplified by universal primers | `qiime taxa filter-table --p-exclude mitochondria,chloroplast` (or phyloseq subset_taxa) before diversity/DA |
 | Genus mismatch across cohorts | labels from different databases (SILVA vs GTDB) | use one database+release for all samples |
-| IdTaxa flattening returns all-NA at every rank, no error | `x$rank` is NULL because `trainingSet` was built without LearnTaxa's `rank=` data.frame (the common case) and the flattening code indexed by `x$rank` instead of position | flatten positionally (`x$taxon[-1]`, padded/truncated to the rank vector length) - see the DECIPHER section above |
+| IdTaxa flattening returns all-NA at every rank, no error | `x$rank` is NULL because `trainingSet` was built without LearnTaxa's `rank=` data.frame (the common case) and the flattening code indexed by `x$rank` instead of position | flatten positionally (`x$taxon[-1]`, padded/truncated to the rank vector length) - see `references/decipher-idtaxa.md` |
 | Two runs of `assignTaxonomy()` give different genus calls on identical input | bootstrap resampling (100 replicates) is stochastic and no seed was set | `set.seed()` before every `assignTaxonomy()` call - see the DADA2 section above |
-| Two runs of `IdTaxa()` (or two `LearnTaxa()` trainings) give different genus calls / a different trainingSet object on identical input | both are internally stochastic (random k-mer subsampling during tree descent) and no seed was set - the same bug class as `assignTaxonomy()`, and by a larger margin at genus | `set.seed()` before every `IdTaxa()` call and every `LearnTaxa()` call - see the DECIPHER section above |
+| Two runs of `IdTaxa()` (or two `LearnTaxa()` trainings) give different genus calls / a different trainingSet object on identical input | both are internally stochastic (random k-mer subsampling during tree descent) and no seed was set - the same bug class as `assignTaxonomy()`, and by a larger margin at genus | `set.seed()` before every `IdTaxa()` call and every `LearnTaxa()` call - see `references/decipher-idtaxa.md` |
 
 ## References
 
