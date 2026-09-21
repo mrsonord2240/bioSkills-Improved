@@ -144,6 +144,12 @@ If round-trip consistency matters (e.g. "every gene mentioned in this paper, the
 - **Symptom:** HTTP 414 URI Too Long, or silent truncation.
 - **Fix:** EPost the IDs first, then ELink with `cmd='neighbor_history'`.
 
+### Chunked EPost links only the last chunk
+- **Trigger:** EPosting >200 IDs in several calls into one WebEnv, then ELinking with the last `QueryKey`.
+- **Mechanism:** Each EPost creates its own QueryKey holding only that chunk; posting into an existing WebEnv does not merge. Live 2026-09-21: 250 gene UIDs posted as 200 + 50, ELink from the last key returned 197 proteins, from the union 1374.
+- **Symptom:** A valid WebEnv/QueryKey and no error, but the linked set covers only the final chunk.
+- **Fix:** Union the chunk keys before linking: `Entrez.esearch(db=dbfrom, term='#1 OR #2', WebEnv=webenv, usehistory='y', retmax=0)` and link from the returned `QueryKey` (implemented in `examples/chain_links.py`, `link_batch_via_history`). Check the set size with `esearch(db=target, term='#<key>', WebEnv=..., retmax=0)['Count']`.
+
 ### One linkset per input ID, indexing confusion
 - **Trigger:** Sending 5 IDs, then accessing `record[0]['LinkSetDb'][0]['Link']` expecting the union.
 - **Mechanism:** ELink returns one `LinkSet` per input UID, indexed by position.
