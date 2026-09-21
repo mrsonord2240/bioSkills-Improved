@@ -84,55 +84,11 @@ CFD remains the default for genome-wide library design. **Critical pitfall:** CF
 
 **Approach:** Identify all PAM-adjacent 20-nt protospacers in the target gene's coding sequence, retain only those in the first 5-65% of the protein (constitutive-exon convention from Brunello), filter on GC 30-70% and absence of poly-T (≥4 Ts terminates U6), score on-target (default: this Skill's GC heuristic; see Version Compatibility for the real-Rule-Set-2 alternatives) and off-target with CRISPOR, then **greedily select the top N guides that are also mutually independent** -- composition filters alone do not reject two candidates that overlap almost entirely (see `select_independent_guides` below).
 
-```python
-import re
-import pandas as pd
-import numpy as np
-from Bio.Seq import Seq
+The three functions live in `examples/design_library.py` (run `python examples/design_library.py`, or copy them):
 
-def find_sgrna_candidates(cds_sequence, pam='NGG', guide_length=20):
-    '''Return all protospacer candidates with PAM coordinates on + strand.
-    Caller must filter by exon position and Azimuth/CFD score.'''
-    cds_sequence = cds_sequence.upper()  # the PAM/spacer regex matches uppercase ACGT only; lowercase (soft-masked) input would silently return 0 candidates
-    pam_pattern = re.compile(f'(?=([ACGT]{{{guide_length}}}{pam.replace("N", "[ACGT]")}))')
-    candidates = []
-    for strand, seq in [('+', cds_sequence), ('-', str(Seq(cds_sequence).reverse_complement()))]:
-        for m in pam_pattern.finditer(seq):
-            spacer = m.group(1)[:guide_length]
-            if 'TTTT' in spacer or spacer.count('G') + spacer.count('C') not in range(6, 15):
-                continue
-            candidates.append({'spacer': spacer, 'strand': strand,
-                               'pos_in_cds': m.start() if strand == '+' else len(seq) - m.start() - 23,
-                               'gc_frac': (spacer.count('G') + spacer.count('C')) / guide_length})
-    return pd.DataFrame(candidates)
-
-def annotate_exon_position(candidates_df, cds_length):
-    '''Filter to protospacers within first 5-65% of CDS (Brunello convention).
-    Reason: N-terminal indels truncate protein; very-N-terminal hits alt initiation;
-    C-terminal hits miss functional domains (Doench 2016 Nat Biotech).'''
-    lo, hi = 0.05 * cds_length, 0.65 * cds_length
-    return candidates_df[(candidates_df['pos_in_cds'] >= lo) & (candidates_df['pos_in_cds'] <= hi)].copy()
-
-def select_independent_guides(candidates_df, n_guides, min_spacing=5, score_col='score'):
-    '''Greedily pick up to n_guides candidates that are mutually independent.
-    Reason: find_sgrna_candidates/annotate_exon_position filter composition
-    only (GC, poly-T); nothing stops two candidates 1-4nt apart -- almost the
-    same 20nt spacer, cutting the same site -- from both counting toward the
-    per-gene quota as if they were independent measurements. Verified against
-    a real gene (TP53, NM_000546.6): requesting 12 candidates with no spacing
-    filter returned a pair 1nt apart (19/20nt shared sequence); this filter
-    guarantees every pair in the output is >=min_spacing nt apart while still
-    filling the quota from the next-best candidates.'''
-    ranked = candidates_df.sort_values(score_col, ascending=False)
-    selected = []
-    for _, cand in ranked.iterrows():
-        if any(abs(cand['pos_in_cds'] - s['pos_in_cds']) < min_spacing for s in selected):
-            continue
-        selected.append(cand)
-        if len(selected) == n_guides:
-            break
-    return pd.DataFrame(selected)
-```
+- `find_sgrna_candidates(cds_sequence, pam='NGG', guide_length=20)` returns every PAM-adjacent protospacer on both strands with `spacer`, `strand`, `pos_in_cds`, `gc_frac`, already filtered for GC 30-70% and no `TTTT`. It uppercases the input first: the PAM/spacer regex matches uppercase ACGT only, so lowercase (soft-masked) input would silently return 0 candidates. The caller still filters by exon position and on-target/CFD score.
+- `annotate_exon_position(candidates_df, cds_length)` keeps protospacers within the first 5-65% of the CDS (Brunello convention). N-terminal indels truncate the protein, very-N-terminal hits can be rescued by alternative initiation, and C-terminal hits miss functional domains (Doench 2016 Nat Biotech).
+- `select_independent_guides(candidates_df, n_guides, min_spacing=5, score_col='score')` greedily picks the top-scoring candidates that are mutually >=`min_spacing` nt apart. The first two functions filter composition only, so nothing stops two candidates 1-4 nt apart (almost the same 20-nt spacer, the same cut site) from both counting toward the per-gene quota. Verified on a real gene (TP53, NM_000546.6): 12 candidates with no spacing filter included a pair 1 nt apart (19/20 nt shared); with the filter every pair is >=5 nt apart and the quota is still filled from the next-best candidates.
 
 ## Control Guides
 
@@ -200,6 +156,8 @@ No knockdown from a CRISPRi guide (wrong TSS): see `references/crispri-crispra-t
 | `references/library-catalog-and-pam.md` | Choosing a published genome-wide library, or a non-SpCas9 enzyme / PAM (SpRY, SaCas9, Cas12a) |
 | `references/oligo-design.md` | Laying out oligos for chip synthesis and cloning (BsmBI overhangs, subpool primers, vendor limits) |
 | `references/failure-modes.md` | Diagnosing a freshly cloned pool: PCR skew, synthesis dropouts, polyclonality from high MOI |
+
+Scripts: `scripts/tss_windows.py` (CRISPRi/a windows), `scripts/build_oligo.py` (synthesis oligo); the ranking functions are in `examples/design_library.py`.
 
 ## References
 
