@@ -132,7 +132,7 @@ samtools index marked.bam
 
 ### Pipeline Version (Optimized)
 
-`examples/markdup_pipeline.sh` is the complete script: the assay gate, `set -euo pipefail` (without it a failed first stage still exits 0 and leaves an empty output), a `mktemp -d` scratch dir (collate/sort do not create `tmpdir`; a missing one fails only the first stage), the pipe below, the index, and the check that markdup dropped no records and the output is not empty. `ASSAY=wgs bash examples/markdup_pipeline.sh in.bam out.bam [threads]`.
+`examples/markdup_pipeline.sh` is the complete script: the assay gate, `set -euo pipefail` (without it a failed first stage still exits 0 and leaves an empty output), a `mktemp -d` scratch dir (collate/sort do not create `tmpdir`; a missing one fails only the first stage), the pipe below, the index, and the check that markdup dropped no records and the output is not empty. Its optional third argument is the thread count.
 
 ```bash
 # collate is faster than sort -n; -u/-O between piped tools skips BGZF round-trips
