@@ -82,12 +82,21 @@ seqtab_nochim <- readRDS('seqtab_nochim.rds')
 # this immediately before this exact call) -- without it, two runs on the same input differ at
 # the genus call for ~2-3% of ASVs. Verified: with set.seed() before each call, repeated runs
 # are reproducible at the genus rank; any fixed integer works, 100 is just a convention here.
+# This is NOT bitwise identity at every rank: ~2/770 cells at Kingdom/Order can still differ
+# between seeded runs, and multithread=FALSE does not remove that residual (checked on 770 ASVs).
 set.seed(100)
 
 # minBoot 50 = the DADA2 default and the RDP recommendation for reads <=250 nt; tutorials
 # often use 80 (a stricter CHOICE, not the default). Raising it truncates to shallower but
 # more reliable ranks; ranks below the threshold are returned as NA, not guessed.
 taxa <- assignTaxonomy(seqtab_nochim, 'silva_nr99_v138.1_train_set.fa.gz', minBoot = 50, tryRC = TRUE, multithread = TRUE)
+
+# Sanity check before trusting the table: a wrong-region/wrong-marker or mis-formatted reference,
+# or bad orientation, returns all-NA calls with no error or warning. To confirm reproducibility,
+# repeat set.seed(100) + assignTaxonomy() once and diff the Genus column (examples/assign_silva.R
+# does both checks, with an optional rerun).
+genus_frac <- mean(!is.na(taxa[, 'Genus']))
+if (genus_frac == 0) stop('assignTaxonomy returned no genus calls: check reference format, region and marker')
 
 # addSpecies assigns species by EXACT (100%) match against a species reference. It does NOT
 # license a species name from a noisy read - it reports a species only when the ASV is
@@ -157,6 +166,11 @@ taxa_idtaxa <- t(sapply(ids, function(x) {
     taxa
 }))
 colnames(taxa_idtaxa) <- ranks
+
+# Sanity check: a wrong-region or wrong-marker training set, or a flattening bug, gives all-NA
+# calls with no error. To confirm reproducibility, repeat set.seed(100) + IdTaxa() once and
+# compare identical(ids, ids_again).
+if (all(is.na(taxa_idtaxa[, 'genus']))) stop('IdTaxa returned no genus calls: check the trainingSet marker/region and the flattening')
 ```
 
 ## QIIME2 classify-sklearn + Region-Specific Training
