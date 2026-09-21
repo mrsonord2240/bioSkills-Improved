@@ -114,20 +114,11 @@ picrust2_pipeline.py \
 
 **Approach:** Read `combined_marker_predicted_and_nsti.tsv.gz` (the file PICRUSt2 2.6.3's default combined bacterial+archaeal run actually produces - `bac_`/`arc_`/`combined_` prefixed files, never an unprefixed `marker_predicted_and_nsti.tsv.gz`), summarize the `metadata_NSTI` distribution, and report the number of ASVs AND the fraction of READS dropped at `--max_nsti 2` (a study that loses 40% of reads predicted function for a different community than it sampled).
 
-```python
-import pandas as pd
-
-nsti = pd.read_csv('picrust2_out/combined_marker_predicted_and_nsti.tsv.gz', sep='\t')   # cols: sequence, metadata_NSTI
-asv_counts = pd.read_csv('asv_table.tsv', sep='\t', index_col=0)                # ASVs x samples
-nsti = nsti.set_index('sequence')
-reads_per_asv = asv_counts.sum(axis=1)
-
-max_nsti = 2.0   # PICRUSt2 default; ASVs above this are dropped before metagenome inference
-dropped = nsti.index[nsti['metadata_NSTI'] > max_nsti]
-reads_dropped_frac = reads_per_asv.reindex(dropped).sum() / reads_per_asv.sum()
-print(f'mean NSTI {nsti.metadata_NSTI.mean():.3f}  median {nsti.metadata_NSTI.median():.3f}')
-print(f'ASVs dropped at NSTI>{max_nsti}: {len(dropped)}/{len(nsti)}  reads dropped: {reads_dropped_frac:.1%}')
+```bash
+python scripts/nsti_report.py picrust2_out asv_table.tsv --max-nsti 2.0   # ASV table: TSV without the biom comment line
 ```
+
+Prints mean/median NSTI, ASVs dropped, and the fraction of reads dropped (columns read: `sequence`, `metadata_NSTI`).
 
 ## Per-Method Failure Modes
 
@@ -135,7 +126,7 @@ print(f'ASVs dropped at NSTI>{max_nsti}: {len(dropped)}/{len(nsti)}  reads dropp
 **Trigger:** reporting "increased butyrate production" / "upregulated" / "more metabolically active." **Mechanism:** PICRUSt2 measured no genes and no transcripts - only inferred gene presence from relatives' genomes. **Symptom:** a results sentence with an activity verb on a predicted pathway. **Fix:** restrict every claim to "potential" / "predicted capacity"; for activity, cite metatranscriptomics, not this skill.
 
 ### NSTI ignored or under-reported
-**Trigger:** accepting the default `--max_nsti 2` filter without reporting the distribution or the dropped fraction. **Mechanism:** the filter silently deletes the most novel/under-referenced ASVs - exactly the organisms an environmental study cares about. **Symptom:** a predicted-function result with no NSTI numbers in the methods. **Fix:** report mean/median NSTI, the distribution, and the ASV AND read fraction dropped (the helper above); treat high mean NSTI as a red flag that the result is mostly extrapolation.
+**Trigger:** accepting the default `--max_nsti 2` filter without reporting the distribution or the dropped fraction. **Mechanism:** the filter silently deletes the most novel/under-referenced ASVs - exactly the organisms an environmental study cares about. **Symptom:** a predicted-function result with no NSTI numbers in the methods. **Fix:** report mean/median NSTI, the distribution, and the ASV AND read fraction dropped (`scripts/nsti_report.py`); treat high mean NSTI as a red flag that the result is mostly extrapolation.
 
 ### Wrong environment (reference coverage too sparse)
 **Trigger:** running PICRUSt2 on soil/marine/sediment/plant/novel hosts and reporting fine-grained KO differences. **Mechanism:** the ~20k-genome reference tree is gut/host-biased; sparse references mean high NSTI and predictions interpolated from distant relatives. **Symptom:** high mean NSTI yet confident KO/pathway tables. **Fix:** report the environment and NSTI; prefer FAPROTAX for the broad biogeochemical question, or do real shotgun. "Relatively better than other predictors" (per the paper) is not "trustworthy in absolute terms."
