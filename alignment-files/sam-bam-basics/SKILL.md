@@ -99,24 +99,13 @@ samtools view -M input.bam chr1:1000-2000 chr1:1500-2500
 samtools view -M -L regions.bed input.bam      # BED is 0-based, half-open
 samtools view --region-file regions.bed input.bam
 ```
-All three gave 5426 on the example above. In pysam, merging overlapping intervals is not enough: a read that spans the gap between two nearby intervals is fetched by both. Use:
+All three gave 5426 on the example above. In pysam, merging overlapping intervals is not enough: a read that spans the gap between two nearby intervals is fetched by both. Use `scripts/fetch_regions.py` (each read once; 0-based half-open regions):
+```bash
+python scripts/fetch_regions.py input.bam regions.bed          # prints SAM lines; BED as above
+```
 ```python
-def fetch_regions(bam, regions):
-    '''Yield each read overlapping any (contig, start, end) region once; 0-based, half-open.'''
-    merged = {}
-    for contig, start, end in sorted(regions):
-        ivs = merged.setdefault(contig, [])
-        if ivs and start <= ivs[-1][1]:
-            ivs[-1][1] = max(ivs[-1][1], end)
-        else:
-            ivs.append([start, end])
-    for contig, ivs in merged.items():
-        prev_end = None
-        for start, end in ivs:
-            for read in bam.fetch(contig, start, end):
-                if prev_end is None or read.reference_start >= prev_end:  # else already yielded for the previous interval
-                    yield read
-            prev_end = end
+from fetch_regions import fetch_regions    # scripts/ on sys.path; regions = [(contig, start, end), ...]
+for read in fetch_regions(bam, regions): ...
 ```
 
 ### Count Alignments
