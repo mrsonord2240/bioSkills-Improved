@@ -50,7 +50,7 @@ Tell the AI agent what to do:
 3. If applicable, build the reference efficacy prior from a matched public dataset
 4. Run JACKS via `python run_JACKS.py` from `JACKS/jacks/`, or programmatically via `jacks.jacks_io.runJACKS`
 5. Leave `--apply_w_hp` off unless deliberately using the hierarchical gene-effect prior (the tool's help advises caution)
-6. Check convergence: genes ending at the 50-iteration cap in the DEBUG log get a refit with a higher `n_iter`; seed `random` before `runJACKS` when p-values must be reproducible
+6. Check convergence: genes ending at the 50-iteration cap in the DEBUG log get a refit with a higher `n_iter`; seed `random` and set `PYTHONHASHSEED` when p-values must be reproducible
 7. Generate the gene-effect matrix plus its std file, and the sgRNA efficacy file (`sgrna`, `X1`, `X2`)
 8. Call hits on effect/std (abs >2); supply `--ctrl_genes` (and `n_pseudo` > 0 in Python) if p-values are needed
 9. Flag low-efficacy guides (X1 <0.3) and genes where all guides are weak (re-design candidates)

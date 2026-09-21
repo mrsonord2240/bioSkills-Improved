@@ -42,7 +42,7 @@ where `i` is sgRNA index, `c` is screen condition, `g(i)` is the gene targeted b
 
 The variational posterior gives expected guide efficacy and gene effect. Gene-level p-values are not a likelihood-ratio test: they compare each gene's effect with pseudo-genes built by resampling the guides of supplied negative-control genes (`--ctrl_genes` plus `n_pseudo` > 0).
 
-Initialisation is fixed (efficacy = 1, gene effect = median LFC) and nothing in the inference is random, so gene effects and efficacies are identical across reruns on the same input. Only the pseudo-gene p-values use Python's `random`; call `random.seed(<int>)` before `runJACKS` to make them reproducible (checked on JACKS 0.2: two unseeded runs give different p-value files, two seeded runs match byte for byte).
+Initialisation is fixed (efficacy = 1, gene effect = median LFC) and nothing in the inference is random, so gene effects and efficacies are identical across reruns on the same input. Only the pseudo-gene p-values are random (Python's `random`, drawing from the control genes held in a `set` of strings). To make them reproducible, set both `random.seed(<int>)` before `runJACKS` and the environment variable `PYTHONHASHSEED=<int>` before Python starts (checked on JACKS 0.2: `random.seed` alone still gave different p-value files across separate processes; with both fixed two runs matched byte for byte, and a different `PYTHONHASHSEED` changed the file).
 
 **Critical assumption:** Guide efficacy is treated as cell-line independent within the same chemistry. Allen 2019 reports per-sgRNA Cas9 KO efficacy is consistent across randomly selected batches of cell lines (within-chemistry), supporting library-shared efficacy. **However**, efficacy is NOT shareable across chemistries: Cas9 KO efficacy != CRISPRi knockdown efficiency != CRISPRa activation efficiency. JACKS must be run separately per chemistry; use only within the same chemistry on the same library.
 
@@ -154,7 +154,7 @@ python run_JACKS.py \
 | Genes missing from output | sgRNA-to-gene map mismatch (unmatched guides are dropped) | Verify naming consistency; check `len(gene_results) == n_genes_expected` |
 | Median efficacy <0.2 | Wrong chemistry assumed by prior | Use a matched-chemistry `--reffile` or override the efficacy prior (see `references/failure-modes.md`) |
 | Lower bound still changing at `Iter 50/50` in the DEBUG log | Iteration cap reached | Refit with a higher `n_iter` (see `references/failure-modes.md`) and compare effects |
-| p-values differ between runs | Pseudo-genes are sampled with Python `random` | `random.seed(<int>)` before `runJACKS`; gene effects themselves are deterministic |
+| p-values differ between runs | Pseudo-genes are sampled with Python `random` from a set of control genes | `random.seed(<int>)` before `runJACKS` AND `PYTHONHASHSEED=<int>` at interpreter start; gene effects themselves are deterministic |
 | `<sgRNA> has no sgrna reference in <reffile>` | `--reffile` from a different library | Match library exactly |
 
 ## Reference Files
