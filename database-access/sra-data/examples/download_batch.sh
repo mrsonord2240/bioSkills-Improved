@@ -46,8 +46,11 @@ while read -r ACC; do
     # of skipping just that one accession. Check explicitly instead.
     FTP_COL=$(echo "${HEADER}" | tr '\t' '\n' | grep -nx 'fastq_ftp' | cut -d: -f1) || true
     MD5_COL=$(echo "${HEADER}" | tr '\t' '\n' | grep -nx 'fastq_md5' | cut -d: -f1) || true
-    if [ -z "${FTP_COL}" ] || [ -z "${MD5_COL}" ]; then
-        echo "  fastq_ftp not found in ENA response for ${ACC} -- may indicate controlled-access (dbGaP) data, see SKILL.md 'Controlled-access (dbGaP) data' section"
+    MISSING=""
+    if [ -z "${FTP_COL}" ]; then MISSING="fastq_ftp"; fi
+    if [ -z "${MD5_COL}" ]; then MISSING="${MISSING:+${MISSING}, }fastq_md5"; fi
+    if [ -n "${MISSING}" ]; then
+        echo "  ${MISSING} not found in ENA response for ${ACC} -- a missing fastq_ftp may indicate controlled-access (dbGaP) data, see SKILL.md 'Controlled-access (dbGaP) data' section"
         echo "${ACC}" >> "${FAILED}"
         continue
     fi

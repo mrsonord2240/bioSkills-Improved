@@ -219,10 +219,13 @@ HEADER=$(echo "${RESPONSE}" | head -1)
 ROW=$(echo "${RESPONSE}" | tail -1)
 FTP_COL=$(echo "${HEADER}" | tr '\t' '\n' | grep -nx 'fastq_ftp' | cut -d: -f1) || true
 MD5_COL=$(echo "${HEADER}" | tr '\t' '\n' | grep -nx 'fastq_md5' | cut -d: -f1) || true
-# fastq_ftp genuinely absent (not just this pipeline's exit status) is a real signal, not
-# an error to swallow -- check it explicitly instead of letting a fixed-index cut fail silently.
-if [ -z "${FTP_COL}" ] || [ -z "${MD5_COL}" ]; then
-    echo "fastq_ftp not found in ENA response for ${SRR} -- may indicate controlled-access (dbGaP) data, see SKILL.md 'Controlled-access (dbGaP) data' section" >&2
+# A requested field genuinely absent (not just this pipeline's exit status) is a real signal, not
+# an error to swallow -- check it explicitly and name the field that is actually missing.
+MISSING=""
+if [ -z "${FTP_COL}" ]; then MISSING="fastq_ftp"; fi
+if [ -z "${MD5_COL}" ]; then MISSING="${MISSING:+${MISSING}, }fastq_md5"; fi
+if [ -n "${MISSING}" ]; then
+    echo "${MISSING} not found in ENA response for ${SRR} -- a missing fastq_ftp may indicate controlled-access (dbGaP) data, see SKILL.md 'Controlled-access (dbGaP) data' section" >&2
     exit 1
 fi
 URLS=$(echo "${ROW}" | cut -f"${FTP_COL}" | tr ';' '\n')
