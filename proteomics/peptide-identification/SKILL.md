@@ -11,6 +11,8 @@ author: GPTomics
 
 Reference examples tested with: pyOpenMS 3.5.0, pandas 2.2+, numpy 1.26+ (pyOpenMS 3.5 takes a `PeptideIdentificationList`, not a plain Python list, for peptide IDs). Command-line route checked on Sage 0.14.6, Comet 2026.02 rev.2, MS-GF+ v2024.03.26, Percolator 3.09.0, OpenMS 3.5.0 `DecoyDatabase`, Java 17.
 
+Install: `pip install pyopenms pandas numpy` (mokapot optional: `pip install mokapot`, see Common Errors for its pandas/numpy limits). Command-line tools: `sage`, `comet`, `MSGFPlus` (`java -jar`), `msfragger`, `percolator`, OpenMS `DecoyDatabase`; vendor raw -> mzML with `msconvert` (ProteoWizard) or ThermoRawFileParser. R readers: `BiocManager::install(c("mzID", "mzR", "PSMatch"))`.
+
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
 - R: `packageVersion('<pkg>')` then `?function_name` to verify parameters
