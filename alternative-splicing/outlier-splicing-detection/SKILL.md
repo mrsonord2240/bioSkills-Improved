@@ -103,7 +103,7 @@ patient_results <- patient_results[order(patient_results$padjust), ]
 
 **Differences from FRASER 1.x:** default metric is the single **Intron Jaccard Index** (1.x: psi5, psi3, theta); default `deltaPsiCutoff` **0.1** (1.x: 0.3); FRASER >=1.99.0 is FRASER 2. `implementation = 'PCA'` is the default fit; `'AE'` is an autoencoder (the old `correction=` argument is deprecated). Document the version and cutoff used.
 
-**Reproducibility:** PCA fits are deterministic. AE fits differ run to run (measured on 2.6.1: 9,841 of 20,010 p-values differ >1e-6), and `set.seed()` alone does not fix it (9,165 differ); `BPPARAM = SerialParam(RNGseed = 1)` does (0 differ). Use PCA unless you need AE.
+**Reproducibility:** PCA fits are deterministic. AE fits differ run to run (measured on 2.6.1: 9,841 of 20,010 p-values differ >1e-6), and neither seed alone fixes it (`set.seed(1)` alone: 9,279 differ; `SerialParam(RNGseed = 1)` alone: 9,815 differ); `set.seed(1)` together with `BPPARAM = SerialParam(RNGseed = 1)` gives 0 differ. Use PCA unless you need AE.
 
 ## OUTRIDER for Gene-Level Outlier Expression
 

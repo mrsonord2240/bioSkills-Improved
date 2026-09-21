@@ -57,7 +57,7 @@ fds <- est_q(fds, type = 'jaccard', plot = FALSE)
 q_jaccard <- bestQ(fds, type = 'jaccard')
 cat(sprintf('q = %d for %d samples\n', q_jaccard, ncol(fds)))
 
-# implementation = 'PCA' is the default and is deterministic; 'AE' needs set.seed() to be reproducible
+# implementation = 'PCA' is the default and is deterministic; 'AE' is reproducible only with set.seed(1) AND BPPARAM = SerialParam(RNGseed = 1) together
 fds <- FRASER(fds, q = c(jaccard = q_jaccard), implementation = 'PCA', BPPARAM = bp)
 saveFraserDataSet(fds, dir = working_dir)
 
