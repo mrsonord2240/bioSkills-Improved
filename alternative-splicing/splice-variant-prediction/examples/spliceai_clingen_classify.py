@@ -1,116 +1,97 @@
 #!/usr/bin/env python3
 '''
-SpliceAI VCF annotation with ClinGen SVI 2023 splicing-variant classification.
+SpliceAI VCF annotation with ClinGen SVI 2023 PP3/BP4 evidence labels (research-use decision support,
+not a variant classification or diagnosis).
 
 Workflow:
-1. Run SpliceAI on a clinical VCF
-2. Parse INFO field for delta scores (DS_AG, DS_AL, DS_DG, DS_DL)
-3. Apply ClinGen SVI 2023 thresholds for PP3/BP4 evidence
-4. Flag deep-intronic candidates for extended-window re-scoring
-'''
-# Reference: spliceai 1.3+, tensorflow 2.15+, pandas 2.2+ | Verify API if version differs
+1. Run SpliceAI on a VCF (default window)
+2. Parse delta scores; label PP3/BP4 with inclusive published boundaries; missing scores -> not_scored
+3. Re-run variants scoring < 0.20 (including 0.00) with a wider window, keep the higher delta
+4. Report input variants SpliceAI skipped (it exits 0 on them)
 
-import re
+Usage: python spliceai_clingen_classify.py input.vcf genome.fa --build grch38 [--distance 50 --extended 500]
+'''
+# Reference: spliceai 1.3.1, pandas 2.3 | Verify API if version differs
+
+import argparse
 import subprocess
-import pandas as pd
+import sys
 from pathlib import Path
 
+import pandas as pd
 
-def run_spliceai(input_vcf, output_vcf, genome_fa, build='grch38', distance=50, mask=0):
-    '''Run SpliceAI on a VCF.'''
-    cmd = [
-        'spliceai', '-I', str(input_vcf), '-O', str(output_vcf),
-        '-R', str(genome_fa), '-A', build,
-        '-D', str(distance), '-M', str(mask),
-    ]
+from splice_parsers import PP3_MIN, classify_delta, parse_spliceai_vcf, read_input_vcf, variant_key
+
+
+def run_spliceai(input_vcf, output_vcf, genome_fa, build, distance=50, mask=0):
+    '''Run SpliceAI on a VCF. `build` must match the FASTA (grch37 or grch38).'''
+    cmd = ['spliceai', '-I', str(input_vcf), '-O', str(output_vcf), '-R', str(genome_fa),
+           '-A', build, '-D', str(distance), '-M', str(mask)]
     subprocess.run(cmd, check=True)
 
 
-def parse_spliceai_vcf(vcf_path):
-    rows = []
-    with open(vcf_path) as f:
-        for line in f:
-            if line.startswith('#'):
-                continue
-            fields = line.rstrip('\n').split('\t')
-            chrom, pos, _, ref, alts, _, _, info = fields[:8]
-            m = re.search(r'SpliceAI=([^;]+)', info)
-            if not m:
-                continue
-            for ann in m.group(1).split(','):
-                parts = ann.split('|')
-                if len(parts) < 10:
-                    continue
-                allele, symbol = parts[0], parts[1]
-                ds = [float(p) if p not in ('.', '') else 0.0 for p in parts[2:6]]
-                rows.append({
-                    'chrom': chrom, 'pos': int(pos), 'ref': ref, 'alt': allele,
-                    'gene': symbol,
-                    'DS_AG': ds[0], 'DS_AL': ds[1], 'DS_DG': ds[2], 'DS_DL': ds[3],
-                    'delta_max': max(ds),
-                })
-    return pd.DataFrame(rows)
+def per_variant(df):
+    '''One row per variant: highest delta over the genes SpliceAI annotated (readthrough genes such as
+    RPL36A-HNRNPH2 add rows). Choose the MANE gene yourself when the genes disagree.'''
+    best = df.sort_values('delta_max', ascending=False, na_position='last').drop_duplicates('key')
+    return best.set_index('key')[['gene', 'DS_AG', 'DS_AL', 'DS_DG', 'DS_DL', 'delta_max']]
 
 
 def apply_clingen_svi(df):
-    '''Apply ClinGen SVI 2023 thresholds for PP3/BP4 (Walker 2023 AJHG).
-
-    ClinGen SVI applies predictive splice PP3/BP4 at supporting weight only.
-    The 0.5/0.8 cutoffs are SpliceAI precision tiers (Jaganathan 2019), NOT
-    ACMG evidence-strength upgrades; moderate/strong needs functional PS3/BS3.
-    '''
-    bins = [-0.01, 0.10, 0.20, 0.50, 0.80, 1.01]
-    labels = ['BP4', 'inconclusive', 'PP3_supporting', 'PP3_supporting_prec0.5', 'PP3_supporting_prec0.8']
+    '''ClinGen SVI 2023 PP3/BP4 (Walker 2023 AJHG), supporting weight only. 0.5/0.8 are SpliceAI precision
+    tiers (Jaganathan 2019), not ACMG strength upgrades; moderate/strong needs functional PS3/BS3.'''
     df = df.copy()
-    df['acmg_evidence'] = pd.cut(df['delta_max'], bins=bins, labels=labels)
+    df['acmg_evidence'] = classify_delta(df['delta_max'])
     return df
 
 
-def flag_deep_intronic_candidates(df, threshold=0.05):
-    '''Flag variants with weak default-window signal that might benefit from -D 2000 re-scoring.'''
+def flag_extend_window_candidates(df, threshold=PP3_MIN):
+    '''Pseudoexon-creating deep-intronic variants can score 0.00 at the default window, so flag everything
+    below the PP3 threshold (scored 0.00 included). Pre-filter the VCF to the intronic/non-coding variants you
+    care about if it is large: the wide re-run costs time.'''
     df = df.copy()
-    df['extend_window_candidate'] = (df['delta_max'] >= threshold) & (df['delta_max'] < 0.20)
+    df['extend_window_candidate'] = df['delta_max'] < threshold
     return df
 
 
-def main():
-    input_vcf = Path('clinical_variants.vcf')
-    spliceai_50 = Path('clinical_variants_spliceai_50.vcf')
-    spliceai_2000 = Path('clinical_variants_spliceai_2000.vcf')
-    genome = Path('GRCh38.primary_assembly.genome.fa')
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('input_vcf'); ap.add_argument('genome_fa')
+    ap.add_argument('--build', required=True, choices=['grch37', 'grch38'])
+    ap.add_argument('--distance', type=int, default=50); ap.add_argument('--extended', type=int, default=500)
+    ap.add_argument('--out-prefix', default='spliceai_clingen')
+    a = ap.parse_args(argv)
+    prefix = Path(a.out_prefix)
 
-    # Run default-window first for general clinical screening
-    run_spliceai(input_vcf, spliceai_50, genome, distance=50)
-    df_50 = parse_spliceai_vcf(spliceai_50)
-    df_50 = apply_clingen_svi(df_50)
-    df_50 = flag_deep_intronic_candidates(df_50)
+    narrow = prefix.with_name(prefix.name + f'_D{a.distance}.vcf')
+    run_spliceai(a.input_vcf, narrow, a.genome_fa, a.build, distance=a.distance)
+    parsed = parse_spliceai_vcf(narrow)
+    df = per_variant(parsed)
+    inputs = read_input_vcf(a.input_vcf).drop_duplicates('key').set_index('key')
+    df = inputs[['id']].join(df)                      # left join: skipped variants stay, as NaN
+    df = flag_extend_window_candidates(df)
 
-    # Re-run with extended window only on candidates likely to be deep-intronic.
-    # SpliceAI needs a valid VCF, so subset the ORIGINAL input VCF (keep its header)
-    # rather than reconstructing one from the dataframe.
-    candidates = df_50[df_50['extend_window_candidate']]
-    if not candidates.empty:
-        cand_keys = set(zip(candidates['chrom'], candidates['pos'].astype(int)))
-        candidates_vcf = Path('extend_window_candidates.vcf')
-        with open(input_vcf) as fin, open(candidates_vcf, 'w') as fout:
+    cand = df[df['extend_window_candidate']]
+    if not cand.empty:
+        # subset the ORIGINAL input VCF (keeps its header) to the candidate records
+        keys = set(cand.index)
+        cand_vcf = prefix.with_name(prefix.name + '_extend_candidates.vcf')
+        with open(a.input_vcf) as fin, open(cand_vcf, 'w') as fout:
             for line in fin:
-                if line.startswith('#'):
+                c = line.split('\t')
+                if line.startswith('#') or any(variant_key(c[0], c[1], c[3], alt) in keys for alt in c[4].split(',')):
                     fout.write(line)
-                else:
-                    f = line.split('\t')
-                    if (f[0], int(f[1])) in cand_keys:
-                        fout.write(line)
-        run_spliceai(candidates_vcf, spliceai_2000, genome, distance=2000)
-        # Merge the stronger extended-window delta back onto the flagged rows
-        df_2000 = parse_spliceai_vcf(spliceai_2000)[['chrom', 'pos', 'alt', 'gene', 'delta_max']]
-        df_50 = df_50.merge(df_2000, on=['chrom', 'pos', 'alt', 'gene'], how='left', suffixes=('', '_2000'))
-        rescued = df_50['delta_max_2000'].notna()
-        df_50.loc[rescued, 'delta_max'] = df_50.loc[rescued, 'delta_max_2000']
-        df_50 = apply_clingen_svi(df_50.drop(columns='delta_max_2000'))
-
-    df_50.to_csv('spliceai_clingen_classified.tsv', sep='\t', index=False)
-    summary = df_50.groupby('acmg_evidence', observed=True).size()
-    print(summary)
+        wide = prefix.with_name(prefix.name + f'_D{a.extended}.vcf')
+        run_spliceai(cand_vcf, wide, a.genome_fa, a.build, distance=a.extended)
+        w = per_variant(parse_spliceai_vcf(wide))['delta_max'].rename('delta_max_wide')
+        df = df.join(w)
+        df['delta_max'] = df[['delta_max', 'delta_max_wide']].max(axis=1)   # wider window can only add sites
+    df = apply_clingen_svi(df)
+    df.to_csv(f'{prefix}_classified.tsv', sep='\t')
+    print(df['acmg_evidence'].value_counts())
+    for key, r in df[df['acmg_evidence'] == 'not_scored'].iterrows():   # no SpliceAI= tag, or "." scores
+        print(f'WARNING SpliceAI: no score for {r["id"]} ({key})', file=sys.stderr)
+    return df
 
 
 if __name__ == '__main__':
