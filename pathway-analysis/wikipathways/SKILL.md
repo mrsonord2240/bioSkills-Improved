@@ -63,6 +63,7 @@ WikiPathways is a wiki: anyone can create or edit a pathway, content is CC0, and
 | License | CC0 (fully open) | Restrictive (commercial bulk/API) | CC-BY / CC0 |
 | Curation | Community wiki, no formal peer review | Largely automated KO reconstruction | Expert-curated and reviewed |
 | Species | ~30+ | 4000+ (genome-derived) | ~15 (deep human) |
+| Human pathways | ~1,100 (`listPathways('Homo sapiens')`, 2026-09) | ~370 (KEGG REST `list/pathway/hsa`, 2026-09) | see reactome-pathways |
 | Focus | Disease/drug + general | Metabolic/signaling | Reaction-level mechanism |
 | Reproducibility | Pin a dated monthly GMT (live `current/` otherwise) | Live REST API (date-dependent) | Local reactome.db (version-pinned) |
 
@@ -126,15 +127,24 @@ as.data.frame(wp_gsea)   # NES, p.adjust, core_enrichment (the leading edge)
 
 **Goal:** Make a WP analysis reproducible across re-runs by pinning a dated release instead of pulling `current/`.
 
-**Approach:** Download a dated GMT (pass `format='gmt'` - the default is `gpml`), split the compound `name%version%wpid%org` term field into TERM2GENE/TERM2NAME, run `enricher`/`GSEA` on the pinned sets, and report the date in methods. The live archive retains only the last ~12 months of monthly releases (10th of each month) - compute a recent date rather than hardcoding one that will 404 as time passes; for a fixed historical date beyond the window, use the Zenodo GMT/GPML archive instead (https://zenodo.org/communities/wikipathways).
+**Approach:** Download a dated GMT (pass `format='gmt'` - the default is `gpml`), split the compound `name%version%wpid%org` term field into TERM2GENE/TERM2NAME, run `enricher`/`GSEA` on the pinned sets, and report the date in methods. The live archive retains only the last ~12 months of monthly releases (10th of each month) - compute a recent date rather than hardcoding one that will 404 as time passes, and loop over successive months (`Sys.Date() - 60, -90, -120, ...`) with `tryCatch` so a single missing release does not stop the run - the block below does this, and reports the date that succeeded. If every in-window date fails, or for a fixed historical date beyond the window, use the Zenodo GMT/GPML archive instead (https://zenodo.org/communities/wikipathways).
 
 ```r
 library(rWikiPathways)
 library(tidyr)
 
-archive_date <- format(Sys.Date() - 60, '%Y%m10')   # e.g. '20260710'; report this date in methods
-# downloadPathwayArchive needs an organism to actually download a file (organism=NULL opens the index)
-gmt <- downloadPathwayArchive(date=archive_date, organism='Homo sapiens', format='gmt', destpath=tempdir())
+# newest-first candidate release dates, all inside the ~12-month window (10th of each month)
+candidates <- unique(format(Sys.Date() - seq(60, 330, by=30), '%Y%m10'))
+gmt <- NULL
+for (archive_date in candidates) {   # a missing release 404s: step back one month, then fall back to Zenodo
+  # downloadPathwayArchive needs an organism to actually download a file (organism=NULL opens the index)
+  gmt <- tryCatch(suppressWarnings(downloadPathwayArchive(date=archive_date, organism='Homo sapiens',
+                                                          format='gmt', destpath=tempdir())),
+                  error=function(e) NULL)
+  if (!is.null(gmt) && file.exists(file.path(tempdir(), gmt))) break
+  gmt <- NULL
+}
+if (is.null(gmt)) stop('no release in the last ~12 months; use the Zenodo GMT archive')
 wp2gene <- read.gmt(file.path(tempdir(), gmt))
 wp2gene <- separate(wp2gene, term, c('name','version','wpid','org'), sep='%')   # term is a %-joined compound
 t2g <- wp2gene[, c('wpid','gene')]   # TERM2GENE
@@ -227,6 +237,7 @@ For GSEA results read `NES` (sign = direction along the ranking) and `core_enric
 | `searchPathways` error | function removed | use `findPathwaysByText()` |
 | `read.gmt` term column is a `%`-compound | term field not split | `separate(., term, c('name','version','wpid','org'), sep='%')` |
 | `downloadPathwayArchive` opens a browser / downloads nothing | `organism=NULL` | name the organism to actually download a file |
+| `downloadPathwayArchive` warns `cannot open URL ... 404` then errors | that month's release is outside the ~12-month window or was not published | step back one release (`Sys.Date() - 90, -120, ...`, 10th of the month); for an older fixed date use the Zenodo archive |
 | GPML where a GMT was expected | `format` defaulted to `gpml` | pass `format='gmt'` |
 | `gseWP` error about vector names | geneList not named or not sorted decreasing | build a named Entrez vector, `sort(decreasing=TRUE)` |
 | `enrichWP`/`gseWP` returns NULL with no terms | wrong/non-canonical organism string (e.g. a common name like `'zebrafish'`) | verify with `listOrganisms()`/`get_wp_organisms()` first; the string must match exactly |
