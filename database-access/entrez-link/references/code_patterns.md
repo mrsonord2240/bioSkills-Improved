@@ -44,34 +44,9 @@ def batch_gene_protein(gene_ids):
 
 **Goal:** Link 5,000 gene IDs to proteins without hitting URL-length limits.
 
-**Approach:** EPost the IDs first (chunked at 200), then ELink with `cmd='neighbor_history'` referencing the WebEnv. Downstream EFetch picks up linked IDs from the history server.
+**Approach:** EPost the IDs first (chunked), then ELink with `cmd='neighbor_history'` referencing the WebEnv. Downstream EFetch picks up linked IDs from the history server.
 
-**Reference (BioPython 1.83+):**
-```python
-def post_then_link(gene_ids, target='protein', linkname='gene_protein_refseq'):
-    # EPost in chunks of 200
-    webenv = None
-    for i in range(0, len(gene_ids), 200):
-        chunk = gene_ids[i:i+200]
-        kwargs = {'db': 'gene', 'id': ','.join(chunk)}
-        if webenv:
-            kwargs['WebEnv'] = webenv
-        h = Entrez.epost(**kwargs)
-        r = Entrez.read(h); h.close()
-        webenv = r['WebEnv']
-        query_key = r['QueryKey']
-        time.sleep(0.1 if Entrez.api_key else 0.34)
-
-    # Link with neighbor_history
-    h = Entrez.elink(dbfrom='gene', db=target, linkname=linkname,
-                     cmd='neighbor_history', WebEnv=webenv, query_key=query_key)
-    r = Entrez.read(h); h.close()
-    # WebEnv is at the top level of the response; QueryKey is per-LinkSetDbHistory entry.
-    return r[0]['WebEnv'], r[0]['LinkSetDbHistory'][0]['QueryKey']
-
-we, qk = post_then_link(['672', '675', '7157'] * 1000)
-# Downstream: Entrez.efetch(db='protein', WebEnv=we, query_key=qk, retstart=..., retmax=500)
-```
+**Runnable code:** `examples/chain_links.py`, `link_batch_via_history(dbfrom, db, source_ids, linkname=None, chunk=200)` returns `(WebEnv, QueryKey)`; it unions the per-chunk QueryKeys (see SKILL.md, "Chunked EPost links only the last chunk"). Downstream: `Entrez.efetch(db='protein', WebEnv=we, query_key=qk, retstart=..., retmax=500)`.
 
 ### Discover all available links
 
@@ -79,17 +54,7 @@ we, qk = post_then_link(['672', '675', '7157'] * 1000)
 
 **Approach:** `cmd='acheck'` returns the full LinkInfo list per source.
 
-**Reference (BioPython 1.83+):**
-```python
-def list_link_names(dbfrom, id):
-    h = Entrez.elink(dbfrom=dbfrom, id=id, cmd='acheck')
-    r = Entrez.read(h); h.close()
-    info = r[0]['IdCheckList']['IdLinkSet'][0]['LinkInfo']
-    return [(i['LinkName'], i['DbTo'], i.get('MenuTag', '<none>')) for i in info]
-
-for name, target, label in list_link_names('gene', '672'):
-    print(f'{name:<40} -> {target:<15} ({label})')
-```
+**Runnable code:** `examples/discover_links.py`, `discover_links(dbfrom, source_id)` returns `(LinkName, DbTo, MenuTag)` tuples and asserts the LinkInfo schema.
 
 ### Chain links (gene -> protein -> structure)
 
