@@ -259,12 +259,24 @@ Always check `SAMPLES_QUANTIFICATION_SUMMARY.txt` for `NA` rows before trusting 
 
 ```bash
 CRISPRessoWGS \
-    --bam aligned.bam \
-    --reference genome.fa \
-    --region_file off_targets.bed \
+    --bam_file aligned.bam \
+    --reference_file genome.fa \
+    --region_file off_targets.txt \
     --output_folder wgs_run \
     --n_processes 8
+
+# Outputs:
+#   wgs_run/CRISPRessoWGS_on_<bam name>/SAMPLES_QUANTIFICATION_SUMMARY.txt
+#   wgs_run/CRISPRessoWGS_on_<bam name>/CRISPResso_on_<region>/ for each analysed region
 ```
+
+The flag names are exact: `--bam` alone is rejected (`ambiguous option: --bam could match --bam_output, --bam_file`).
+`--region_file` is a tab-separated `chr  start  end  name` table with no header (e.g. `chr9  962  1198  HEK3`).
+**`--min_reads_to_use_region` defaults to 10 for WGS:** a region with fewer reads is skipped, its row in
+`SAMPLES_QUANTIFICATION_SUMMARY.txt` is `NA`, and the run still exits 0. Check for `NA` rows, and lower the
+threshold when the BAM is a small slice. Checked on CRISPResso2 2.3.4 with the CRISPResso2 repo's `tests/`
+`smallGenome.fa` (chr9/chr11 slices) and `Both.Cas9.fastq.smallGenome.bam`: FANCF 23 reads, 26.09% Modified;
+HEK3 2 reads, `NA` at the default and 50% Modified with `--min_reads_to_use_region 1`.
 
 **Use case:** Validate empirically that an in vivo / clinical-grade edit has minimal off-target activity (combine with GUIDE-seq or CIRCLE-seq predicted sites).
 
@@ -324,7 +336,7 @@ def parse_crispresso(output_dir):
 ### Bystander C/A editing inflates "editing efficiency"
 
 **Trigger:** Base-editor sample with wide quantification window; bystander Cs at adjacent positions counted as edits.
-**Mechanism:** Default `--quantification_window_size 10` includes all positions in editing window; bystander edits are real but distinct from target edit.
+**Mechanism:** A wide window (`--quantification_window_size 10`; the CRISPResso default is 1) includes all positions in the editing window; bystander edits are real but distinct from target edit.
 **Symptom:** Editing efficiency 80%+ but target SNV is 30%; bystander rate is 50%.
 **Fix:** Always read the per-position table (`Quantification_window_nucleotide_percentage_table.txt`), not just the aggregate. Report target and bystander rates separately. See [[base-editing-analysis]].
 
