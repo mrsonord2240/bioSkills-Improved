@@ -197,51 +197,7 @@ For cloud-native analysis pipelines (Nextflow on AWS Batch, Cromwell, etc.), STR
 
 **Approach:** Query ENA portal API for FASTQ URLs and md5; download with curl; verify with md5sum.
 
-**Reference (ENA portal API 2.0+, curl; checked 2026-09-17):**
-```bash
-#!/bin/bash
-set -euo pipefail
-SRR="${1:-SRR12345678}"
-OUT="${2:-./fastq}"
-mkdir -p "${OUT}"
-
-# Get FASTQ URLs + md5 from ENA portal API. Locate columns by their documented field
-# name, not a fixed index: ENA's filereport ALWAYS prepends run_accession as column 1,
-# regardless of what `fields=` lists, so fields=fastq_ftp,fastq_md5 puts the real data
-# in columns 2 and 3, not 1 and 2 (cut -f1/-f2 silently grabs the accession and the URL,
-# one column short -- confirmed against the live API).
-RESPONSE=$(curl -s "https://www.ebi.ac.uk/ena/portal/api/filereport?accession=${SRR}&result=read_run&fields=fastq_ftp,fastq_md5&format=tsv")
-HEADER=$(echo "${RESPONSE}" | head -1)
-ROW=$(echo "${RESPONSE}" | tail -1)
-FTP_COL=$(echo "${HEADER}" | tr '\t' '\n' | grep -nx 'fastq_ftp' | cut -d: -f1) || true
-MD5_COL=$(echo "${HEADER}" | tr '\t' '\n' | grep -nx 'fastq_md5' | cut -d: -f1) || true
-# A requested field genuinely absent (not just this pipeline's exit status) is a real signal, not
-# an error to swallow -- check it explicitly and name the field that is actually missing.
-MISSING=""
-if [ -z "${FTP_COL}" ]; then MISSING="fastq_ftp"; fi
-if [ -z "${MD5_COL}" ]; then MISSING="${MISSING:+${MISSING}, }fastq_md5"; fi
-if [ -n "${MISSING}" ]; then
-    echo "${MISSING} not found in ENA response for ${SRR} -- a missing fastq_ftp may indicate controlled-access (dbGaP) data, see SKILL.md 'Controlled-access (dbGaP) data' section" >&2
-    exit 1
-fi
-URLS=$(echo "${ROW}" | cut -f"${FTP_COL}" | tr ';' '\n')
-MD5S=$(echo "${ROW}" | cut -f"${MD5_COL}" | tr ';' '\n')
-
-i=0
-while read url; do
-    fname="${OUT}/$(basename ${url})"
-    expected_md5=$(echo "${MD5S}" | sed -n "$((i+1))p")
-    echo "Downloading ${fname}"
-    curl -sL -o "${fname}" "https://${url}"
-    actual_md5=$(md5sum "${fname}" | awk '{print $1}')
-    if [ "${actual_md5}" != "${expected_md5}" ]; then
-        echo "MD5 MISMATCH ${fname}: expected ${expected_md5}, got ${actual_md5}"
-        exit 1
-    fi
-    echo "  md5 OK"
-    i=$((i+1))
-done <<< "${URLS}"
-```
+`echo ERR10419835 > acc.txt; bash examples/download_batch.sh acc.txt ./fastq` -- a one-line accessions file is the single-run case (ENA portal API 2.0+, curl; checked 2026-09-17). It locates the `fastq_ftp` / `fastq_md5` columns by header name (ENA always prepends `run_accession`, so a fixed `cut -f1/-f2` grabs the accession and the URL), names the missing field when one is absent (a missing `fastq_ftp` may be controlled-access, see the dbGaP section), md5-verifies every file, and lists failed accessions in `<out_dir>/failed.txt` (the script itself exits 0, so check that file).
 
 ### prefetch + fasterq-dump (SRA toolkit, classic)
 
@@ -253,43 +209,7 @@ done <<< "${URLS}"
 
 **Approach:** pysradb metadata returns a full hierarchy table; pull SRR column.
 
-**Reference (pysradb 2.2+):**
-```python
-from pysradb import SRAweb
-import pandas as pd
-
-
-def gse_to_srr(gse):
-    db = SRAweb()
-    df = db.gse_to_srp(gse)
-    if df.empty:
-        return []
-    srp = df['study_accession'].iloc[0]
-    runs = db.srp_to_srr(srp)
-    return runs['run_accession'].tolist()
-
-
-def bioproject_to_runs(prjna):
-    db = SRAweb()
-    return db.sra_metadata(prjna, detailed=True)
-
-
-def batch_resolve(ids):
-    db = SRAweb()
-    rows = []
-    for id in ids:
-        try:
-            meta = db.sra_metadata(id, detailed=True)
-            rows.append(meta)
-        except Exception as e:
-            print(f'{id}: {e}')
-    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
-
-
-# Resolve a GSE to all its SRRs
-srrs = gse_to_srr('GSE123456')
-print(f'GSE123456 -> {len(srrs)} SRRs')
-```
+`python scripts/pysradb_resolve.py GSE123456 [PRJNA... SRX...]` prints the SRR runs for each ID (pysradb 2.2+, checked 2.5.1). Import `gse_to_srr` (GSE -> SRP -> SRR), `bioproject_to_runs` (full detailed metadata table) or `batch_resolve` (many IDs, failures printed and skipped) for use in a pipeline.
 
 ### Cloud (STRIDES) and 10x single-cell
 
