@@ -51,7 +51,7 @@ Entrez.tool = 'project-name'
 | < 200 known IDs | Any db | EFetch with comma-joined `id=` | Single round-trip; trivial |
 | 200-5,000 known IDs | Any db | EPost (chunked at 200) -> history -> chunked EFetch | URL length limit + chunked retrieval |
 | 5,000-100,000 from a query | Any db | ESearch with `usehistory='y'` -> chunked EFetch | Push to server once; pull in batches |
-| > 100,000 sequences | nucleotide/protein | Consider FTP mirror or Datasets CLI; chunk if E-utils still | NCBI throttles bulk; offline mirror is faster |
+| > 100,000 sequences | nucleotide/protein | Consider FTP mirror or Datasets CLI; if E-utils is still the chosen path, chunk via the history server (single stream) | NCBI throttles bulk; offline mirror is faster |
 | > 1,000,000 sequences, or a literal "entire database" request | nucleotide/protein | **Refuse the EFetch-loop approach outright.** Point only to NCBI's bulk FTP/BLAST-db mirrors (`ftp.ncbi.nlm.nih.gov`) or Datasets CLI; do not attempt a chunked E-utilities loop at this scale | At this scale a single-stream E-utilities loop is a multi-week job this Skill's tools were never designed to serve -- not a "consider," a hard stop, the same way >4 concurrent workers is a hard stop |
 | Whole genome assemblies | Assembly/Datasets | `datasets download genome accession ...` | Datasets v2 is the modern bulk endpoint |
 | All RefSeq for a species | Datasets | `datasets download genome taxon ...` | Replaces assembly_summary.txt scraping |
@@ -114,114 +114,31 @@ Smaller batches for GenBank/XML because per-record payload is larger; larger bat
 
 **Goal:** Download all records matching a query, robust to mid-job failures and session expiry.
 
-**Approach:** ESearch with history; checkpoint cursor to disk; on error, retry the chunk; on session expiry, re-run ESearch and resume from checkpoint.
+**Approach:** ESearch with history; checkpoint cursor to disk; on error, retry the chunk; on session expiry (HTTP 200 with `<ERROR>` body), re-run ESearch and resume from checkpoint. The chunk is never skipped: after `max_retries` failures it raises. Bytes/str bodies are both handled; on resume the output is truncated to the last newline.
 
-**Reference (BioPython 1.83+):**
+**Runnable:** `examples/robust_download.py` -> `checkpointed_download(db, term, out_path, ckpt_path, rettype='fasta', batch_size=500, max_retries=5)`. The module sets a placeholder `Entrez.email` when imported, so set yours after the import:
+
 ```python
-import json
-import time
-from pathlib import Path
-from urllib.error import HTTPError
-from Bio import Entrez
-
-
-def checkpointed_batch_download(db, term, out_path, ckpt_path, rettype='fasta',
-                                 retmode='text', batch_size=500, max_retries=3):
-    '''Download all matching records with disk checkpoint for resumability.'''
-    delay = 0.1 if Entrez.api_key else 0.34
-    ckpt = Path(ckpt_path)
-    start = json.loads(ckpt.read_text())['start'] if ckpt.exists() else 0
-
-    h = Entrez.esearch(db=db, term=term, usehistory='y', retmax=0)
-    s = Entrez.read(h); h.close()
-    webenv, query_key, total = s['WebEnv'], s['QueryKey'], int(s['Count'])
-    print(f'{total:,} records matched; resuming at {start:,}')
-
-    mode = 'a' if start else 'w'
-    with open(out_path, mode) as out:
-        while start < total:
-            for attempt in range(max_retries):
-                try:
-                    h = Entrez.efetch(db=db, rettype=rettype, retmode=retmode,
-                                      retstart=start, retmax=batch_size,
-                                      webenv=webenv, query_key=query_key)
-                    body = h.read(); h.close()
-                    if isinstance(body, bytes):
-                        body = body.decode('utf-8', errors='replace')
-                    if '<ERROR>' in body[:500]:
-                        raise RuntimeError(f'Server error in body: {body[:200]}')
-                    out.write(body)
-                    break
-                except HTTPError as e:
-                    if e.code == 429:
-                        wait = 10 * (attempt + 1)
-                        print(f'  Rate-limited; sleeping {wait}s')
-                        time.sleep(wait)
-                    elif attempt == max_retries - 1:
-                        raise
-                    else:
-                        time.sleep(5 * (attempt + 1))
-                except RuntimeError as e:
-                    # Likely WebEnv expired; re-run ESearch
-                    print(f'  {e}; refreshing WebEnv')
-                    h = Entrez.esearch(db=db, term=term, usehistory='y', retmax=0)
-                    s = Entrez.read(h); h.close()
-                    webenv, query_key = s['WebEnv'], s['QueryKey']
-
-            start += batch_size
-            ckpt.write_text(json.dumps({'start': start, 'total': total}))
-            time.sleep(delay)
-            print(f'  {min(start, total):,}/{total:,}')
-    ckpt.unlink(missing_ok=True)
+import sys; sys.path.insert(0, 'examples')
+from robust_download import checkpointed_download
+from Bio import Entrez; Entrez.email = 'you@institution.edu'  # Entrez.api_key = '...' if you have one
+checkpointed_download('nucleotide', 'BRCA1[GENE] AND Homo sapiens[ORGN] AND biomol_mrna[PROP] AND srcdb_refseq[PROP]',
+                      'brca1_mrna.fasta', 'brca1_mrna.ckpt.json')
 ```
 
 ### EPost large ID list, then EFetch
 
 **Goal:** Download by a known list of 5,000 accessions without 414 URI errors.
 
-**Approach:** EPost in 200-ID chunks; reuse WebEnv across chunks; final fetch reads from history.
+**Approach:** EPost in 200-ID chunks; reuse WebEnv across chunks; final fetch iterates each QueryKey by its own chunk size (retstart is relative to that key, not to the whole list).
 
-**Reference (BioPython 1.83+):**
-```python
-def epost_and_fetch(db, ids, out_path, rettype='fasta', retmode='text', batch_size=500):
-    delay = 0.1 if Entrez.api_key else 0.34
-    webenv = None
-    posted_keys = []  # (query_key, n_ids) so we iterate each key's actual size
-    for i in range(0, len(ids), 200):
-        chunk = ids[i:i+200]
-        kwargs = {'db': db, 'id': ','.join(chunk)}
-        if webenv:
-            kwargs['WebEnv'] = webenv
-        h = Entrez.epost(**kwargs)
-        r = Entrez.read(h); h.close()
-        webenv = r['WebEnv']
-        posted_keys.append((r['QueryKey'], len(chunk)))
-        time.sleep(delay)
-
-    with open(out_path, 'w') as out:
-        for qk, n in posted_keys:
-            for start in range(0, n, batch_size):
-                h = Entrez.efetch(db=db, rettype=rettype, retmode=retmode,
-                                  retstart=start, retmax=min(batch_size, n - start),
-                                  webenv=webenv, query_key=qk)
-                out.write(h.read()); h.close()
-                time.sleep(delay)
-```
+**Runnable:** `examples/batch_by_ids.py` defines `chained_epost_fetch(db, ids, out_path, rettype='fasta', batch_size=500)` for long lists and `direct_efetch(db, ids, out_path)` for <200 IDs. It is a demo script (running or importing it fetches a 255-ID demo list), so copy the functions or edit the `small_list`/`large_list` inputs at the bottom.
 
 ### Integrity check after download
 
 **Goal:** Confirm downloaded FASTA has the expected record count and no truncation.
 
-**Approach:** Count expected (from ESearch Count) vs observed (from SeqIO.parse).
-
-```python
-from Bio import SeqIO
-
-def verify_fasta_count(path, expected):
-    observed = sum(1 for _ in SeqIO.parse(path, 'fasta'))
-    assert observed == expected, f'Expected {expected:,} records, found {observed:,}'
-    return True
-```
+**Approach:** Count expected (from ESearch Count) vs observed (from `SeqIO.parse`): `verify_count(path, expected)` in `examples/batch_by_ids.py` (copy it; same demo-script caveat). Skip the check when ESearch Count is 0 (no output file is written; see `examples/batch_fasta.py`).
 
 For genome assemblies and known-checksum files, NCBI provides MD5 manifests (e.g. `md5checksums.txt` in FTP genome directories). NCBI Datasets CLI verifies checksums automatically; the FTP-direct route needs explicit `md5sum -c`.
 
