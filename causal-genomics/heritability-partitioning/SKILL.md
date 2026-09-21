@@ -86,6 +86,18 @@ Methodology evolves; benchmark consensus shifts. Verify against current Yengo 20
 | Case-control GWAS with low prevalence | LDSC on liability scale (--samp-prev --pop-prev) | Observed-scale h2 understates liability-scale truth |
 | Single-cell ATAC cell-type prioritization | S-LDSC with per-cluster ATAC peaks as annotations | Cross-reference atac-seq/single-cell-atac for peak generation |
 
+## Per-Method Reference Files
+
+Load only the file for the method in use (each holds the pipeline, install line, failure modes and errors for that method):
+
+| Method | File |
+|--------|------|
+| LDAK SumHer (`--calc-tagging`, `--sum-hers`) | `references/ldak-sumher.md` |
+| HESS local h2 | `references/hess-local-h2.md` |
+| HDL genetic correlation (R) | `references/hdl-genetic-correlation.md` |
+
+LDSC, S-LDSC, cell-type LDSC and cross-trait LDSC stay in this file. BOLT-REML, GCTA-GREML, graphREML and Popcorn carry no pipeline here beyond the taxonomy row, decision tree and install notes.
+
 ## LDSC Intercept Interpretation (Postdoc Nuance)
 
 The LDSC intercept is widely misinterpreted as a "confounding score". The correct interpretation:
@@ -116,7 +128,7 @@ LDSC (GCTA model) and LDAK SumHer (LDAK-Thin model) make different assumptions a
 
 These give systematically different functional enrichment estimates. Speed 2019 reported that LDAK-Thin often gives **lower** conserved-region enrichment than baseline LDSC; conversely LDSC can over-attribute h2 to coding/conserved regions because the GCTA prior couples LD to causality. Gazal 2019 Nat Genet 51:1202-1204 argues the baseline-LD S-LDSC model is better-calibrated (higher model likelihood) and that LDAK/SumHer's lower functional-enrichment estimates are downward-biased; the LDAK developers dispute this (Speed 2020 Nat Genet 52:458), so report both models and flag the model-dependence.
 
-**Operational rule:** Whenever functional enrichment is the primary claim (e.g. "h2 is enriched in tissue T by N-fold"), report enrichment from BOTH LDSC and LDAK. Flag the model assumption. If LDSC and LDAK disagree by > 2x, treat the claim as model-dependent and cite Gazal 2019. For non-enrichment claims (total h2, rg between two traits), the model dependence is smaller and LDSC alone is acceptable.
+**Operational rule:** Whenever functional enrichment is the primary claim (e.g. "h2 is enriched in tissue T by N-fold"), report enrichment from BOTH LDSC and LDAK. Flag the model assumption. If LDSC and LDAK disagree by > 2x (e.g. LDSC conserved-region enrichment 25x vs LDAK 10x; both are model-internally consistent and the data alone cannot pick one), treat the claim as model-dependent and cite Gazal 2019. Report LDSC primary + LDAK confirmatory, emphasize directional agreement over magnitude, and never pick the model that gives the desired answer. For non-enrichment claims (total h2, rg between two traits), the model dependence is smaller and LDSC alone is acceptable.
 
 ## Cell-Type Prioritization (Finucane 2018)
 
@@ -150,6 +162,7 @@ Published `.ldcts` files cover GTEx tissues, Roadmap epigenome, immune cell type
 | Threshold | Source | Rationale |
 |-----------|--------|-----------|
 | mean chi-square > 1.02 | LDSC wiki / Bulik-Sullivan 2015 | Below this, LDSC h2 estimate has huge SE; need N proportional to 1 / h2 |
+| Total h2 must lie in [0, 1] on both observed and liability scale | Definition of h2_SNP | A point estimate outside [0, 1] is never a face-value result. If the 95% CI (estimate +/- 1.96 SE) still excludes [0, 1] (e.g. liability h2 1.43 (0.10)), it is an artifact: check `--samp-prev`/`--pop-prev` assignment, munged N and the LD reference, then report it as a data or model failure. If the CI overlaps the bound, report it as noise around the boundary |
 | h2 SE < 0.02 | LDSC convention | Below this SE, h2 estimate is interpretable; above, treat as exploratory |
 | h2 SE >= 0.02 OR mean chi-square < 1.02 | LDSC convention | Estimate unreliable; N >= 50k is typical noise floor for h2 ~ 0.1 (scales as ~1/h2) |
 | LDSC intercept / ratio bins | Bulik-Sullivan 2015 | See the intercept/ratio table under "LDSC Intercept Interpretation" |
@@ -242,26 +255,6 @@ Non-zero `gcov_int` under known sample overlap is the **correct** behavior, NOT 
 
 **Fix:** Always report intercept, mean chi-square, ratio = (intercept - 1) / (mean_chi2 - 1), and h2 jointly. Interpret ratio < 0.2 as "mostly polygenic, h2 trustworthy"; ratio > 0.3 as "investigate population structure / overlap before claiming h2".
 
-### LDSC vs LDAK enrichment discordance
-
-**Trigger:** Running both LDSC baseline-LD and LDAK SumHer and getting different per-annotation enrichment.
-
-**Mechanism:** GCTA model (LDSC) couples per-SNP h2 to local LD; LDAK-Thin de-couples and re-weights by MAF + LD with empirical exponents. These priors differ; the data alone cannot determine which is correct.
-
-**Symptom:** LDSC reports conserved-region enrichment of 25x; LDAK reports 10x; both are model-internally consistent.
-
-**Fix:** Cite Gazal 2019 Nat Genet 51:1202 as the LDSC-vs-LDAK reconciliation reference; report BOTH models; treat 2x or larger discordance as model-dependent. For enrichment-driven hypotheses (e.g. tissue prioritization), reconcile by reporting LDSC primary + LDAK confirmatory and emphasize directional agreement over magnitude. Do not pick the model that gives the desired answer.
-
-### HDL bias with sample overlap
-
-**Trigger:** Running HDL.rg on two GWAS that share > 5% of samples (e.g. two UKB traits, or UKB + FinnGen with overlapping recruitment).
-
-**Mechanism:** HDL's eigen-decomposition likelihood treats the two traits as independent samples; sample-correlation in residuals biases the likelihood (typically inflates rg toward 1).
-
-**Symptom:** HDL rg substantially different from cross-trait LDSC rg; HDL z-score very large compared to LDSC z; suspicious for high-correlation trait pairs.
-
-**Fix:** Use cross-trait LDSC instead (intercept absorbs overlap). If both must be used, restrict HDL to unambiguously non-overlapping cohorts (e.g. UKB-only trait1 vs FinnGen-only trait2 with no shared individuals confirmed via individual ID exchange or IBD).
-
 ### LDSC with non-EUR ancestry and EUR LD scores
 
 **Trigger:** Applying default EUR LD scores from `alkesgroup.broadinstitute.org/LDSCORE/eur_w_ld_chr/` to an EAS, AFR, or AMR GWAS.
@@ -282,16 +275,6 @@ Non-zero `gcov_int` under known sample overlap is the **correct** behavior, NOT 
 
 **Fix:** Test annotations marginal to the baseline by including baseline-LD_v2.2 plus the new annotation only; never test multiple highly correlated annotations jointly; report VIF of annotation matrix; use the joint enrichment of {baseline + new} category not per-tau.
 
-### HESS locus instability at sparse SNP density
-
-**Trigger:** Running HESS at a locus with < 1000 LD-pruned SNPs (e.g. centromere-adjacent region).
-
-**Mechanism:** HESS quadratic form on projected effect estimates is unstable at low SNP density; matrix conditioning explodes.
-
-**Symptom:** Locus h2 estimate negative or > 0.5 (unphysical); standard error very large; subsequent loci stable.
-
-**Fix:** Require >= 1000 SNPs per locus; use LDetect partition (Berisa & Pickrell 2016 Bioinformatics 32:283) which targets ~1700 loci genome-wide; discard sparse loci or merge with neighbors.
-
 ### Case-control LDSC observed vs liability scale
 
 **Trigger:** Reporting LDSC h2 from a case-control GWAS on the observed (0/1) scale.
@@ -302,91 +285,6 @@ Non-zero `gcov_int` under known sample overlap is the **correct** behavior, NOT 
 
 **Fix:** Always supply `--samp-prev <case_fraction>` and `--pop-prev <population_lifetime_prevalence>` to LDSC; report h2 on liability scale. Without these flags, LDSC defaults to observed scale. Lee 2011 (AJHG 88:294) conversion: `h2_liab = h2_obs * (K(1-K))^2 / (P(1-P) * z^2)` (numerator is K^2(1-K)^2), where K = population prevalence, P = sample case proportion, z = standard-normal density at the quantile (1-K). LDSC applies this via `--samp-prev/--pop-prev`; verify K and P are assigned correctly (K is population, P is sample). Skipping the conversion typically yields a 2-10x underestimate vs the liability-scale truth.
 
-## LDAK SumHer Pipeline
-
-**Goal:** Alternative h2 and functional enrichment estimate using the LDAK-Thin model for reconciliation with LDSC.
-
-**Approach:** Reformat sumstats to LDAK input -> run `ldak --sum-hers` against the pre-computed LDAK-Thin tagging file -> compare to LDSC.
-
-```bash
-# 1. LDAK requires header: Predictor A1 A2 n Z (Z optional; can use beta + se instead)
-# Reference LDAK-Thin tagging files at dougspeed.com/pre-computed-tagging-files
-ldak --sum-hers trait_sumher \
-    --summary trait_ldak.txt \
-    --tagfile ldak.thin.hapmap.gbr.tagging \
-    --check-sums NO
-
-# 2. Partitioned with BaselineLD annotations (two steps)
-# BaselineLD provides binary + continuous annotations covering coding/conserved/regulatory/MAF
-# bins; download BaselineLD.zip (96 annotations) from dougspeed.com/resources and extract to ./BaselineLD/BaselineLD{1..96} (the run uses the first 86).
-# The annotation flags belong to --calc-tagging (which builds the tagging file), NOT to
-# --sum-hers. LDAK uses --annotation-number + --annotation-prefix (continuous) or
-# --partition-number + --partition-prefix (binary). No --category-file flag exists.
-
-# 2a. Build the annotated tagging file from a genotype reference (--power -.25 = LDAK-Thin)
-ldak --calc-tagging trait_bld --bfile ref_panel --power -.25 \
-    --annotation-number 86 \
-    --annotation-prefix BaselineLD/BaselineLD
-
-# 2b. Estimate partitioned h2 against that tagging file (no annotation flags here)
-ldak --sum-hers trait_bld --summary trait_ldak.txt \
-    --tagfile trait_bld.tagging \
-    --check-sums NO
-```
-
-Pre-computed tagging files exist for GBR (HapMap reference); other ancestries require building tagging file via `--calc-tagging`. LDAK SumHer outputs h2 estimate, per-category h2 share, and enrichment with Z-scores.
-
-## HESS Local h2 Pipeline
-
-**Goal:** Estimate per-locus heritability genome-wide using LDetect partition.
-
-**Approach:** Step 1 computes quadratic forms per locus from LD reference; step 2 estimates h2; output per-locus h2 with SE.
-
-```bash
-# HESS step 1: per-chromosome local h2 quadratic forms (run per chromosome)
-for chr in {1..22}; do
-    hess.py \
-        --local-hsqg trait.sumstats.gz \
-        --chrom $chr \
-        --bfile 1000G_EUR_chr${chr} \
-        --partition LDetect_EUR_chr${chr}.bed \
-        --out hess_chr${chr}
-done
-
-# HESS step 2: aggregate across chromosomes and estimate h2
-hess.py \
-    --prefix hess_chr \
-    --out trait_local_h2 \
-    --tot-hsqg <total_h2_estimate> <total_h2_SE>
-# Provide total h2 and SE from LDSC for the global constraint
-```
-
-LDetect partition files (Berisa & Pickrell 2016) are available pre-computed for EUR/EAS/AFR at https://bitbucket.org/nygcresearch/ldetect-data. HESS detects high-h2 loci suitable for fine-mapping prioritization.
-
-## HDL Genetic Correlation (R)
-
-**Goal:** Genetic correlation with ~60% lower variance than LDSC when samples are non-overlapping.
-
-**Approach:** Reformat sumstats to HDL input -> download UKB reference panel eigen-decomposition -> run HDL.rg.
-
-```r
-library(HDL)
-
-# Sumstats need columns: SNP, A1, A2, b (beta), se, N
-gwas1 <- read.table('trait1.txt', header = TRUE, stringsAsFactors = FALSE)
-gwas2 <- read.table('trait2.txt', header = TRUE, stringsAsFactors = FALSE)
-
-LD.path <- 'UKB_array_SVD_eigen90_extraction'
-
-rg_result <- HDL.rg(gwas1.df = gwas1, gwas2.df = gwas2, LD.path = LD.path,
-                    Nref = 335265, output.file = 'hdl_rg.log',
-                    eigen.cut = 'automatic')
-
-# rg_result: rg, rg.se, p, h2_1, h2_2, gen.cov
-```
-
-HDL UKB reference (`UKB_array_SVD_eigen90_extraction`) requires non-overlapping samples; if either GWAS is from UKB, HDL is biased.
-
 ## Common Errors
 
 | Error / symptom | Cause | Solution |
@@ -395,12 +293,8 @@ HDL UKB reference (`UKB_array_SVD_eigen90_extraction`) requires non-overlapping 
 | `munge_sumstats.py` drops > 50% of SNPs | Allele mismatch with HapMap3 SNPlist; or A1/A2 swapped | Inspect drop reasons; pre-harmonize alleles; check rsID format |
 | LDSC intercept > 1.5 | Population stratification, cryptic relatedness, or extensive sample overlap | Report jointly with ratio; investigate per-cohort PC adjustment |
 | Stratified LDSC enrichment > 100x | Tiny annotation (<0.1% genome) underpowered | Set annotation size floor >= 0.5%; report joint enrichment of larger composite category |
-| LDAK h2 markedly different from LDSC h2 | Model assumption divergence (GCTA vs LDAK-Thin) | Per Gazal 2019 / Hou 2019; report both and flag model-dependence |
-| HDL rg = NA or numerical error | Sumstat format wrong; or eigen.cut too aggressive | Use eigen.cut='automatic'; check column names exactly |
-| HESS locus h2 negative | < 1000 SNPs in locus; LD ref-stat mismatch | Drop locus or merge with neighbor; ensure LD ref matches GWAS ancestry |
 | `--samp-prev/--pop-prev` not supplied for case-control | LDSC defaults to observed scale | Always supply both for case-control; report liability-scale h2 |
 | Cell-type S-LDSC: no tissue p < 2.5e-4 | Trait underpowered for tissue prioritization (mean chi-square low) | Pool with related traits via MTAG; or report no tissue distinguishable |
-| LDAK tagging file: build mismatch | Using hg19 tagging on hg38 GWAS sumstats | Tagging files are build-specific; download matched build |
 | BOLT-REML "matrix not positive definite" | GRM has duplicated individuals or extreme relatedness | Pre-filter to unrelated < 0.05 kinship; or use REML method-of-moments instead |
 | `munge_sumstats.py`: missing N column | Per-SNP N column not supplied | Pass `--N <Ntot>` (numeric total) OR `--N-col N` (column name); pick one |
 | `munge_sumstats.py`: all SNPs drop silently | A1/A2 flipped relative to HM3 reference (`--merge-alleles`) | Verify allele coding matches `w_hm3.snplist`; pre-harmonize or swap A1 <-> A2 |
@@ -426,10 +320,6 @@ pip install numpy==1.21.5 pandas==1.3.3 scipy==1.7.3   # environment3.yml's pins
 # type int". LD score files must be gzipped (`.l2.ldscore.gz`) -- ldscore() hardcodes that
 # suffix; every official reference bundle already ships gzipped.
 
-# LDAK 6+
-wget https://raw.githubusercontent.com/dougspeed/LDAK/main/ldak6.3.linux
-chmod +x ldak6.3.linux
-
 # Pre-computed reference resources (one-time download)
 # EUR LD scores (HapMap3 SNPs)
 wget https://alkesgroup.broadinstitute.org/LDSCORE/eur_w_ld_chr.tar.bz2
@@ -447,18 +337,9 @@ Before pointing LDSC at real GWAS data, confirm the install works: `LDSC_DIR=./l
 runs `--h2`, `--rg`, and `--h2-cts` against the simulated fixtures in the clone's own `test/` directory
 and prints real, checkable regression output for each.
 
-```r
-# HDL
-remotes::install_github('zhenin/HDL/HDL')
-# HDL UKB reference (downloads ~5 GB)
-# https://github.com/zhenin/HDL/wiki/Reference-panels
-```
+LDAK, HESS and HDL install notes live in their `references/` files (see "Per-Method Reference Files").
 
 ```bash
-# HESS (Python 2 by default; Python 3 fork: huwenboshi/hess Python 3 branch)
-git clone https://github.com/huwenboshi/hess.git
-pip install -r hess/requirements.txt
-
 # BOLT-LMM / BOLT-REML
 wget https://alkesgroup.broadinstitute.org/BOLT-LMM/downloads/BOLT-LMM_v2.4.1.tar.gz
 
