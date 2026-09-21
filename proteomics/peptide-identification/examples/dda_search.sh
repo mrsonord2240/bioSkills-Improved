@@ -7,7 +7,7 @@
 #
 # MZML may hold several space-separated paths (no spaces inside a path): they are
 # searched together and rescored in one Percolator run, which is how Percolator
-# gets enough PSMs to train (see "Rescore" in SKILL.md).
+# gets enough PSMs to train (see "Rescore" in references/cli_route.md).
 #
 # Checked on Sage 0.14.6, Comet 2026.02 rev.2, Percolator 3.09.0,
 # OpenMS 3.5.0 DecoyDatabase, on Orbitrap Astral 5-min DDA runs.
