@@ -85,15 +85,16 @@ For base editing screens a widened window is conventional; CRISPResso2's own bas
 **Approach:** Align FASTQ reads to the reference and (optional) expected-HDR amplicon, classify each read, and report aggregated statistics.
 
 ```bash
+# --expected_hdr_amplicon_seq is optional (HDR only); --min_average_read_quality is a Phred filter (see note below)
 CRISPResso \
     --fastq_r1 sample_R1.fastq.gz \
     --fastq_r2 sample_R2.fastq.gz \
     --amplicon_seq <amplicon_sequence_ref_genome> \
     --guide_seq <20nt_protospacer_no_PAM> \
-    --expected_hdr_amplicon_seq <edited_amplicon_for_HDR> \  # OPTIONAL
+    --expected_hdr_amplicon_seq <edited_amplicon_for_HDR> \
     --quantification_window_size 1 \
     --quantification_window_center -3 \
-    --min_average_read_quality 30 \                          # Phred quality filter
+    --min_average_read_quality 30 \
     --output_folder sample_results \
     --name sample_id
 
@@ -240,12 +241,13 @@ CRISPRessoBatch \
 # TP53_exon7     ACGT...         GUIDE2
 # KRAS_codon12   ACGT...         GUIDE3
 
+# --min_reads_to_use_region 100: see the note below (the default of 1000 skips small amplicons)
 CRISPRessoPooled \
     --fastq_r1 pooled_R1.fastq.gz \
     --fastq_r2 pooled_R2.fastq.gz \
     --amplicons_file amplicons.txt \
     --output_folder pooled_run \
-    --min_reads_to_use_region 100 \                          # see note below
+    --min_reads_to_use_region 100 \
     --n_processes 8
 
 # Outputs:
