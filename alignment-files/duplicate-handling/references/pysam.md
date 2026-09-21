@@ -3,42 +3,15 @@
 ## pysam Python Alternative
 
 ### Full Pipeline
-```python
-import pysam
-
-# Sort by name
-pysam.sort('-n', '-o', 'namesort.bam', 'input.bam')
-
-# Fixmate
-pysam.fixmate('-m', 'namesort.bam', 'fixmate.bam')
-
-# Sort by coordinate
-pysam.sort('-o', 'coordsort.bam', 'fixmate.bam')
-
-# Mark duplicates
-pysam.markdup('coordsort.bam', 'marked.bam')
-
-# Index
-pysam.index('marked.bam')
+`pysam.sort('-n', ...)` -> `pysam.fixmate('-m', ...)` -> `pysam.sort(...)` -> `pysam.markdup(...)` -> `pysam.index(...)`, with a record-count check, in `scripts/pysam_markdup.py`:
+```bash
+python scripts/pysam_markdup.py input.bam marked.bam
 ```
 
 ### Check Duplicate Flag
-```python
-import pysam
-
-with pysam.AlignmentFile('marked.bam', 'rb') as bam:
-    total = 0
-    duplicates = 0
-    for read in bam:
-        if read.is_secondary or read.is_supplementary:
-            continue
-        total += 1
-        if read.is_duplicate:
-            duplicates += 1
-
-    print(f'Total: {total}')
-    print(f'Duplicates: {duplicates}')
-    print(f'Rate: {duplicates/total*100:.2f}%')
+Counts primary alignments with `read.is_duplicate` (skips secondary and supplementary) and prints total, duplicates and rate, in `scripts/dup_rate.py`:
+```bash
+python scripts/dup_rate.py marked.bam
 ```
 
 ### Filter Out Duplicates

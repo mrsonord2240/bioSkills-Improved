@@ -9,41 +9,29 @@ For UMI libraries (10x scRNA, ctDNA panels, Twist/IDT/Roche UMI capture), naive 
 Input must be **coordinate-sorted and indexed**.
 Pass `--paired` for paired-end libraries: without it the mates are deduplicated independently and the output is silently wrong (5689 vs 2805 records on a paired-end capture BAM). Add `--random-seed=1` for a reproducible output: umi_tools picks among tied reads at random, so without it the count moves by about 1 between runs (5688 or 5689 here).
 
+`scripts/umi_tools_dedup.sh` runs both forms with `--method=directional --random-seed=1` and fails on an empty output:
 ```bash
-# 10x / scRNA -- group by cell barcode + UMI. Check the tags exist first: with absent CB/UB,
-# --per-cell writes an EMPTY BAM and still exits 0
-samtools view cellranger_possorted.bam | head -1000 | grep -c 'CB:Z:'    # must be > 0
-umi_tools dedup --stdin=cellranger_possorted.bam --stdout=dedup.bam \
-    --extract-umi-method=tag --umi-tag=UB --cell-tag=CB \
-    --per-cell --method=directional --random-seed=1
-test "$(samtools view -c dedup.bam)" -gt 0
+# 10x / scRNA: group by cell barcode (CB) + UMI (UB). With absent CB/UB, --per-cell writes an EMPTY BAM and
+# still exits 0, so the script checks for CB:Z: in the first 1000 records and exits 2 if there are none.
+bash scripts/umi_tools_dedup.sh scrna cellranger_possorted.bam dedup.bam
 
-# Bulk UMI, paired-end (UMI in the RX tag)
-samtools sort -o sorted.bam raw.bam && samtools index sorted.bam
-umi_tools dedup --stdin=sorted.bam --stdout=dedup.bam --paired \
-    --extract-umi-method=tag --umi-tag=RX --method=directional --random-seed=1
+# Bulk UMI, paired-end (UMI in the RX tag): sorts and indexes a copy first, passes --paired
+bash scripts/umi_tools_dedup.sh bulk-paired raw.bam dedup.bam
 ```
 
 ### fgbio consensus (bulk UMI / ctDNA, best practice for low-VAF detection)
 
-`GroupReadsByUmi` needs the mate mapping-quality (`MQ`) tag on every read (see Common Errors). `samtools fixmate -m` on name-grouped input adds it; alternatively `fgbio SetMateInformation` on queryname-sorted input. Consensus reads are written **unmapped**; re-align them before variant calling. Single-strand and duplex use different grouping strategies and are separate branches:
+`GroupReadsByUmi` needs the mate mapping-quality (`MQ`) tag on every read (see Common Errors). `samtools fixmate -m` on name-grouped input adds it; alternatively `fgbio SetMateInformation` on queryname-sorted input. Consensus reads are written **unmapped**; re-align them before variant calling. Single-strand and duplex use different grouping strategies and are separate branches. `scripts/fgbio_consensus.sh` name-sorts, adds the mate tags, groups and calls consensus:
 
 ```bash
-# If the UMI is in a separate FASTQ instead of the RX tag, annotate first and use annotated.bam below:
-#   fgbio AnnotateBamWithUmis -i raw.bam -f umi.fastq -o annotated.bam
-samtools sort -n -o qn.bam raw.bam
-samtools fixmate -m qn.bam mated.bam        # or: fgbio SetMateInformation -i qn.bam -o mated.bam
+# Single-strand molecular consensus (--strategy=adjacency --edits=1, then CallMolecularConsensusReads --min-reads=1)
+bash scripts/fgbio_consensus.sh single raw.bam consensus.bam
 
-# Single-strand molecular consensus
-fgbio GroupReadsByUmi -i mated.bam -o grouped.bam --strategy=adjacency --edits=1 --raw-tag=RX
-fgbio CallMolecularConsensusReads -i grouped.bam -o consensus.bam --min-reads=1
-
-# Duplex (xGen-Prism, NEBNext duplex): needs --strategy=paired, which requires RX as two UMIs joined by '-'
-# (UMI1-UMI2; a single-UMI RX fails with IllegalArgumentException; single-UMI libraries use the adjacency
-# branch above) and writes MI tags with /A /B strand suffixes. CallDuplexConsensusReads on adjacency-grouped reads crashes (StringIndexOutOfBoundsException).
-fgbio GroupReadsByUmi -i mated.bam -o grouped_duplex.bam --strategy=paired --edits=1 --raw-tag=RX
-fgbio CallDuplexConsensusReads -i grouped_duplex.bam -o duplex.bam --min-reads 1 1 0
+# Duplex (xGen-Prism, NEBNext duplex): --strategy=paired, then CallDuplexConsensusReads --min-reads 1 1 0
+bash scripts/fgbio_consensus.sh duplex raw.bam duplex.bam
 ```
+
+Duplex needs `--strategy=paired`, which requires RX as two UMIs joined by `-` (UMI1-UMI2; a single-UMI RX fails with IllegalArgumentException, so single-UMI libraries use the single-strand branch) and writes MI tags with `/A` `/B` strand suffixes. `CallDuplexConsensusReads` on adjacency-grouped reads crashes (StringIndexOutOfBoundsException). If the UMI is in a separate FASTQ instead of the RX tag, annotate first and pass the annotated BAM: `fgbio AnnotateBamWithUmis -i raw.bam -f umi.fastq -o annotated.bam`.
 
 ### Picard UMI-aware marking
 ```bash

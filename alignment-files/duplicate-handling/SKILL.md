@@ -131,23 +131,15 @@ samtools index marked.bam
 ```
 
 ### Pipeline Version (Optimized)
-```bash
-# pipefail: without it a failed first stage still exits 0 and leaves an empty marked.bam
-set -euo pipefail
-mkdir -p tmpdir   # collate/sort do not create it; a missing dir fails only the first stage
 
+`examples/markdup_pipeline.sh` is the complete script: the assay gate, `set -euo pipefail` (without it a failed first stage still exits 0 and leaves an empty output), a `mktemp -d` scratch dir (collate/sort do not create `tmpdir`; a missing one fails only the first stage), the pipe below, the index, and the check that markdup dropped no records and the output is not empty. `ASSAY=wgs bash examples/markdup_pipeline.sh in.bam out.bam [threads]`.
+
+```bash
 # collate is faster than sort -n; -u/-O between piped tools skips BGZF round-trips
 samtools collate -O -u input.bam tmpdir/collate | \
     samtools fixmate -m -u - - | \
     samtools sort -u -@ 4 -T tmpdir/sort - | \
-    samtools markdup -@ 4 -d 2500 --use-read-groups \
-        -f markdup_stats.txt - marked.bam
-
-samtools index marked.bam
-
-# Sanity: markdup drops no records, and the output is not empty
-test "$(samtools view -c input.bam)" -gt 0 && \
-test "$(samtools view -c input.bam)" -eq "$(samtools view -c marked.bam)"
+    samtools markdup -@ 4 -d 2500 --use-read-groups -f markdup_stats.txt - marked.bam
 ```
 
 This gives the same flagged counts as the plain `sort -n | fixmate | sort | markdup` chain and skips the intermediate files, but it was not faster in a measured run (800k reads, 4 threads: 6.4 s vs 4.6 s for the plain chain). No speed figure is claimed for 30x WGS.
@@ -286,6 +278,8 @@ Messages verbatim from samtools 1.24. Each stops the tool (exit 1); a partial ou
 | `references/umi-dedup.md` | The decision table says UMI: `umi_tools dedup`, fgbio single-strand / duplex consensus, Picard UmiAware |
 | `references/alternative-markers.md` | The user wants samblaster, Picard, biobambam2, sambamba, PacBio HiFi `pbmarkdup`, or mapDamage for aDNA |
 | `references/pysam.md` | The user wants the workflow, the duplicate rate or a duplicate filter in Python |
+
+Runnable helpers are in `scripts/` and are invoked from those files: `pysam_markdup.py`, `dup_rate.py`, `umi_tools_dedup.sh`, `fgbio_consensus.sh`. The complete samtools pipeline is `examples/markdup_pipeline.sh`.
 
 ## Related Skills
 
