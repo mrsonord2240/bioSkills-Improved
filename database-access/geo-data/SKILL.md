@@ -15,6 +15,8 @@ Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show biopython geoparse` then introspect signatures
 - R: `packageVersion('GEOquery')`
 
+Text encoding differs by language on Windows (checked 2026-09-21, Python 3.12 / R 4.4.3): Python's default follows the locale (`cp1252` here, unless `PYTHONUTF8=1`) while R's was UTF-8. GEO SOFT and matrix files contain UTF-8, so in Python always pass `encoding='utf-8', errors='replace'` to `gzip.open(..., 'rt')`, whatever the R side does.
+
 If the GSE structure doesn't match expectations (missing fields, malformed series matrix), re-fetch from FTP directly and inspect the SOFT or MINiML file as source of truth.
 
 # GEO Data
@@ -225,6 +227,7 @@ print(check_super_or_sub_series('GSE346738'))
 
 ```python
 import gzip
+import urllib.request
 import pandas as pd
 
 
