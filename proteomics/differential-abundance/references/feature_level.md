@@ -1,6 +1,6 @@
 # Feature-Level Testing (msqrob2, MSstats) -- Peptide Table In, Protein Calls Out
 
-Loaded from `SKILL.md` when a peptide/precursor table exists. Checked 2026-09-21 on msqrob2 1.14.1, QFeatures 1.16.0, MsCoreUtils 1.18.0, MSstats 4.14.2 (R 4.4.3 / Bioconductor 3.20). Every block chains through the ambient objects `sample_info`, `peptide_wide`, `evidence`, `protein_groups` and `annotation`; the end-to-end version is `examples/msqrob2_peptide_level.R`.
+Loaded from `SKILL.md` when a peptide/precursor table exists. Checked 2026-09-21 on msqrob2 1.14.1, QFeatures 1.16.0, MsCoreUtils 1.18.0, MSstats 4.14.2 (R 4.4.3 / Bioconductor 3.20). The runnable code is in `examples/msqrob2_peptide_level.R` and `scripts/` (below); the short msqrobAggregate block continues from the example's `pe` and `L`.
 
 ## msqrob2 Workflow (R)
 
@@ -8,38 +8,7 @@ Loaded from `SKILL.md` when a peptide/precursor table exists. Checked 2026-09-21
 
 **Approach:** Build a `QFeatures` object from a wide peptide matrix, log-transform, keep peptides seen in at least 2 runs, aggregate to protein with `robustSummary` (Huber M-estimation, which is what downweights an outlier peptide), then fit `msqrob` -- ridge/robust regression with empirical-Bayes variance moderation -- and test the contrast. `hypothesisTest` writes its result into `rowData(pe[['protein']])`, one data frame per contrast. Two things the object does silently and you must undo: proteins with no observation in a condition come back with `adjPval = NA` rather than in a list, and any per-run normalization you apply here is applied to a *different peptide set in each run* (see the centring section). Report the untestable and undetected proteins separately, as `SKILL.md` requires. Runnable end to end: `examples/msqrob2_peptide_level.R` (takes `evidence.txt` plus an annotation file, or simulates a peptide table when given no arguments).
 
-```r
-library(QFeatures)
-library(msqrob2)
-
-# peptide_wide: one row per precursor; columns 'feature', 'protein', then one intensity column per run
-runs <- sample_info$run
-col_data <- data.frame(quantCols = runs, condition = factor(sample_info$condition),
-                       sample = factor(runs), row.names = runs)  # quantCols column is required by readQFeatures
-pe <- readQFeatures(assayData = peptide_wide, quantCols = runs, colData = col_data, name = 'peptideRaw')
-pe <- zeroIsNA(pe, 'peptideRaw')
-pe <- logTransform(pe, base = 2, i = 'peptideRaw', name = 'peptideLog')
-rowData(pe[['peptideLog']])$nNonZero <- rowSums(!is.na(assay(pe[['peptideLog']])))
-pe <- filterFeatures(pe, ~ nNonZero >= 2, keep = TRUE)  # keep=TRUE: the variable exists only on peptideLog
-
-# undetected list, taken BEFORE aggregation: msqrob2 reports these as adjPval = NA, not as a list
-cond <- colData(pe)$condition  # colData lives on the QFeatures object; pe[['peptideLog']]$condition is NULL
-obs <- sapply(levels(cond), function(g)
-  tapply(rowSums(!is.na(assay(pe[['peptideLog']])[, cond == g, drop = FALSE])),
-         rowData(pe[['peptideLog']])$protein, sum))
-undetected <- rownames(obs)[apply(obs, 1, min) == 0]  # report as "undetected in group X", never as a fold change
-
-pe <- aggregateFeatures(pe, i = 'peptideLog', fcol = 'protein', name = 'protein',
-                        fun = MsCoreUtils::robustSummary, na.rm = TRUE)
-pe <- msqrob(pe, i = 'protein', formula = ~condition, robust = TRUE)
-L <- makeContrast('conditionTreatment = 0', parameterNames = 'conditionTreatment')
-pe <- hypothesisTest(pe, i = 'protein', contrast = L)
-
-res <- rowData(pe[['protein']])$conditionTreatment  # columns: logFC, se, df, t, pval, adjPval (no adj.P.Val)
-res$protein <- rownames(pe[['protein']])
-untestable <- res$protein[is.na(res$adjPval)]       # report these; they are not "not significant"
-res <- res[!is.na(res$adjPval), ]
-```
+The runnable block is `examples/msqrob2_peptide_level.R`, which does the whole chain above and the undetected list; run it as `Rscript examples/msqrob2_peptide_level.R evidence.txt annotation.csv`. It builds `peptide_wide` (one row per precursor; columns `feature`, `protein`, then one intensity column per run) and `colData` (with the required `quantCols` column and `sample`), takes the undetected list before aggregation, and reads the result from `rowData(pe[['protein']])$conditionTreatment` (columns `logFC, se, df, t, pval, adjPval`; no `adj.P.Val`). Rows with `adjPval = NA` are untestable: report them separately, not as non-significant.
 
 To keep every peptide as its own degree of freedom instead of summarizing first, fit the mixed model over the peptide assay. `sample` must be a column of `colData` and `feature` a column of `rowData`:
 
@@ -59,23 +28,10 @@ pe <- hypothesisTest(pe, i = 'proteinLmer', contrast = L)
 
 **The `normalization` argument is the per-run median normalization the centring section below warns about.** `'equalizeMedians'` is MSstats's default. On the 4 v 4 audit peptide set it gave median log2FC -0.184, median null-protein SE 0.119 and 101 calls with 21 false positives (20.8% realized FDR at nominal 5%); `normalization = FALSE` gave median log2FC +0.008, SE 0.204 and 79 calls with 0 false positives. Keep `'equalizeMedians'` only if the centring checks below pass; otherwise pass `FALSE` and normalize at the protein level after summarization (proteomics/quantification).
 
-```r
-library(MSstats)
+Runnable script: `scripts/msstats_group_comparison.R` runs the importer, `dataProcess` (TMP, `MBimpute = FALSE`) and `groupComparison`, builds the contrast from the reference and test level names, and writes the tested table (`log2FC, SE, Tvalue, DF, pvalue, adj.pvalue, issue`; `adj.pvalue` is the BH p) and the undetected proteins (infinite `log2FC`, `issue == 'oneConditionMissing'`) to separate files. The annotation file has `Raw.file, Condition, BioReplicate, IsotopeLabelType`. Set `normalization` explicitly; `FALSE` = none (audit set: -0.184 / 20.8% FDR under `equalizeMedians` vs +0.008 / 0.0%).
 
-input <- MaxQtoMSstatsFormat(evidence = evidence, proteinGroups = protein_groups,
-                             annotation = annotation, use_log_file = FALSE)  # annotation: Raw.file, Condition, BioReplicate, IsotopeLabelType
-proc <- dataProcess(input,
-                    normalization = 'equalizeMedians',  # per-run median normalization: run the centring checks; FALSE = none (audit set: -0.184 / 20.8% FDR vs +0.008 / 0.0%)
-                    summaryMethod = 'TMP', censoredInt = 'NA', MBimpute = FALSE, use_log_file = FALSE)
-
-contrast <- matrix(c(-1, 1), nrow = 1,
-                   dimnames = list('Treatment-Control', c('Control', 'Treatment')))  # order = levels(GROUP)
-res <- groupComparison(contrast.matrix = contrast, data = proc, use_log_file = FALSE)$ComparisonResult
-res$Protein <- as.character(res$Protein)
-
-undetected <- res[res$issue %in% 'oneConditionMissing', ]   # infinite log2FC; report as undetected, not as a ratio
-tested <- res[is.finite(res$log2FC) & !is.na(res$adj.pvalue), ]
-# columns: Protein, Label, log2FC, SE, Tvalue, DF, pvalue, adj.pvalue, issue (adj.pvalue is the BH p)
+```bash
+Rscript scripts/msstats_group_comparison.R evidence.txt proteinGroups.txt annotation.csv Control Treatment equalizeMedians out_prefix
 ```
 
 ## Centring checks -- run both before reading any feature-level result
@@ -93,38 +49,13 @@ tested <- res[is.finite(res$log2FC) & !is.na(res$adj.pvalue), ]
 
 The offset is the detectable symptom of the pair, not the cause on its own, so there are two cheap checks: the offset of the result table, and the residual SD of the peptide table before and after the normalization. The residual SD fell to 0.76 of its un-normalized value under per-run median centring (both the all-peptide and the within-condition-only variants) and stayed at 1.00 under the uniform offset. Fix a failure upstream (proteomics/quantification: normalize on features present in every run, or at the protein level after summarization), not by re-centring the p-values.
 
-```r
-# Trip-wires, not distributional bounds: both constants were read off ONE 4 v 4 label-free set.
-OFFSET_MAX   <- 0.05  # |median log2FC| over the tested proteins
-SD_RATIO_MIN <- 0.85  # residual SD after / before per-run normalization (0.76 where it produced 31 false positives)
+Runnable script: `scripts/centring_checks.R` defines `resid_sd()`, `check_sd_ratio()` (the warning, at `SD_RATIO_MIN`) and `check_offset()` (the stop, at `OFFSET_MAX`), and as a script runs both on a peptide table with and without per-run median normalization. Both constants were read off ONE 4 v 4 label-free set: trip-wires, not distributional bounds. `peptide_wide.csv` has `feature`, `protein` and one linear-scale intensity column per run; `samples.csv` has `run` and `condition`.
 
-# median within-condition SD over peptides (log2 matrix, features x runs; NA-tolerant)
-resid_sd <- function(L, cond) {
-  ss <- df <- 0
-  for (g in levels(cond)) {
-    m <- L[, cond == g, drop = FALSE]
-    ss <- ss + rowSums((m - rowMeans(m, na.rm = TRUE))^2, na.rm = TRUE)
-    df <- df + pmax(rowSums(!is.na(m)) - 1, 0)
-  }
-  median(sqrt(ss[df > 0] / df[df > 0]))
-}
-
-# 1. Residual check, only if you normalize. msqrob2 route: run this after filterFeatures and before
-#    aggregateFeatures, then aggregate and test from 'peptideNorm' (aggregateFeatures(pe, i = 'peptideNorm', ...)).
-#    MSstats route: fit twice, normalization = FALSE and the default, and compare median(tested$SE)
-#    instead: same warning, same SD_RATIO_MIN.
-pe <- normalize(pe, i = 'peptideLog', name = 'peptideNorm', method = 'center.median')
-sd_ratio <- resid_sd(assay(pe[['peptideNorm']]), cond) / resid_sd(assay(pe[['peptideLog']]), cond)
-if (sd_ratio < SD_RATIO_MIN) warning(sprintf(
-  'residual SD fell to %.2f of its un-normalized value: the normalization is removing within-condition variance and shrinking the SEs. Check the offset below and compare with normalization off.',
-  sd_ratio))
-
-# 2. Offset check on the result table (msqrob2: res$logFC; MSstats: tested$log2FC)
-offset <- median(res$logFC, na.rm = TRUE)
-if (abs(offset) > OFFSET_MAX) stop(sprintf(
-  'median log2FC = %+.3f: the contrast is not centred. Re-normalize (proteomics/quantification) before reading this table.',
-  offset))
+```bash
+Rscript scripts/centring_checks.R peptide_wide.csv samples.csv TRUE Control Treatment   # TRUE = per-run median centring first
 ```
+
+Check 1 (residual SD) applies only if you normalize. On the msqrob2 route run it after `filterFeatures` and before `aggregateFeatures`, then aggregate and test from `peptideNorm`. On the MSstats route fit twice, `normalization = FALSE` and the default, and compare `median(tested$SE)`: same warning, same `SD_RATIO_MIN`. Check 2 (offset) reads the result table (msqrob2 `res$logFC`; MSstats `tested$log2FC`).
 
 Passing both checks does not certify the normalization; it only means these two symptoms are absent. The checks are also imperfect in both directions on the audit set: the offset stop would have blocked a harmless uniform -0.20 shift, and the within-condition-only variant passes the offset check (-0.016) and is caught only by the SD ratio. A drop in residual SD is also what normalization is FOR when the loading variation is real, so read a warning together with the offset. A study that genuinely expects a global shift must override `OFFSET_MAX` deliberately.
 

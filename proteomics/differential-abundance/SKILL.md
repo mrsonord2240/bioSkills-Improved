@@ -73,30 +73,13 @@ Default when uncertain: protein-level summary matrix at n=3-5 -> limma `eBayes(t
 
 **Approach:** Filter to proteins with enough valid values per group (rows with no or too few values give `NA` averages that stop `eBayes(trend = TRUE)`), build the design (batch as a covariate when present), fit the linear model, drop rows the design cannot estimate, then contrast, apply EB moderation with the intensity trend and robust fitting, and extract BH-corrected results. The per-condition count is NOT sufficient in a paired or blocked design (donor, subject or batch in the model): rows whose observed values fall in different blocks in the two conditions leave zero residual df or a partly `NA` coefficient vector, and limma tests them anyway on a contrast that is partly a block difference. Report proteins removed by either filter (e.g. undetected in one group) separately. Never feed `removeBatchEffect` output to `lmFit`. Runnable end to end on simulated data: `examples/limma_analysis.R`.
 
-```r
-library(limma)
+Runnable script: `scripts/limma_de.R` holds the valid-value filter, the design with batch as a covariate, the estimability filter, `eBayes(trend = TRUE, robust = TRUE)` and the BH table. `matrix.csv` is log2, proteins by samples; `samples.csv` has `sample`, `condition` and optionally `batch`; the contrast names are levels of `condition`. Its output lists the rows dropped by each filter. Report them.
 
-cond <- factor(sample_info$condition)
-# Valid-value filter BEFORE lmFit: >= 2 values in every group (study choice; 3 of 4 is common)
-n_valid <- sapply(levels(cond), function(g) rowSums(!is.na(protein_matrix[, cond == g, drop = FALSE])))
-protein_matrix <- protein_matrix[apply(n_valid >= 2, 1, all), ]
-
-design <- model.matrix(~0 + condition + batch, data = sample_info)  # batch in the model, not removed first
-colnames(design)[seq_len(nlevels(cond))] <- levels(cond)
-
-fit <- lmFit(protein_matrix, design)
-# Estimability filter: the per-group count above does not make the contrast estimable under a blocked
-# design ('Partial NA coefficients for N probe(s)'). Keep only fully estimated rows with residual df.
-estimable <- fit$df.residual > 0 & rowSums(is.na(fit$coefficients)) == 0
-fit <- fit[estimable, ]    # report the dropped rows; they are the non-estimable ones, not "not significant"
-
-contrast_matrix <- makeContrasts(Treatment - Control, levels = design)
-fit2 <- contrasts.fit(fit, contrast_matrix)
-fit2 <- eBayes(fit2, trend = TRUE, robust = TRUE)  # trend mandatory for label-free; robust Winsorizes outliers
-
-results <- topTable(fit2, coef = 1, number = Inf, adjust.method = 'BH')
-# columns: logFC, AveExpr, t, P.Value, adj.P.Val, B  (adj.P.Val is the BH p; there is no $FDR)
+```bash
+Rscript scripts/limma_de.R matrix.csv samples.csv Treatment-Control results.csv [min_valid=2]
 ```
+
+To keep the fit for `treat()`, DEqMS and ashr below, `source('scripts/limma_de.R')` and call `out <- run_limma_de(protein_matrix, sample_info, 'Treatment-Control')`, then `fit2 <- out$fit2` and `results <- out$results`.
 
 ### Minimum-fold-change testing
 
@@ -155,34 +138,7 @@ Read `references/feature_level.md` before testing from a peptide/precursor table
 
 **Goal:** Run the full pipeline in Python when no R is available and n is large enough that moderation is unnecessary.
 
-**Approach:** Log2-transform, median-normalize, run per-protein Welch t-tests, apply Benjamini-Hochberg. Return the untestable proteins (fewer than 2 values in a group) alongside the results, as the limma section requires -- they are not "not significant". This has NO variance moderation and should not be used at n=3-5 -- escalate to limma/DEqMS for small n. Runnable script: `examples/differential_abundance.py`.
-
-```python
-import numpy as np
-import pandas as pd
-from scipy import stats
-from statsmodels.stats.multitest import multipletests
-
-def preprocess(intensities):
-    log2_data = np.log2(intensities.replace(0, np.nan))  # zeros -> NaN to avoid -inf
-    sample_medians = log2_data.median(axis=0)
-    return log2_data - sample_medians + sample_medians.median()
-
-def differential_abundance(normalized, case_cols, ctrl_cols):
-    rows, untestable = [], []
-    for protein in normalized.index:
-        case, ctrl = normalized.loc[protein, case_cols].dropna(), normalized.loc[protein, ctrl_cols].dropna()
-        if len(case) >= 2 and len(ctrl) >= 2:
-            _, pval = stats.ttest_ind(case, ctrl, equal_var=False)  # Welch; scipy defaults to Student's True
-            rows.append({'protein': protein, 'log2fc': case.mean() - ctrl.mean(), 'pvalue': pval})
-        else:  # never drop these silently: proteins undetected in one group are often the largest real changes
-            untestable.append({'protein': protein, 'n_case': len(case), 'n_ctrl': len(ctrl)})
-    if not rows:
-        raise ValueError('No protein has >= 2 non-missing values in both groups; a two-sample test is not possible')
-    df = pd.DataFrame(rows)
-    df['padj'] = multipletests(df['pvalue'], method='fdr_bh')[1]  # default is Holm-Sidak; pass fdr_bh explicitly
-    return df, pd.DataFrame(untestable, columns=['protein', 'n_case', 'n_ctrl'])  # report the second table too
-```
+**Approach:** Log2-transform, median-normalize, run per-protein Welch t-tests, apply Benjamini-Hochberg. Return the untestable proteins (fewer than 2 values in a group) alongside the results, as the limma section requires -- they are not "not significant". This has NO variance moderation and should not be used at n=3-5 -- escalate to limma/DEqMS for small n. Runnable script with the `preprocess()` and `differential_abundance()` functions: `examples/differential_abundance.py` (run it as `python examples/differential_abundance.py`; import the two functions for your own matrix).
 
 ## Fold-Change Reporting
 
