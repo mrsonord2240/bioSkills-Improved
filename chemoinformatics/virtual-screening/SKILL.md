@@ -25,7 +25,14 @@ installed via pip; use the bare name, as in the code below.
 
 **On Windows, `pip install vina` has no wheel** (`ValueError: Boost library location was
 not found!` at build time). Use the Vina CLI via `subprocess` instead of `from vina import
-Vina` -- see the CLI-fallback comment in "Vina Docking (Single Ligand)" below.
+Vina` -- see the CLI-fallback comment in "Vina Docking (Single Ligand)" below. The Python-API
+branch itself is verified, not just doc-checked: conda-forge ships prebuilt `vina` 1.2.7 for
+linux-64 (`conda install -c conda-forge vina`), which runs under WSL on a Windows box. Docking
+benzamidine into PDB 3PTB there with `scripts/dock_single.py`'s `from vina import Vina` path and
+with `examples/virtual_screen.py`'s `virtual_screen()` gave the same top pose (-5.978 kcal/mol)
+as the Vina CLI run on the same fixture, and `write_poses`/`v.energies()` round-tripped a valid
+multi-model PDBQT. No Windows build of the PyPI `vina` wheel exists, so the CLI fallback stays
+the Windows-native path -- but the API branch is confirmed correct, not merely plausible.
 
 # Virtual Screening
 
@@ -130,7 +137,21 @@ When the binding pocket is not known (apo target, novel allosteric site):
 prank predict -f receptor.pdb -o pockets/
 ```
 
-P2Rank output `<receptor>_predictions.csv` lists pocket centers with scores. The highest model score does not identify a pocket as orthosteric or biologically relevant; verify ranked pockets against co-crystal, mutagenesis, SAR, or other structural evidence.
+**On Windows, `prank.bat` returns immediately with no output when invoked through a shell
+wrapper** (`cmd.exe /c`, or a bash script calling it) -- confirmed on this fixture: it printed
+only the `cmd.exe` banner and produced no `pockets/` directory. Call the jar directly instead,
+which does run and predict:
+
+```bash
+java -cp "<p2rank_dir>/bin/p2rank.jar;<p2rank_dir>/bin/lib/*" cz.siret.prank.program.Main \
+     predict -f receptor.pdb -o pockets/
+```
+
+Verified on PDB 3PTB: 4 pockets in ~4 s, `pockets/rec.pdb_predictions.csv` with `pocket1` centered
+at (-1.52, 14.47, 17.47) -- the same box center used throughout this Skill's Vina examples, which
+sits on the real benzamidine site. P2Rank output `<receptor>_predictions.csv` lists pocket centers
+with scores. The highest model score does not identify a pocket as orthosteric or biologically
+relevant; verify ranked pockets against co-crystal, mutagenesis, SAR, or other structural evidence.
 
 ## Vina Docking (Single Ligand)
 
@@ -166,6 +187,7 @@ Vina's `rmsd_lb` and `rmsd_ub` are lower and upper heavy-atom RMSD bounds betwee
 | All affinities very poor (-3 to -5) | Wrong protonation; ligand too large for box | Re-check pKa; expand box |
 | Identical affinity across ligands | Receptor grid not computed | Call `v.compute_vina_maps()` before dock |
 | PoseBusters passes only ~3/12 on a docked charged ligand; `Explicit valence ... is greater than permitted` | `obabel` PDBQT -> SDF dropped bond orders/charges | Rebuild with meeko `RDKitMolCreate.from_pdbqt_mol` (see Handoff caveat) |
+| `prank predict` exits with no `pockets/` directory and no error | `prank.bat` returns immediately when run through a shell wrapper on Windows | Call the jar directly: `java -cp ".../bin/p2rank.jar;.../bin/lib/*" cz.siret.prank.program.Main predict ...` (see Binding Site Detection) |
 | Pose poses make no sense | Receptor and ligand in different frames | Ensure same coordinate origin |
 | Metal-coordination pose is wrong | The selected scoring/preparation protocol lacks a validated model for that metal geometry | Use a metal-specific validated workflow; the Vina executable can use AutoDock4Zn maps with `--scoring ad4` for zinc, while other metals require separately supported parameters/protocols |
 | GPU mode slow | Vina is CPU-only; only GNINA is GPU | Use GNINA for GPU; if using a third-party GPU port of Vina, benchmark it on the same hardware, target, library tranche, and search settings before adopting it |
