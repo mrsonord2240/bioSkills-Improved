@@ -43,6 +43,8 @@ Read a file only when the request needs that method; everything every request ne
 | `references/tool-installation.md` | A package is missing or fails to install; setting up local clumping |
 | `references/bibliography.md` | Citing a method |
 
+Runnable code lives in `scripts/` (run with `Rscript`): `twosample_workflow.R` (standard workflow, writes `harmonised.tsv`), `mr_presso_outliers.R`, `mvmr_conditional_f.R`, `simex_egger.R`. Each has a usage header.
+
 ## Statistical Model Taxonomy
 
 | Method | Pleiotropy assumption | Min instruments | Strength | Fails when |
@@ -176,55 +178,12 @@ Steiger is a heuristic; it can flag "reverse causation" wrongly when an unmeasur
 
 **Approach:** Extract genome-wide significant instruments -> clump (local plink preferred) -> extract outcome -> harmonise -> mr -> pleiotropy + heterogeneity + leave-one-out -> Steiger -> MR-PRESSO -> report.
 
-```r
-library(TwoSampleMR)
-library(ieugwasr)
-
-exposure_raw <- read_exposure_data(
-    filename = 'exposure_gwas.tsv', sep = '\t',
-    snp_col = 'SNP', beta_col = 'BETA', se_col = 'SE',
-    effect_allele_col = 'A1', other_allele_col = 'A2',
-    eaf_col = 'EAF', pval_col = 'P', samplesize_col = 'N'  # required for directionality_test() below
-)
-
-exposure_sig <- subset(exposure_raw, pval.exposure < 5e-08)  # genome-wide significance
-
-# F-statistic computed from EXPOSURE (Burgess 2011); ratio of squared effect to its variance
-exposure_sig$f_stat <- (exposure_sig$beta.exposure / exposure_sig$se.exposure)^2
-exposure_sig <- subset(exposure_sig, f_stat >= 10)  # Staiger-Stock 1997 weak-IV heuristic
-
-clumped <- ld_clump(
-    data.frame(rsid = exposure_sig$SNP, pval = exposure_sig$pval.exposure),
-    clump_r2 = 0.001, clump_kb = 10000,  # polygenic MR convention
-    plink_bin = genetics.binaRies::get_plink_binary(),
-    bfile = '1kg_EUR/EUR'
-)
-exposure_dat <- subset(exposure_sig, SNP %in% clumped$rsid)
-
-outcome_dat <- read_outcome_data(
-    filename = 'outcome_gwas.tsv', snps = exposure_dat$SNP, sep = '\t',
-    snp_col = 'SNP', beta_col = 'BETA', se_col = 'SE',
-    effect_allele_col = 'A1', other_allele_col = 'A2',
-    eaf_col = 'EAF', pval_col = 'P', samplesize_col = 'N'  # required for directionality_test() below
-)
-
-dat <- harmonise_data(exposure_dat, outcome_dat, action = 2)  # infer from EAF; drops MAF~0.5 palindromes
-
-primary <- mr(dat, method_list = c('mr_ivw', 'mr_egger_regression',
-                                    'mr_weighted_median', 'mr_weighted_mode'))
-
-heterogeneity <- mr_heterogeneity(dat)         # Cochran Q
-pleiotropy <- mr_pleiotropy_test(dat)          # Egger intercept
-loo <- mr_leaveoneout(dat)                     # influential-SNP check
-
-steiger <- directionality_test(dat)            # variance-explained direction
-if (is.null(steiger)) {
-    stop("directionality_test() returned NULL -- dat is missing pval.exposure/pval.outcome/",
-         "samplesize.exposure/samplesize.outcome (or supply pre-computed r.exposure/r.outcome, ",
-         "e.g. via get_r_from_lor() for binary traits). It fails silently, not loudly, so check ",
-         "for NULL rather than trusting a downstream NULL$correct_causal_direction.")
-}
+```bash
+Rscript scripts/twosample_workflow.R --exposure exposure_gwas.tsv --outcome outcome_gwas.tsv \
+    --outdir mr_out --bfile 1kg_EUR/EUR    # --no-clump ONLY for instruments already LD-independent
 ```
+
+`scripts/twosample_workflow.R` (TwoSampleMR, ieugwasr) reads two TSVs with columns `SNP, BETA, SE, A1, A2, EAF, P, N` (`N` is required: `directionality_test()` needs `samplesize_col`) and runs: `P < 5e-8` -> per-instrument F from the EXPOSURE `(beta/se)^2 >= 10` (Staiger-Stock 1997) -> `ld_clump()` at r2 = 0.001 / 10 Mb (local plink; `genetics.binaRies::get_plink_binary()` unless `--plink`) -> `harmonise_data(action = 2)` (infer from EAF; drops MAF~0.5 palindromes) -> `mr()` IVW / Egger / weighted median / weighted mode -> `mr_heterogeneity()` (Cochran Q), `mr_pleiotropy_test()` (Egger intercept), `mr_leaveoneout()` -> `directionality_test()`, which the script turns into an error when it silently returns NULL (missing p-value/sample-size columns; supply `r.exposure`/`r.outcome`, e.g. via `get_r_from_lor()`, for binary traits). It writes `primary`, `heterogeneity`, `pleiotropy`, `leaveoneout`, `steiger` and `harmonised` TSVs to `--outdir`; `harmonised.tsv` feeds the MR-PRESSO and SIMEX scripts.
 
 ## MR-PRESSO Outlier Detection
 
