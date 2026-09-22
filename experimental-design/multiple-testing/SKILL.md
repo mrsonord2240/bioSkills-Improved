@@ -113,26 +113,15 @@ at m=18,000, see "IHW segfaults or silently reduces to BH"). Use this wrapper, w
 retried child process and falls back to plain BH:
 
 ```r
-# ihw_safe(): IHW in a child process (a segfault kills the child, not your session).
-# Checked on IHW 1.34.0 / R 4.4.3.
-ihw_safe <- function(p, covariate, alpha = 0.05, nbins = 5, tries = 3) {
-  inp <- tempfile(fileext = '.rds'); out <- tempfile(fileext = '.rds')
-  on.exit(unlink(c(inp, out)))
-  saveRDS(list(p = p, cov = covariate, alpha = alpha, nbins = nbins), inp)
-  code <- sprintf("d <- readRDS('%s'); library(IHW); r <- ihw(d$p, d$cov, alpha = d$alpha, nbins = d$nbins); saveRDS(adj_pvalues(r), '%s')",
-                  normalizePath(inp, winslash = '/'), normalizePath(out, winslash = '/', mustWork = FALSE))
-  for (i in seq_len(tries)) {
-    st <- system2(file.path(R.home('bin'), 'Rscript'), c('-e', shQuote(code)), stdout = FALSE, stderr = FALSE)
-    if (identical(st, 0L) && file.exists(out)) return(list(padj = readRDS(out), method = 'IHW', attempts = i))
-  }
-  list(padj = p.adjust(p, 'BH'), method = 'BH (IHW solver crashed; fallback)', attempts = tries)
-}
+source('scripts/ihw_safe.R')   # defines ihw_safe(p, covariate, alpha = 0.05, nbins = 5, tries = 3); checked on IHW 1.34.0 / R 4.4.3
 
 # de_table: one row per feature, with columns pvalue and mean_expression
 res <- ihw_safe(de_table$pvalue, de_table$mean_expression)
 de_table$padj_ihw <- res$padj
 res$method; sum(res$padj < 0.05)                   # report which method actually produced the padj
 ```
+
+`scripts/ihw_safe.R` also runs as a CLI: `Rscript scripts/ihw_safe.R in.csv pvalue mean_expression out.csv [alpha]`.
 
 ## Independent Filtering -- Power for Free, If the Filter Is Independent
 
