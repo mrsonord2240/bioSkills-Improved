@@ -98,21 +98,9 @@ Mummichog exists because identification is the rate-limiter: only ~2-10% of unta
 
 **Approach:** Map names/IDs to KEGG compounds and report mapping coverage; then run the hypergeometric test against an explicit assay-coverage background. Default to the **Local-Only ORA** function (no user data leaves the machine, background correction verified end to end); the MetaboAnalystR API path is the alternative.
 
-```r
-current.msg <- character(0); err.vec <- character(0)  # required -- see Version Compatibility
-library(MetaboAnalystR)
-
-# 'pathora' = pathway ORA; 'conc' = concentration-style input
-mSet <- InitDataObjects('conc', 'pathora', FALSE)
-mSet <- SetOrganism(mSet, 'hsa')
-
-# Confidently identified compounds (MSI level 1-2); names, HMDB, or KEGG IDs
-compounds <- c('Pyruvate', 'L-Lactate', 'Citrate', 'Succinate', 'Fumarate', 'L-Alanine')
-mSet <- Setup.MapData(mSet, compounds)
-mSet <- CrossReferencing(mSet, 'name')          # 'name' | 'hmdb' | 'kegg' | 'pubchem'
-mSet <- CreateMappingResultTable(mSet)          # inspect mapping coverage before trusting any p-value
-kegg_ids <- mSet$dataSet$map.table[, 'KEGG']
-kegg_ids <- kegg_ids[!is.na(kegg_ids) & nzchar(kegg_ids)]
+```bash
+# compounds.txt: one name/HMDB/KEGG ID per line (MSI level 1-2); writes kegg_ids.txt and prints mapping coverage
+Rscript scripts/map_compounds.R compounds.txt hsa name kegg_ids.txt   # ID type: name | hmdb | kegg | pubchem
 ```
 
 ### Enrichment test

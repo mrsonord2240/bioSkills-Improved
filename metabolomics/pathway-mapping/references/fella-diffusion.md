@@ -1,4 +1,4 @@
-<!-- Moved verbatim from SKILL.md (2026-09-21). -->
+<!-- Moved from SKILL.md (2026-09-21); code now in scripts/. -->
 
 ## Network-Diffusion Enrichment (FELLA)
 
@@ -6,23 +6,9 @@
 
 **Approach:** Build the KEGG knowledge graph once, then per-analysis map KEGG IDs and run heat diffusion; inspect excluded (unmapped) compounds explicitly.
 
-```r
-library(FELLA)
-
-# Build once, reuse. buildGraphFromKEGGREST hits the live KEGG API (slow); cache the DB.
-graph <- buildGraphFromKEGGREST(organism = 'hsa')
-buildDataFromGraph(keggdata.graph = graph, databaseDir = 'fella_hsa', internalDir = FALSE)
-fella.data <- loadKEGGdata(databaseDir = 'fella_hsa', internalDir = FALSE)
-
-cpd_ids <- c('C00022', 'C00186', 'C00158', 'C00042', 'C00122', 'C00041') # KEGG compound IDs only
-analysis <- defineCompounds(compounds = cpd_ids, data = fella.data)
-getExcluded(analysis)                              # compounds that did not map -- report this
-
-# 'diffusion' is the recommended default; runHypergeom = plain ORA over the graph,
-# runPagerank (lowercase r) = directed random walks. The method string is lowercase.
-# approx = 'normality' (shown here) is analytic/deterministic, no seed needed. If using
-# approx = 'simulation' instead, call set.seed() first -- it resamples niter times and is
-# not reproducible run-to-run otherwise.
-analysis <- runDiffusion(object = analysis, data = fella.data, approx = 'normality')
-results <- generateResultsTable(object = analysis, data = fella.data, method = 'diffusion', threshold = 0.05)
+```bash
+# cpd_ids.txt: KEGG compound IDs only, one per line; builds the fella_hsa database on first use, reuses it after
+Rscript scripts/fella_diffusion.R cpd_ids.txt fella_hsa fella_results.csv
 ```
+
+The graph build hits the live KEGG API (slow), so the database is cached in the directory. Unmapped compounds are printed via `getExcluded()`: report them. `diffusion` is the recommended default; `runHypergeom` = plain ORA over the graph, `runPagerank` (lowercase r) = directed random walks; the method string is lowercase. `approx = 'normality'` (used) is analytic/deterministic, no seed needed; with `approx = 'simulation'` call `set.seed()` first, since it resamples `niter` times.
