@@ -117,33 +117,17 @@ Entropy of the fate-probability vector is the differentiation-potential proxy: h
 **Goal:** Infer initial states, terminal states, and uncertainty-aware fate probabilities from any directional evidence source.
 **Approach:** Build a directed transition matrix from one or more kernels, combine with a connectivity kernel for smoothing, then coarse-grain into macrostates with GPCCA.
 
-```python
-# Standalone .py on Windows: keep everything under the guard (see the Windows note below)
-import cellrank as cr
-
-def main(adata):
-    pk = cr.kernels.PseudotimeKernel(adata, time_key='dpt_pseudotime').compute_transition_matrix(n_jobs=1)
-    ck = cr.kernels.ConnectivityKernel(adata).compute_transition_matrix()
-    combined = 0.8 * pk + 0.2 * ck                      # weights are a researcher choice; sweep them
-
-    g = cr.estimators.GPCCA(combined)
-    g.compute_macrostates(n_states=10, cluster_key='leiden')   # n_states from the Schur/eigenvalue spectral gap
-    g.predict_terminal_states(method='stability')
-    g.predict_initial_states(n_states=1, allow_overlap=True)   # without allow_overlap, real branching data can raise
-                                                                 # ValueError: N cells overlapped between initial/terminal states
-    g.compute_fate_probabilities(n_jobs=1)
-    g.compute_lineage_drivers()
-    return g
-
-if __name__ == '__main__':
-    g = main(adata)                                     # adata: loaded with dpt_pseudotime + leiden
+```bash
+python scripts/cellrank_fate.py adata.h5ad --time-key dpt_pseudotime --cluster-key leiden --n-states 10 --out fate.h5ad
 ```
+
+`scripts/cellrank_fate.py` builds `PseudotimeKernel` (0.8) + `ConnectivityKernel` (0.2; the weights are a researcher choice, sweep them), runs GPCCA (`n_states` from the Schur/eigenvalue spectral gap), predicts terminal and initial states, and computes fate probabilities and lineage drivers. `predict_initial_states(..., allow_overlap=True)` is deliberate: without it, real branching data can raise `ValueError: N cells overlapped between initial/terminal states`. It prints per-cluster mean fate-probability entropy and keeps the Windows entry-point guard.
 
 Kernels decouple WHERE direction comes from (RealTime when timepoints exist, Pseudotime/CytoTRACE otherwise, Velocity only when trustworthy, Connectivity for smoothing) from WHAT is computed (GPCCA macrostates + fate probabilities). Prefer the RealTimeKernel for time courses. Fate probabilities are a deterministic function of the transition matrix, so a wrong kernel yields confidently wrong, well-formed probabilities with no internal warning; check that conclusions survive dropping the velocity kernel.
 
 **VelocityKernel with `mode='deterministic'` velocity:** deterministic velocity is the weakest of the three modes, and its per-cell errors carry straight into `VelocityKernel`. On scVelo's pancreas data (same deterministic velocity, kernel 0.8 + `ConnectivityKernel` 0.2, GPCCA `n_states=8`, checked on cellrank 2.3.3), mean fate-probability entropy in Ductal progenitors vs Alpha/Beta was 0.36 vs 0.32 with `VelocityKernel` (barely any separation) but 1.02 vs 0.45 with `PseudotimeKernel` on `velocity_pseudotime`. When only deterministic velocity exists, take direction from `PseudotimeKernel` (or RealTime/CytoTRACE) and use velocity only as a cross-check; either way inspect the predicted terminal states against markers.
 
-**Windows note:** `compute_transition_matrix()` and `compute_fate_probabilities()` spawn a `multiprocessing.Manager()` progress-bar queue that raises `RuntimeError: An attempt has been made to start a new process before the current process has finished its bootstrapping phase` when this code runs as a plain `.py` script on Windows (not from a notebook). Keep the entry point under `if __name__ == '__main__':` (as above, with `n_jobs=1`).
+**Windows note:** `compute_transition_matrix()` and `compute_fate_probabilities()` spawn a `multiprocessing.Manager()` progress-bar queue that raises `RuntimeError: An attempt has been made to start a new process before the current process has finished its bootstrapping phase` when this code runs as a plain `.py` script on Windows (not from a notebook). Keep the entry point under `if __name__ == '__main__':` with `n_jobs=1`, as `scripts/cellrank_fate.py` does.
 
 ### Slingshot and Monocle3 (R)
 
@@ -182,14 +166,8 @@ RNA velocity infers the time derivative of the spliced-mRNA state from the lag b
 **Approach:** Compute moments, recover dynamics (dynamical only, subject to the compatibility note above), compute velocity, build the velocity graph, then sanity-check confidence and phase portraits before any embedding plot.
 
 ```python
-import scanpy as sc
-import scvelo as scv
-scv.pp.filter_and_normalize(adata, min_shared_counts=20)   # n_top_genes was removed from this call in scvelo 0.3+;
-adata.layers['normalized_X'] = adata.X.copy()               # do HVG selection as a separate step (checked on scvelo 0.3.4),
-sc.pp.log1p(adata)                                           # then restore the non-log normalized X moments() expects
-sc.pp.highly_variable_genes(adata, n_top_genes=2000)
-adata = adata[:, adata.var['highly_variable']].copy()
-adata.X = adata.layers.pop('normalized_X')
+scv.pp.filter_and_normalize(adata, min_shared_counts=20)   # n_top_genes was removed from this call in scvelo 0.3+ (checked on 0.3.4):
+                                                             # do HVG selection separately (see the example)
 scv.pp.moments(adata, n_pcs=30, n_neighbors=30)
 scv.tl.velocity(adata, mode='deterministic')        # DEFAULT is 'stochastic'; use 'dynamical'/'stochastic' only
                                                       # after confirming they run on your installed numpy/pandas/scvelo
@@ -197,8 +175,9 @@ scv.tl.velocity_graph(adata, n_jobs=1, show_progress_bar=False)   # show_progres
                                                                     # multiprocessing.Manager() crash in a plain .py script
 scv.tl.velocity_confidence(adata)                   # inspect BEFORE trusting the stream plot
 scv.tl.velocity_pseudotime(adata)                   # ordering proxy when latent_time (needs recover_dynamics) is unavailable
-scv.pl.velocity(adata, var_names=['GATA1'])         # per-gene phase portrait, not just the embedding
 ```
+
+The complete pipeline (loom merge, HVG selection with the `normalized_X` save/restore that `moments()` needs, stream plot, confidence, per-gene phase portraits, top velocity genes) is `examples/scvelo_velocity.py`.
 
 Bergen 2021 failure modes are the DEFAULT expectation, not edge cases. Velocity is unreliable or invalid in mature/terminal/non-dividing systems (adult neurons, steady-state tissue), where little net du/dt means noise dominates and arrows can point backward; under heterogeneous kinetics, one global gamma per gene mis-fits multi-branch systems; and a clean 2D stream plot can manufacture coherence the high-dimensional field lacks. Deeper still (Gorin 2022), the velocity ODE is a deterministic reduction of a stochastic process, intronic reads are a biased proxy for nascent RNA (internal priming, intron retention, 3' and length bias all corrupt gamma), and confidence/coherence metrics reward the kNN smoothing of the moments step rather than correspondence to truth (Zheng 2023). Do not consume raw arrows: feed velocity into CellRank 2 as ONE kernel, validate against known markers or metabolic labeling, and gate interpretation with uncertainty (veloVI `get_directional_uncertainty`).
 
