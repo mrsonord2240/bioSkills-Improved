@@ -49,21 +49,6 @@ GenomicSEM models latent genetic architecture across GWAS summary statistics at 
 
 Methodology evolves; verify the current Grotzinger 2023+ tutorials at `github.com/GenomicSEM/GenomicSEM/wiki` before locking a method. ESEM rotation choice (geomin vs target rotation) is an active area; report sensitivity to rotation.
 
-## MTAG vs GenomicSEM Common-Factor GWAS
-
-Both methods exploit genetic correlation among input GWAS, but their goals and outputs differ.
-
-| Property | MTAG | GenomicSEM commonfactorGWAS |
-|----------|------|------------------------------|
-| Output | Per-trait shrunk z-scores | SNP effect on latent factor |
-| Sample-overlap handling | Bivariate LDSC intercept | Full LDSC sampling-covariance matrix V |
-| Heterogeneity diagnostic | MaxFDR (Turley 2018) | Q_SNP (Grotzinger 2019) |
-| Interpretation | "Boosted power for trait k" | "Effect on what the traits share" |
-| Min traits | 2 | 3 (otherwise factor not identified) |
-| Best when | Power-boost an individual trait | Common factor hypothesized |
-
-Both depend on accurate sampling covariance. MTAG fails (MaxFDR > 5%) under the same heterogeneity that produces large Q_SNP in GenomicSEM. The two methods should be reported together when the prior on a common factor is non-trivial; agreement increases confidence, disagreement points to architecture-specific SNPs. Prefer `commonfactorGWAS` over MTAG when the traits fit a common factor (CFI >= 0.95): it models heterogeneity explicitly through Q_SNP.
-
 ## Decision Tree by Scenario
 
 | Scenario | Recommended | Why |
@@ -77,19 +62,11 @@ Both depend on accurate sampling covariance. MTAG fails (MaxFDR > 5%) under the 
 | Sample overlap unknown or any-overlap suspected | Always use `ldsc()` output as input | V matrix off-diagonals absorb overlap |
 | Cross-ancestry common-factor analysis | Run per-ancestry, compare loadings; no published cross-ancestry SEM as of 2026 | Method not yet validated for mixed-ancestry V |
 | Single biobank for all traits (e.g., UKB only) | GenomicSEM with `ldsc()`; the V matrix will reflect overlap | Equivalent to one-sample MR -- the V matrix is the correction |
-| Comparing GenomicSEM and MTAG on the same traits | Run both; compare top hits + heterogeneity | Concordance increases confidence; divergence flags heterogeneity |
+| Comparing GenomicSEM and MTAG on the same traits (`references/mtag-comparison.md`) | Run both; compare top hits + heterogeneity | Concordance increases confidence; divergence flags heterogeneity |
 
 ## Per-Method Failure Modes
 
-### Heywood case (negative residual variance)
-
-**Trigger:** A residual variance estimate is < 0, or a standardized loading exceeds 1.
-
-**Mechanism:** Empirical underidentification; the genetic covariance matrix S is near-singular OR a trait has near-zero specific variance under the model. The maximum-likelihood / DWLS estimator runs past the boundary of the parameter space.
-
-**Symptom:** `lavaan` warning "some estimated lv variances are negative" or "covariance matrix is not positive definite"; standardized loading > 1; non-convergence.
-
-**Fix:** First, inspect the LDSC S matrix for genetic correlations near 1 (multicollinearity). Drop or merge near-identical traits. Second, constrain the offending residual variance to be non-negative in the lavaan syntax (`trait1 ~~ a*trait1; a > 0`). Third, verify the V matrix is positive definite via `chol(V_LD)`; if not, the bivariate LDSC inputs disagree on intercept signs and need re-munging. Never re-fit without diagnosing the cause.
+Heywood case, forced common factor on heterogeneous traits and non-positive-definite V: `references/failure-modes.md`. MTAG MaxFDR > 5%: `references/mtag-comparison.md`. Sample overlap and Q_SNP below.
 
 ### Sample overlap mis-specified
 
@@ -110,36 +87,6 @@ Both depend on accurate sampling covariance. MTAG fails (MaxFDR > 5%) under the 
 **Symptom:** Top "common-factor SNPs" are dominated by trait-specific effects; replication in independent cohorts is poor for SNPs with high Q_SNP.
 
 **Fix:** Always report Q_SNP p-value alongside the factor p-value. Flag SNPs with Q_SNP p < 0.05 / N_factor_SNPs (Bonferroni for the discovered set; see Quantitative Thresholds) as architecture-violating and exclude from "common-factor SNP" claims. Re-fit those SNPs in `userGWAS()` with separate paths to each trait.
-
-### Trait inclusion under heterogeneous factor structure
-
-**Trigger:** Forcing a common-factor model on traits that don't share a single latent factor.
-
-**Mechanism:** When two or more traits load on a different factor than the rest, the single-factor model misfits. lavaan still returns parameter estimates but model fit is poor.
-
-**Symptom:** CFI < 0.9; RMSEA > 0.08; some standardized loadings near 0 while others near 1; chi-square highly significant even after accounting for N.
-
-**Fix:** Run ESEM first (`commonfactor` then `usermodel` with cross-loadings allowed) to discover structure. If two factors emerge, fit a two-factor `usermodel`. Drop traits with near-zero loadings on all factors. Document the model search.
-
-### MTAG MaxFDR > 5%
-
-**Trigger:** Running MTAG on traits with low pairwise genetic correlation or with one trait that has a very different architecture.
-
-**Mechanism:** MTAG assumes a homogeneous variance-covariance structure across SNPs. When heterogeneity dominates, the empirical-Bayes shrinkage can over-claim SNPs in the focal trait. Turley 2018 defines MaxFDR as the maximum estimated false discovery rate under worst-case heterogeneity; > 5% invalidates the published trait-specific summary statistics.
-
-**Symptom:** MTAG output file reports `maxFDR` > 0.05; per-trait MTAG hits don't replicate in independent cohorts.
-
-**Fix:** Check pairwise rg via LDSC; if any pair is < 0.7, MTAG is risky. Drop the most heterogeneous trait and re-run. Alternatively, switch to GenomicSEM's `commonfactorGWAS` which models heterogeneity explicitly via Q_SNP.
-
-### Non-positive-definite V_LD matrix
-
-**Trigger:** LDSC inputs from different ancestry GWAS, or one trait with very low mean chi-square (< 1.02).
-
-**Mechanism:** V is the sampling covariance of vech(S); when individual entries of S have huge SE relative to off-diagonal covariance, the resulting V is not positive definite (negative eigenvalues).
-
-**Symptom:** `commonfactor()` errors with "matrix is not positive definite" before fitting; `eigen(LDSCoutput$V)$values` shows negative values.
-
-**Fix:** Verify per-trait mean chi-square via `ldsc()` log; below 1.02, exclude that trait. Verify all GWAS are EUR ancestry (or match ancestry of LD scores). Apply nearest-PD smoothing via `Matrix::nearPD(V)$mat` ONLY as a last resort and document the approximation in methods.
 
 ## Model Fit Diagnostics
 
@@ -229,7 +176,9 @@ Read the file only when the task needs it; the rest of this skill is enough for 
 | Need | File |
 |------|------|
 | ESEM (exploratory factor structure), `userGWAS()` custom SNP path models, higher-order / bifactor / p-factor models | `references/advanced-models.md` |
-| Run MTAG beside GenomicSEM, or reconcile the two when they disagree | `references/mtag-comparison.md` |
+| Run MTAG beside GenomicSEM, compare it with `commonfactorGWAS` (property table), reconcile the two when they disagree, or MTAG MaxFDR > 5% | `references/mtag-comparison.md` |
+| Heywood case (negative residual variance, loading > 1), poor common-factor fit (CFI < 0.9), or non-positive-definite V | `references/failure-modes.md` |
+| Runtimes and cluster settings for genome-wide runs, or installing the LDSC / MTAG Python tools | `references/runtime-and-python-tools.md` |
 | Stratified GenomicSEM (`enrich()`, partitioned heritability of the factor) | `references/stratified-genomicsem.md` |
 
 ## Common-Factor GWAS with Q_SNP
@@ -285,19 +234,6 @@ cfgwas$Q_pval_ML <- cfgwas_ml$Q_pval[match(cfgwas$SNP, cfgwas_ml$SNP)]
 cfgwas$factor_only <- cfgwas$factor_sig & !cfgwas$qsnp_sig & cfgwas$Q_pval_ML > (0.05 / sum(cfgwas$factor_sig))
 ```
 
-## Computational Footprint
-
-| Step | Runtime | Hardware |
-|------|---------|----------|
-| `ldsc()` multi-trait sampling covariance | minutes | laptop |
-| `commonfactor()` / `usermodel()` (no SNP loop) | seconds | laptop |
-| `commonfactorGWAS()` over 6-8M SNPs | 4-24h depending on cores | cluster recommended |
-| `userGWAS()` over 6-8M SNPs with complex path model | 8-48h | cluster recommended |
-| Stratified GenomicSEM with 50+ annotations | 1-3 days | cluster |
-| MTAG over 6-8M SNPs | 1-2h | laptop or cluster |
-
-Cluster runs of `commonfactorGWAS()` / `userGWAS()` should use `MPI=TRUE` when submitting via mpirun; GenomicSEM detects the OS internally (via `Sys.info()[['sysname']]`) and selects FORK (Linux/Mac) vs PSOCK (Windows) cluster types automatically -- there is no `Operating=` user argument. On a Mac/Windows workstation, reduce `cores` to the physical-core count to avoid PSOCK fork failures.
-
 ## Common Errors
 
 | Error / symptom | Cause | Solution |
@@ -330,21 +266,7 @@ install.packages(c('Matrix', 'gdata'))
 remotes::install_github('MRCIEU/TwoSampleMR')  # for downstream MR using factor GWAS as exposure
 ```
 
-For Python tools:
-
-```bash
-# LDSC (munge_sumstats.py for GenomicSEM input): CBIIT/ldsc, checked on commit 1f09cf0,
-# Python 3.9. abdenlab/ldsc-python3 v2.0.0 and belowlab/ldsc v3.0.1 crash on --h2/--rg.
-git clone https://github.com/CBIIT/ldsc.git && cd ldsc
-micromamba create -n ldsc -c conda-forge -c bioconda python=3.9 bitarray=2 pybedtools=0.10.0 -y
-micromamba run -n ldsc pip install numpy==1.21.5 pandas==1.3.3 scipy==1.7.3
-
-# MTAG
-git clone https://github.com/JonJala/mtag.git
-cd mtag && pip install -r requirements.txt
-```
-
-Pre-downloaded reference files: `eur_w_ld_chr/`, `baselineLD_v2.2.*`, `w_hm3.snplist`, and 1000G allele-frequency files are hosted at `alkesgroup.broadinstitute.org/LDSCORE/`.
+LDSC and MTAG Python installs: `references/runtime-and-python-tools.md`. Pre-downloaded reference files: `eur_w_ld_chr/`, `baselineLD_v2.2.*`, `w_hm3.snplist`, and 1000G allele-frequency files are hosted at `alkesgroup.broadinstitute.org/LDSCORE/`.
 
 ## References
 
