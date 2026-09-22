@@ -99,7 +99,7 @@ NCBI stopped issuing new GI numbers for major nucleotide/protein submissions sta
 | Cross-references (xref) | partial | yes (in GB) | yes |
 | Bulk metadata for 10K records | best (1 call per ~500) | slow | slow |
 
-*Current nucleotide ESummary docsums (Biopython 1.88, checked 2026-09-17) carry no `Organism` field — only `AccessionVersion`, `Length`, `Title`, `TaxId`, etc. Derive organism from the leading binomial in `Title`, or resolve `TaxId` via a `db='taxonomy'` EFetch. See `bulk_summaries()` under Code patterns.
+*Current nucleotide ESummary docsums (Biopython 1.88, checked 2026-09-17) carry no `Organism` field — only `AccessionVersion`, `Length`, `Title`, `TaxId`, etc. Derive organism from the leading binomial in `Title`, or resolve `TaxId` via a `db='taxonomy'` EFetch. See `bulk_summaries()` / `organism_of()` in `examples/fetch_summaries.py`.
 
 ESummary's documented hard limit is 10,000 docsums per call, but the practical sweet spot is ~500 (keeps the URL under length limits when IDs are comma-joined; for >500 use EPost to push IDs server-side first). Per-record payload is much smaller than EFetch. Use ESummary as the default for any metadata-only workflow.
 
@@ -142,28 +142,7 @@ for feat in gb.features:
 
 **Approach:** ESummary on a comma-joined ID batch (max 500 per call by convention; supports 10K hard limit).
 
-**Reference (BioPython 1.83+):**
-```python
-def bulk_summaries(db, ids, chunk=500):
-    out = []
-    for i in range(0, len(ids), chunk):
-        h = Entrez.esummary(db=db, id=','.join(ids[i:i+chunk]))
-        out.extend(Entrez.read(h)); h.close()
-        time.sleep(0.1 if Entrez.api_key else 0.34)
-    return out
-
-def organism_of(s):
-    '''No direct Organism field on current nucleotide docsums -- derive from Title.'''
-    org = s.get('Organism')
-    if org:
-        return org
-    words = s.get('Title', '').split()
-    return ' '.join(words[:2]) if len(words) >= 2 else s.get('Title', '?')
-
-records = bulk_summaries('nucleotide', uid_list)
-for s in records:
-    print(s['AccessionVersion'], s['Length'], organism_of(s))
-```
+**Reference:** `examples/fetch_summaries.py` defines `bulk_summaries(db, ids, chunk=500)` (chunked ESummary, rate-limited) and `organism_of(docsum)` (derives the organism from `Title` when the docsum has no `Organism` field); run it for a demo, or copy the two functions.
 
 ### Extract CDS in one round-trip
 
@@ -251,6 +230,8 @@ print(f'{len(proteins)} CDS-translated proteins')
 | `references/sra.md` | Converting SRA UIDs to SRR accessions and run metrics |
 | `references/variants-clinvar-snp.md` | Fetching ClinVar VCV or dbSNP records |
 | `references/history-server-fetch.md` | Pulling a large ESearch result set via `webenv`/`query_key` |
+
+Runnable scripts (paths relative to this Skill folder): `scripts/history_fetch.py` (large ESearch result set to FASTA), `scripts/variant_records.py` (ClinVar / dbSNP record by UID). Runnable demos: `examples/`.
 
 ## References
 

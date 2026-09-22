@@ -28,20 +28,8 @@ Response is a namespaced (`https://www.ncbi.nlm.nih.gov/SNP/docsum`) `ExchangeSe
 
 **Approach:** `rettype='vcv', retmode='xml'`. The response has no DTD/XSD, so `Entrez.read()` cannot parse it (Biopython raises `ValueError` and recommends ElementTree) — parse with `xml.etree.ElementTree` instead.
 
-```python
-import xml.etree.ElementTree as ET
-
-def clinvar_record(uid):
-    h = Entrez.efetch(db='clinvar', id=uid, rettype='vcv', retmode='xml')
-    raw = h.read(); h.close()
-    text = raw.decode() if isinstance(raw, bytes) else raw
-    archive = ET.fromstring(text).find('.//VariationArchive')
-    sig = archive.find('.//Classifications/GermlineClassification/Description')
-    return {
-        'accession': archive.get('Accession'),
-        'variation_name': archive.get('VariationName'),
-        'clinical_significance': sig.text if sig is not None else None,
-    }
+```bash
+python scripts/variant_records.py --email you@inst.edu --db clinvar --uid 4887763
 ```
 
 Report only the record's own stated classification — never a diagnosis or treatment recommendation.
@@ -52,18 +40,8 @@ Report only the record's own stated classification — never a diagnosis or trea
 
 **Approach:** `rettype='xml', retmode='xml'`; response is namespaced, parse with `xml.etree.ElementTree`.
 
-```python
-def snp_record(uid):
-    h = Entrez.efetch(db='snp', id=uid, rettype='xml', retmode='xml')
-    raw = h.read(); h.close()
-    text = raw.decode() if isinstance(raw, bytes) else raw
-    ns = {'s': 'https://www.ncbi.nlm.nih.gov/SNP/docsum'}
-    doc = ET.fromstring(text).find('s:DocumentSummary', ns)
-    gene = doc.find('.//s:GENE_E/s:NAME', ns)
-    sig = doc.find('s:CLINICAL_SIGNIFICANCE', ns)
-    return {
-        'chr': doc.findtext('s:CHR', default=None, namespaces=ns),
-        'gene': gene.text if gene is not None else None,
-        'clinical_significance': sig.text if sig is not None else None,
-    }
+```bash
+python scripts/variant_records.py --email you@inst.edu --db snp --uid 429358
 ```
+
+`scripts/variant_records.py` defines `clinvar_record(uid)` and `snp_record(uid)` (ElementTree; import them after setting `Entrez.email`).
