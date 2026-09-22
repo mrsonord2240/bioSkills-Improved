@@ -124,6 +124,8 @@ mageck count \
     --output-prefix in_vivo_screen
 ```
 
+**Windows path note (checked on MAGeCK 0.5.9.5):** run this from the data directory with relative filenames, as shown above. Absolute Windows paths containing a backslash immediately followed by an uppercase letter that forms a Python regex escape (most commonly `\Users\...`) crash `mageck count`'s own QC-report writer with `re.error: bad escape \U`, after counting has already completed correctly — the crash is in report generation, not counting. Forward slashes (`C:/Users/...`) avoid it entirely if an absolute path is unavoidable.
+
 ## Hit Calling for In Vivo
 
 **Goal:** Identify per-gene fitness effects despite high inter-animal variability.
@@ -241,6 +243,7 @@ Verified against a synthetic 6-animal / 60-gene in vivo dataset with 5 planted t
 | Low CEGv2 PR-AUC | Context-specific essentialome | Use in vivo-specific reference set |
 | Low mapping rate | Wrong sequencing primers | Verify library lentiviral architecture |
 | Coverage at endpoint <50x | Implantation bottleneck | Increase cells implanted; focused library |
+| `mageck count` crashes with `re.error: bad escape \U` | Absolute Windows path (e.g. `C:\Users\...`) passed to `--list-seq`/`--fastq`/`--output-prefix`; counting already finished, crash is in QC-report writing | Run from the data directory with relative filenames, or use forward slashes in the path |
 
 ## References
 
