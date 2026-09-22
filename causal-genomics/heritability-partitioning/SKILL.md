@@ -157,33 +157,7 @@ These give systematically different functional enrichment estimates. Speed 2019 
 
 **Approach:** Munge sumstats to LDSC format -> run --h2 for total -> run --h2 with --ref-ld-chr including baseline annotations -> --overlap-annot for enrichment p-values -> --print-coefficients for per-annotation tau.
 
-```bash
-# 1. Munge GWAS summary statistics into LDSC format
-munge_sumstats.py \
-    --sumstats gwas_raw.tsv \
-    --N-col N \
-    --snp SNP --a1 A1 --a2 A2 --p P --signed-sumstats BETA,0 \
-    --merge-alleles w_hm3.snplist \
-    --out trait
-# Produces trait.sumstats.gz with SNP, A1, A2, Z, N columns
-
-# 2. Total h2 (univariate; intercept, ratio, mean chi2 reported)
-ldsc.py \
-    --h2 trait.sumstats.gz \
-    --ref-ld-chr eur_w_ld_chr/ \
-    --w-ld-chr eur_w_ld_chr/ \
-    --out trait_h2
-
-# 3. Partitioned h2 with baseline-LD v2.2 model (Gazal 2017)
-ldsc.py \
-    --h2 trait.sumstats.gz \
-    --ref-ld-chr 1000G_Phase3_baselineLD_v2.2_ldscores/baselineLD. \
-    --frqfile-chr 1000G_Phase3_frq/1000G.EUR.QC. \
-    --w-ld-chr 1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC. \
-    --overlap-annot \
-    --print-coefficients \
-    --out trait_partitioned
-```
+Run it as `bash examples/ldsc_partitioned_h2.sh <gwas.tsv> <trait_prefix> [samp_prev] [pop_prev]`: step 1 `munge_sumstats.py` to `<trait>.sumstats.gz` (SNP, A1, A2, Z, N), step 2 total h2 (intercept, ratio, mean chi2; liability scale when both prevalences are given), step 3 partitioned h2 against baseline-LD v2.2 (`--overlap-annot --print-coefficients`). Steps 4-5 of the same script are the cell-type and rg runs. It expects the reference bundles from "Tool Install Notes" under `$LDSC_REF`.
 
 Ancestry-matched LD scores (EAS, AFR, AMR) are available at alkesgroup.broadinstitute.org/LDSCORE; do NOT apply EUR LD scores to non-EUR GWAS.
 
