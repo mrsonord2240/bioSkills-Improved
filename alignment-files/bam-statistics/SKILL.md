@@ -71,7 +71,7 @@ Mate-overlap handling differs between tools, so **mean depth differs 2x on the s
 | `samtools depth`, `samtools coverage`, pysam `pileup()`, `mosdepth --fast-mode` | counted twice (16.77x); no overlap option in `coverage` |
 | `samtools depth -s`, `mosdepth` (default) | counted once (8.86x) |
 | `samtools mpileup` | counted once at the default `-Q 13` (8.85x); `-x` disables it (16.75x). The lower-quality mate base is zeroed, so `-Q 0` defeats the removal (16.77x). Its depth column also counts D and N positions (unlike `samtools depth`) |
-| `bcftools mpileup` | counted once in `FORMAT/DP` (`-a FORMAT/DP`) and in the bases used for calling: 8.85x at the default, 16.77x with `-x` or `-Q 0`. `INFO/DP` is 16.77x either way (counted before overlap removal) |
+| `bcftools mpileup` | counted once in `FORMAT/DP` (`-a FORMAT/DP`) and in the bases used for calling: 8.85x at the default, 16.77x with `-x` or `-Q 0`. `INFO/DP` is 16.77x either way (counted before overlap removal). Unlike `samtools mpileup`, both `FORMAT/DP` and `INFO/DP` drop to 0 across a deletion span rather than counting it (verified: a 20 bp deletion covered by 20 reads shows `samtools mpileup` depth 20 throughout, `bcftools mpileup` DP 0) |
 
 ## samtools flagstat
 
