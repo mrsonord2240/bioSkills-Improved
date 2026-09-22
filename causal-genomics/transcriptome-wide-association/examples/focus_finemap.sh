@@ -17,7 +17,15 @@ set -euo pipefail
 
 # ---- Inputs ----
 GWAS_FILE='gwas.sumstats'                                # GWAS sumstats (CHR SNP BP A1 A2 Z P columns at minimum)
-LD_REF_PREFIX='1000G_EUR/chr'                            # PLINK bfile per chromosome (chr1.bim/bed/fam, ...)
+LD_REF_PREFIX='1000G_EUR/all'                            # One PLINK bfile (all.bim/bed/fam) covering every
+                                                          # chromosome to analyze -- NOT chr-templated like
+                                                          # FUSION's --ref_ld_chr. `focus finemap` passes this
+                                                          # straight to pandas_plink.read_plink(); a literal
+                                                          # ".../chr" prefix with no matching file 404s
+                                                          # (confirmed 2026-09-21). --chr/--locations subset
+                                                          # the loaded SNPs afterward, they do not pick a file.
+                                                          # For real per-chromosome files, use pandas_plink's
+                                                          # own glob syntax instead, e.g. '1000G_EUR/chr*.bed'.
 FOCUS_DB='focus_gtex_v8_whole_blood.db'                  # FOCUS DB matched to the TWAS weight panel
 TISSUE='Whole_Blood'                                     # Tissue label inside the FOCUS DB
 LOCATIONS='38:EUR'                                       # Required (not optional) in installed pyfocus 0.802;

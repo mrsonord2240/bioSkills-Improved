@@ -13,7 +13,7 @@
 
 focus finemap \
     gwas.sumstats \
-    1000G_EUR_chr \
+    1000G_EUR_all \
     focus_gtex_v8_whole_blood.db \
     --p-threshold 5e-8 \
     --tissue Whole_Blood \
@@ -21,6 +21,8 @@ focus finemap \
     --out gwas_focus_whole_blood
 # Output: per-gene PIP, credible-set membership flag, and locus-level group probability
 ```
+
+**LD reference path is a single PLINK fileset, not per-chromosome like FUSION.** `focus finemap` passes the `ref` argument straight to `pandas_plink.read_plink()`: give it one bfile prefix (`1000G_EUR_all.bed/.bim/.fam`) covering every chromosome you will analyze, or a real glob (`1000G_EUR/chr*.bed`) if the panel is split into per-chromosome files. `--chr`/`--locations` only filter the SNPs already loaded -- they do not select which file to open. A chr-templated prefix with no matching file (e.g. `1000G_EUR_chr`, mirroring FUSION's `--ref_ld_chr`) 404s with `FileNotFoundError: ...bim` (confirmed 2026-09-21).
 
 `--locations` is required on every `focus finemap` call in installed pyfocus 0.802, including single-ancestry runs -- omitting it crashes with `Please specify independent regions location or default regions with '37:EUR', etc.` (confirmed 2026-09-19; there is no "uses default LD blocks" fallback). Use `38:EUR` for GRCh38-aligned panels (e.g. GTEx v8 PredictDB/MASHR) or `37:EUR` for GRCh37-aligned panels; non-EUR/multi-ancestry codes follow the same `build:ANC1-ANC2-...` syntax used by MA-FOCUS below.
 
@@ -53,7 +55,7 @@ Cite the Mancuso 2019 supplement for the sensitivity-scan protocol. MA-FOCUS ext
 ```bash
 focus finemap \
     eur.sumstats.tsv.gz:eas.sumstats.tsv.gz:afr.sumstats.tsv.gz \
-    1000G_EUR_chr:1000G_EAS_chr:1000G_AFR_chr \
+    1000G_EUR_all:1000G_EAS_all:1000G_AFR_all \
     focus_eur.db:focus_eas.db:focus_afr.db \
     --chr 22 --locations 38:EUR-EAS-AFR \
     --out gwas_ma_focus
