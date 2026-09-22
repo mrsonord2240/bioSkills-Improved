@@ -107,8 +107,9 @@ mixscape.mixscape(
 # Defaults to layer='X_pert' (output of perturbation_signature)
 
 # Keep only KO cells for downstream analysis
-adata_ko = adata[adata.obs['mixscape_class_global'].isin(['KO'])   # mixscape_class holds '<gene> KO'; the bare label is in mixscape_class_global].copy()
-print(f'KO cells: {adata_ko.n_obs} ({adata_ko.n_obs/adata.n_obs:.1%} of perturbed)')
+# (mixscape_class holds '<gene> KO'; the bare label is in mixscape_class_global)
+adata_ko = adata[adata.obs['mixscape_class_global'].isin(['KO'])].copy()
+print(f'KO cells: {adata_ko.n_obs} ({adata_ko.n_obs/(adata.obs["sgrna_assignment"] != "NTC").sum():.1%} of perturbed)')
 ```
 
 **Critical:** Mixscape can fail when the perturbation has weak phenotype; empirically Mixscape detects perturbations with log-fold-change <-0.5 (depletion) reliably, but weaker effects collapse into the NTC distribution. For genome-wide screens, run Mixscape per perturbation; for low-effect perturbations, trust the assignment without filtering.
@@ -174,7 +175,7 @@ ms.perturbation_signature(adata, pert_key='gene_target', control='NT', n_neighbo
 ms.mixscape(adata, pert_key='gene_target', control='NT')
 
 # Filter to KO cells
-adata_ko = adata[adata.obs['mixscape_class'].isin(['KO', 'NT'])].copy()
+adata_ko = adata[adata.obs['mixscape_class_global'].isin(['KO', 'NT'])].copy()
 
 # Pseudobulk differential expression via pertpy (PyDESeq2 backend)
 # pertpy >= 1.0: build the contrast with .contrast(column, baseline, group_to_compare), then pass
