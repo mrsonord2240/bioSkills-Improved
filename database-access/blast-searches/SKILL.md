@@ -54,7 +54,7 @@ Always include a FASTA defline in `sequence` (`>id\n...`), even for a throwaway 
 
 **The misuse to avoid:** using default `blastn` (word=11) for cross-species DNA where `dc-megablast` is the right tool. Or using `megablast` (word=28) for cross-species homology where it will miss every divergent hit. The most-misused BLAST parameter according to literature.
 
-**`qblast()` API note:** `megablast` and `dc-megablast` in the table above are program *concepts*, not literal `program=` strings. `NCBIWWW.qblast(program='megablast', ...)` raises `ValueError: Program specified is megablast. Expected one of blastn, blastp, blastx, tblastn, tblastx` immediately -- confirmed live. Both are requested as `program='blastn'` plus a flag; see "Requesting megablast / dc-megablast" under Code patterns below.
+**`qblast()` API note:** `megablast` and `dc-megablast` in the table above are program *concepts*, not literal `program=` strings. `NCBIWWW.qblast(program='megablast', ...)` raises `ValueError: Program specified is megablast. Expected one of blastn, blastp, blastx, tblastn, tblastx` immediately -- confirmed live. Both are requested as `program='blastn'` plus a flag; see "Requesting megablast / dc-megablast" in `references/dna-patterns.md`.
 
 ## Database decision (search space)
 
@@ -78,7 +78,7 @@ E-values scale with database size (Karlin & Altschul 1990 PNAS 87:2264) -- the s
 
 ## Composition-Based Statistics (CBS)
 
-Compositional bias inflates significance for low-complexity proteins. Default `composition_based_statistics=2` (Yu&Altschul 2005) is correct for most cases; switch to `composition_based_statistics=3` for protein queries under 30 aa, where mode 2 over-corrects (used in the Short peptide search pattern below). For known compositional bias (coiled-coil regions, signal peptides), CBS=2 is appropriate but consider hard-masking with SEG (`filter='S'` in `qblast()`); extreme bias still inflates scores and shows up as many "significant" hits to unrelated low-complexity proteins. Full mode table and mechanism (Yu et al. 2006): `references/statistics.md`.
+Compositional bias inflates significance for low-complexity proteins. Default `composition_based_statistics=2` (Yu&Altschul 2005) is correct for most cases; switch to `composition_based_statistics=3` for protein queries under 30 aa, where mode 2 over-corrects (used in the Short peptide search pattern in `references/protein-patterns.md`). For known compositional bias (coiled-coil regions, signal peptides), CBS=2 is appropriate but consider hard-masking with SEG (`filter='S'` in `qblast()`); extreme bias still inflates scores and shows up as many "significant" hits to unrelated low-complexity proteins. Full mode table and mechanism (Yu et al. 2006): `references/statistics.md`.
 
 ## The `max_target_seqs` trap
 
@@ -111,151 +111,20 @@ For very short query proteins (e.g. proteomics-identified peptides), BLOSUM45 + 
 | Done | RID + results retained | Fetch XML |
 | Expired | RID purged | 24-36h after completion |
 
-`NCBIWWW.qblast()` handles polling internally with a fixed retry interval. For long-running searches (>5 min) or batches, submit and capture the RID, then poll independently to avoid blocking (`scripts/blast_rid.py`, see "Programmatic RID polling" below). The RID is visible at `https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Get&RID=...` for 24-36 hours.
+`NCBIWWW.qblast()` handles polling internally with a fixed retry interval. For long-running searches (>5 min) or batches, submit and capture the RID, then poll independently to avoid blocking (`scripts/blast_rid.py`, see "Programmatic RID polling" in `references/results-and-rid.md`). The RID is visible at `https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Get&RID=...` for 24-36 hours.
 
 **Latency is not fixed.** A small blastn against `refseq_select_rna` takes about a minute (62 s measured), but permissive-cutoff, large-`hitlist_size` or low-word-size searches (PAM30 + `word_size=2` + `expect=1000` measured 181 s once and 1141 s (19 min) another time, on an unchanged query pattern) can run many times longer, and any search waits behind a busy NCBI queue (the same small blastn measured 62 s on a quiet day and 33 min on a busy one). A multi-minute wait on those combinations is not a hang: keep polling the RID rather than resubmitting, and only give up on `Status=FAILED`/`UNKNOWN` or after your own timeout.
 
-## Code patterns
+## Reference Files
 
-### Standard remote BLASTN with reproducible parameters
+Code patterns live in `references/`; read the one that matches the call you are writing.
 
-**Goal:** Run BLASTN with explicit, paper-quality parameters.
-
-**Approach:** Specify program, database (refseq_select for stability), word size, expect, and a large hitlist_size to dodge the max_target_seqs trap.
-
-**Reference (BioPython 1.83+):**
-```python
-from Bio.Blast import NCBIWWW, NCBIXML
-
-handle = NCBIWWW.qblast(
-    program='blastn',
-    database='refseq_select_rna',
-    sequence=query_seq,
-    expect=1e-10,
-    word_size=11,
-    hitlist_size=500,  # large; filter top-N downstream
-    format_type='XML',
-)
-record = NCBIXML.read(handle); handle.close()
-top10 = sorted(record.alignments, key=lambda a: a.hsps[0].expect)[:10]
-```
-
-### Requesting megablast / dc-megablast (qblast() flag, not a program value)
-
-**Goal:** Run high-identity DNA search (megablast) or sensitive discontiguous cross-species search (dc-megablast).
-
-**Approach:** `NCBIWWW.qblast()` has no `program='megablast'`. Both are requested as `program='blastn'` plus a keyword flag -- confirmed live, `program='megablast'` fails immediately with `ValueError`.
-
-**Reference (BioPython 1.83+):**
-```python
-# megablast (word=28, high-identity DNA, e.g. contamination screening)
-handle = NCBIWWW.qblast(
-    program='blastn',
-    megablast=True,
-    database='refseq_select_rna',
-    sequence=query_seq,
-    hitlist_size=500,
-)
-
-# dc-megablast (discontiguous, sensitive cross-species mRNA)
-handle = NCBIWWW.qblast(
-    program='blastn',
-    megablast=True,
-    template_type='coding',   # or 'optimal'
-    template_length=18,       # 16, 18, or 21
-    database='refseq_select_rna',
-    sequence=query_seq,
-    hitlist_size=500,
-)
-```
-Verified live: `program='blastn', megablast=True` on a human/mouse/rat cross-species mRNA query returned 5 alignments (human + mouse only) vs. 11 from plain `blastn`/word=11 on the identical query -- reduced but non-zero cross-species sensitivity, matching the mechanism in Failure Modes below.
-
-### Protein search with organism restriction
-
-**Goal:** Find mammalian homologs of a query protein in Swiss-Prot.
-
-**Approach:** `entrez_query` filters the BLAST search space pre-execution; faster and more meaningful E-values than post-filtering.
-
-**Reference (BioPython 1.83+):**
-```python
-handle = NCBIWWW.qblast(
-    program='blastp',
-    database='swissprot',
-    sequence=protein_seq,
-    entrez_query='Mammalia[Organism]',
-    expect=1e-5,
-    composition_based_statistics=2,
-    hitlist_size=200,
-)
-record = NCBIXML.read(handle); handle.close()
-```
-
-### Short peptide search
-
-```python
-handle = NCBIWWW.qblast(
-    program='blastp',
-    database='swissprot',
-    sequence=peptide_seq,  # < 30 aa
-    matrix_name='PAM30',
-    word_size=2,
-    gapcosts='9 1',  # required: PAM30 rejects BLOSUM62's default gap costs (11,1) -- see word-size/gap-cost table above
-    expect=1000,  # short queries need permissive cutoff
-    composition_based_statistics=3,
-    hitlist_size=100,
-)
-```
-Verified live: omitting `gapcosts` raises `ValueError: Error message from NCBI: ... Gap existence and extension values of 11 and 1 not supported for PAM30`; with `gapcosts='9 1'` the call succeeds.
-
-### Save XML for re-parsing
-
-```python
-handle = NCBIWWW.qblast('blastn', 'refseq_select_rna', query)
-with open('blast.xml', 'w') as f:
-    f.write(handle.read())
-handle.close()
-
-with open('blast.xml') as f:
-    record = NCBIXML.read(f)
-```
-
-### Hit extraction with identity + coverage filtering
-
-**Goal:** Return structured top hits with biological metrics, not just E-values.
-
-**Approach:** Walk alignments + first HSP; compute identity and query coverage as fractions; sort by bit-score (database-size invariant) not E-value.
-
-**Reference (BioPython 1.83+):**
-```python
-def top_hits(record, min_identity=0.5, min_coverage=0.7, top_n=10):
-    qlen = record.query_length
-    hits = []
-    for aln in record.alignments:
-        hsp = aln.hsps[0]
-        ident = hsp.identities / hsp.align_length
-        cov = hsp.align_length / qlen
-        if ident >= min_identity and cov >= min_coverage:
-            hits.append({
-                'accession': aln.accession,
-                'title': aln.title,
-                'evalue': hsp.expect,
-                'bits': hsp.bits,
-                'identity': ident,
-                'coverage': cov,
-            })
-    return sorted(hits, key=lambda h: -h['bits'])[:top_n]
-```
-
-### Programmatic RID polling for long jobs
-
-**Goal:** Submit a long job, keep the RID, poll without blocking, resume later.
-
-**Approach:** `qblast()` never exposes the RID, so use the NCBI BLAST URL API directly (`scripts/blast_rid.py`, stdlib only): `Put` returns RID + RTOE, `SearchInfo` returns `Status=WAITING|READY|FAILED|UNKNOWN`, `Get` returns the XML. It waits RTOE, polls at most once per 60 s, refuses queries without a defline, and exits with the NCBI error text on a rejected submit.
-```bash
-python scripts/blast_rid.py run --query q.fa --program blastn --db refseq_select_rna --hitlist 500 --expect 1e-10 --out hits.xml
-python scripts/blast_rid.py submit --query q.fa --program tblastn --db nr      # prints RID; later: status RID / fetch RID --out hits.xml
-```
-The saved XML parses with `NCBIXML.read()` (see `examples/save_and_parse.py`).
+| File | Read when |
+|---|---|
+| `references/dna-patterns.md` | Writing a `blastn` call, or requesting megablast / dc-megablast (`megablast=True`, `template_type`) |
+| `references/protein-patterns.md` | `blastp` with `entrez_query` organism restriction, or a peptide under 30 aa (PAM30, `gapcosts`) |
+| `references/results-and-rid.md` | Saving/re-parsing XML, filtering hits by identity + coverage, or polling a long job by RID |
+| `references/statistics.md` | E-value derivation, CBS mode table, twilight zone |
 
 ## Failure modes
 
