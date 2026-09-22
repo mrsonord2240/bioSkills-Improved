@@ -10,12 +10,12 @@ Beyond the standard fields, downstream tools depend on optional tags whose prese
 | ms:i | samtools fixmate -m | Mate score (lowercase per SAMtags); minimap2's own `ms:i` is an unrelated DP score | samtools markdup |
 | RG:Z | aligner from -R | Read group ID | GATK BQSR, MarkDuplicates LB lookup |
 | SA:Z | All split-read aligners | Other alignments of the read: `rname,pos,strand,CIGAR,mapQ,NM;` records (pos 1-based, each ends with `;`) | Sniffles, Manta, cuteSV, GRIDSS, Delly |
-| NH:i | STAR, HISAT2 | Number of reported hits | featureCounts multimapper handling, Salmon (not verified here) |
-| HI:i | STAR | Hit index among NH (1-based by default; `--outSAMattrIHstart 0` for 0-based) | RSEM (not verified here) |
+| NH:i | STAR, HISAT2 | Number of reported hits | featureCounts multimapper handling (checked: subread 2.0.6 -- default excludes all NH>1 alignments, `-M` includes them, `-M --fraction` weights each by 1/NH), Salmon (not verified here) |
+| HI:i | STAR | Hit index among NH (1-based by default; `--outSAMattrIHstart 0` for 0-based) | Not RSEM: checked RSEM 1.2.28's `rsem-calculate-expression --help` and `convert-sam-for-rsem --help`, neither mentions HI; RSEM groups a multi-mapped read's alignments by consecutive same-QNAME lines, not by an HI tag |
 | XS:A | STAR (`--outSAMstrandField intronMotif`), HISAT2 | Strand inferred from splice motif | StringTie, Cufflinks |
 | ts:A | minimap2 `-ax splice` | Transcript strand from splice motif | StringTie |
-| CB:Z | Cell Ranger, STARsolo | Corrected cell barcode (not verified here) | scRNA quantification |
-| UB:Z | Cell Ranger, STARsolo | Corrected UMI (not verified here) | UMI-aware dedup |
+| CB:Z | Cell Ranger, STARsolo | Corrected cell barcode; checked STARsolo 2.7.11b (`--soloType CB_UMI_Simple` + whitelist writes `CB:Z` matching the whitelist entry). Cell Ranger not run (registration-gated download) | scRNA quantification |
+| UB:Z | Cell Ranger, STARsolo | Corrected UMI; checked STARsolo 2.7.11b (`UB:Z` present alongside `CB:Z` in the same run). Cell Ranger not run (registration-gated download) | UMI-aware dedup |
 | RX:Z | fgbio AnnotateBamWithUmis | Raw UMI (bulk) | fgbio GroupReadsByUmi |
 | MI:Z | fgbio GroupReadsByUmi | Molecular identifier (UMI group) | CallMolecularConsensusReads, duplex calling |
 | cs:Z | minimap2 --cs | Compact CIGAR-with-bases | paftools, SV tools |
