@@ -4,15 +4,7 @@ Saving XML, extracting hits, and polling a long job by RID. Read when parsing re
 
 ### Save XML for re-parsing
 
-```python
-handle = NCBIWWW.qblast('blastn', 'refseq_select_rna', query)
-with open('blast.xml', 'w') as f:
-    f.write(handle.read())
-handle.close()
-
-with open('blast.xml') as f:
-    record = NCBIXML.read(f)
-```
+`examples/save_and_parse.py` (`run_and_save()` writes `qblast()` output to disk, `parse_hits()` re-reads it with `NCBIXML.read()`).
 
 ### Hit extraction with identity + coverage filtering
 
@@ -20,26 +12,7 @@ with open('blast.xml') as f:
 
 **Approach:** Walk alignments + first HSP; compute identity and query coverage as fractions; sort by bit-score (database-size invariant) not E-value.
 
-**Reference (BioPython 1.83+):**
-```python
-def top_hits(record, min_identity=0.5, min_coverage=0.7, top_n=10):
-    qlen = record.query_length
-    hits = []
-    for aln in record.alignments:
-        hsp = aln.hsps[0]
-        ident = hsp.identities / hsp.align_length
-        cov = hsp.align_length / qlen
-        if ident >= min_identity and cov >= min_coverage:
-            hits.append({
-                'accession': aln.accession,
-                'title': aln.title,
-                'evalue': hsp.expect,
-                'bits': hsp.bits,
-                'identity': ident,
-                'coverage': cov,
-            })
-    return sorted(hits, key=lambda h: -h['bits'])[:top_n]
-```
+`examples/basic_blast.py` `top_n_by_bitscore(record, n, min_identity, min_coverage)` (protein version with coverage-only filter: `examples/blastp_filtered.py` `filter_top`).
 
 ### Programmatic RID polling for long jobs
 
@@ -47,6 +20,7 @@ def top_hits(record, min_identity=0.5, min_coverage=0.7, top_n=10):
 
 **Approach:** `qblast()` never exposes the RID, so use the NCBI BLAST URL API directly (`scripts/blast_rid.py`, stdlib only): `Put` returns RID + RTOE, `SearchInfo` returns `Status=WAITING|READY|FAILED|UNKNOWN`, `Get` returns the XML. It waits RTOE, polls at most once per 60 s, refuses queries without a defline, and exits with the NCBI error text on a rejected submit.
 ```bash
+# from the Skill directory
 python scripts/blast_rid.py run --query q.fa --program blastn --db refseq_select_rna --hitlist 500 --expect 1e-10 --out hits.xml
 python scripts/blast_rid.py submit --query q.fa --program tblastn --db nr      # prints RID; later: status RID / fetch RID --out hits.xml
 ```
