@@ -266,6 +266,8 @@ For a per-position list of differences, use `compare_to_ref` in `references/pyth
 | `references/contig-naming.md` | BAM and reference disagree on contig names, "which GRCh38 is this", renaming contigs with `samtools reheader`, UCSC / Ensembl / RefSeq name maps |
 | `references/consensus-modes.md` | IUPAC codes (`--ambig`, `--het-fract`, `--call-fract`, `--het-scale`), platform `--config` profiles, `-T`, viral consensus, `samtools consensus` vs `bcftools consensus` |
 | `references/python-consensus.md` | pysam majority-vote consensus, `compare_to_ref`, the header dict for writing a BAM |
+| `scripts/rename_contigs.sh` | Rename BAM contigs from a `map.tsv` (`in.bam map.tsv out.bam [ref.fa]`), see `references/contig-naming.md` |
+| `scripts/pysam_consensus.py` | Majority-vote consensus / differences from the reference for a BAM window (`consensus` and `compare` subcommands) |
 
 ## Related Skills
 

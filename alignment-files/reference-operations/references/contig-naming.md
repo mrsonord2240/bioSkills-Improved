@@ -1,6 +1,6 @@
 # Contig Naming, GRCh38 Flavours and Renaming
 
-Moved verbatim from `SKILL.md` (2026-09-21). Read when a BAM and its reference disagree on contig names (`chr22` vs `22`, RefSeq accessions), when asked which GRCh38 a BAM was aligned to, or before renaming contigs without re-aligning.
+Moved from `SKILL.md` (2026-09-21); the rename-by-map recipe is now `scripts/rename_contigs.sh`. Read when a BAM and its reference disagree on contig names (`chr22` vs `22`, RefSeq accessions), when asked which GRCh38 a BAM was aligned to, or before renaming contigs without re-aligning.
 
 ### GRCh38 Is Not One Reference
 
@@ -43,14 +43,11 @@ Renaming is a header-only change: BAM records store a contig index, so `samtools
 ```bash
 # map.tsv: old<TAB>new, one contig per line (e.g. chr22<TAB>22, chrM<TAB>MT), or UCSC -> RefSeq from the assembly report:
 grep -v '^#' GCF_000001405.40_GRCh38.p14_assembly_report.txt | tr -d '\r' | awk -F'\t' '$10!="na" && $7!="na"{print $10 "\t" $7}' > map.tsv   # a few UCSC contigs (chrUn_KI270752v1) have no RefSeq accession ("na"): reheader stops with "Duplicate entry na" if they stay
-samtools view -H sample.bam | awk -F'\t' -v OFS='\t' 'NR==FNR{m[$1]=$2; next}
-    /^@SQ/{for(i=2;i<=NF;i++) if($i~/^SN:/){n=substr($i,4); if(n in m) $i="SN:" m[n]}} {print}' map.tsv - > renamed.hdr
-samtools reheader renamed.hdr sample.bam > renamed.bam.tmp && mv renamed.bam.tmp renamed.bam && samtools index renamed.bam   # a failed reheader leaves no renamed.bam
+scripts/rename_contigs.sh sample.bam map.tsv renamed.bam   # header-only rename + index; a failed reheader leaves no renamed.bam
+# add ref.fa as a 4th argument to also check names and lengths against ref.fa.fai (prints OK)
 
 # UCSC -> Ensembl for the primary chromosomes only (hg38/GRCh38, not hg19); chr1_KI..._alt, chrUn_... etc. keep their names
 samtools view -H sample.bam | sed -E -e 's/^(@SQ\tSN:)chrM\t/\1MT\t/' -e 's/^(@SQ\tSN:)chr([0-9]+|X|Y)\t/\1\2\t/' > renamed.hdr
-
-# Check: contig names and lengths now equal the reference's
-diff <(samtools view -H renamed.bam | awk '/^@SQ/{print $2, $3}') <(awk '{print "SN:"$1, "LN:"$2}' ref.fa.fai) && echo OK
+samtools reheader renamed.hdr sample.bam > renamed.bam && samtools index renamed.bam
 ```
 `SA:Z:`, `XA:Z:` and `OA:Z:` tags hold contig names as text and keep the old names; drop them with `samtools view -b -x SA -x XA renamed.bam` if a downstream tool reads them. `samtools reheader` also accepts a CRAM (checked on 1.24: exit 0, header `M5` kept, records decode identically with `-T` the renamed reference; decoding without `-T` needs a `REF_PATH`/cache entry for that `M5`). For VCF use `bcftools annotate --rename-chrs map.tsv`.
