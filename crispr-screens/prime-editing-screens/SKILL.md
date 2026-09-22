@@ -9,11 +9,14 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: PRIDICT2 git HEAD 2026-09-16 (https://github.com/uzh-dqbm-cmi/PRIDICT2), CRISPResso2 2.3.4 (via Docker, `pinellolab/crispresso2:latest`), pandas 2.2+, numpy 1.26+.
+Reference examples tested with: PRIDICT2 git HEAD 2026-09-16 (https://github.com/uzh-dqbm-cmi/PRIDICT2), CRISPResso2 2.3.4 (via Docker, `pinellolab/crispresso2:latest`), ePRIDICT git HEAD ddcdba360c969469a536343dd89e29179961e367 (https://github.com/Schwank-Lab/epridict) with its `light` model, pandas 2.2+, numpy 1.26+.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - CLI: `python pridict2_pegRNA_design.py single --help`; `python pridict2_pegRNA_design.py batch --help`
-- Web: PRIDICT2 web interface at https://pridict.it/
+- CLI: `python epridict_prediction.py single --help` (run from the epridict repo root)
+- Web: PRIDICT2 and ePRIDICT web interfaces at https://pridict.it/
+
+ePRIDICT is Linux/macOS only -- `pybigwig` has no Windows wheel (use WSL on Windows).
 
 If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
 
@@ -24,8 +27,8 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 - Python: `PRIDICT2` for pegRNA efficiency prediction
 - Python: `ePRIDICT` for chromatin-context prediction; pair with PRIDICT2 rather than replacing it
 - CLI: `CRISPResso --prime_editing_pegRNA_*` for amplicon-level analysis
-- Workflow: pegRNA library design -> PRIDICT2 filtering -> screen execution -> CRISPResso2 quantification -> per-variant scoring
-- Details: PRIDICT2 CLI and library filtering in `references/pridict2-batch-cli.md`; PRIME, MOSAIC and BE cross-validation in `references/pooled-screen-methods.md` (see Reference Files)
+- Workflow: pegRNA library design -> PRIDICT2 filtering -> ePRIDICT chromatin check -> screen execution -> CRISPResso2 quantification -> per-variant scoring
+- Details: PRIDICT2 CLI and library filtering in `references/pridict2-batch-cli.md`; ePRIDICT install and prediction in `references/epridict-chromatin.md`; PRIME, MOSAIC and BE cross-validation in `references/pooled-screen-methods.md` (see Reference Files)
 
 ## Prime Editor Chemistry Comparison
 
@@ -97,9 +100,14 @@ CRISPResso \
     --output_folder pe_results \
     --name sample_id
 
-# Output: CRISPResso_quantification_of_editing_frequency.txt
+# Output: CRISPResso2 nests one level below --output_folder, as
+#   pe_results/CRISPResso_on_sample_id/CRISPResso_quantification_of_editing_frequency.txt
+# (i.e. <output_folder>/CRISPResso_on_<name>/; the commented filename alone is not the path).
 # Prime-editing outcomes appear as extra amplicon ROWS (Reference / Prime-edited /
 # Scaffold-incorporated), each with Unmodified%, Modified% and read counts.
+# A correct extension puts the edited reads in the Prime-edited row; building it PBS-then-RTT
+# instead yields Prime-edited NA/0 with those same reads counted as Reference-row substitutions
+# (verified: 240/500 edited reads -> Prime-edited row with RTT-then-PBS, 0 -> with PBS-then-RTT).
 ```
 
 ## Failure Modes
@@ -109,7 +117,10 @@ CRISPResso \
 **Trigger:** Sequence-only prediction missed chromatin context.
 **Mechanism:** Closed chromatin reduces Cas9 binding and RT activity; PRIDICT2 only sees sequence.
 **Symptom:** PRIDICT2 predicts 60% efficiency; observed is 5%.
-**Fix:** Cross-reference target with chromatin accessibility data (ATAC-seq) in the cell line; flag pegRNAs at silenced loci; pilot before screen.
+**Fix:** Score the target's chromatin context directly with ePRIDICT (K562 model; see
+`references/epridict-chromatin.md`) rather than proxying it with a separate ATAC-seq track -- ePRIDICT
+is the published companion to PRIDICT2 for exactly this gap. Flag pegRNAs whose ePRIDICT percentile is
+low despite a high PRIDICT2 score; pilot those before committing library budget.
 
 ### High scaffold incorporation
 
@@ -202,13 +213,15 @@ no designable PAM cannot be PE-installed (see "Library missing intended variant"
 | Low editing across library | Cell-line RT inactivity | Verify PE2 expression; switch to validated line |
 | Scaffold incorporation >10% | RTT too short | Re-design with longer RTT |
 | Partial multi-base edits | RT processivity limit | Shorter RTT or PE3 |
-| PRIDICT predicts but observes much lower | Chromatin context | Pilot at chromatin-aware sites |
+| PRIDICT predicts but observes much lower | Chromatin context | Score the locus with ePRIDICT (`references/epridict-chromatin.md`); flag low-percentile targets; pilot before library order |
 | Library missing variants | No NGG PAM | SpRY-PE; BE alternative |
 | CRISPResso2 reports ~0% Prime-edited on a library that should edit | pegRNA extension built PBS-then-RTT instead of RTT-then-PBS | Rebuild extension as RTT-revcomp + PBS-revcomp |
 | PRIDICT2 batch: `--summarize: expected one argument` | Bare `--summarize` flag | Pass a value: `--summarize K562` (or `HEK`) |
 | PRIDICT2 batch: summary file is `""` (exit 0) | Wrong header (`sequence` not `editseq`), zero data rows, or no NGG PAM near any edit | Read the run's stdout for the cause; see Failure Modes, "Batch run exits 0 with an empty summary file" |
 | PRIDICT2 batch: `FileNotFoundError` referencing `input/<file>` | CSV not placed in the CLI's default `./input` directory | `mkdir input` and move the CSV there, or pass `--input-dir` explicitly |
 | PRIDICT2 batch `--summarize`: `FileNotFoundError` on the output directory itself | `--output-dir` does not exist yet -- `--summarize` lists existing `.csv` files there before the run starts | `mkdir -p <output-dir>` before running with `--summarize` |
+| PRIDICT2 batch `--summarize`: `ValueError: Output directory is not empty. Please move or delete existing .csv files` | `--output-dir` exists but already holds a `.csv` -- including a previous PRIDICT2 run's own per-sequence `_pegRNA_Pridict_full.csv` files, which the run itself writes there | Pre-creating the directory is necessary but not sufficient: a second `--summarize` run into the same `--output-dir` always fails. Point it at a fresh directory (or clear the `.csv` files first) |
+| PRIDICT2 batch with `--cores` above 3 | The tool documents 3 as the maximum ("Maximum 3 cores to prevent memory issues") but passes `--cores` straight through unvalidated, so a larger number is accepted silently | Use `--cores 3` (also the default); do not raise it |
 | PE concordant with BE on transitions, disagrees on transversions | PE handles transversions BE doesn't | Expected; trust PE |
 
 ## Reference Files
@@ -216,6 +229,7 @@ no designable PAM cannot be PE-installed (see "Library missing intended variant"
 | File | Read when |
 |------|-----------|
 | `references/pridict2-batch-cli.md` | Running PRIDICT2 single or batch mode, loading its output columns, filtering and picking top pegRNAs per variant |
+| `references/epridict-chromatin.md` | Installing and running ePRIDICT, or interpreting a locus whose chromatin context contradicts its PRIDICT2 score |
 | `references/pooled-screen-methods.md` | Planning a PRIME-style pooled screen or MOSAIC saturation library, or intersecting PE hits with a parallel BE screen |
 
 ## References

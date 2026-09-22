@@ -17,16 +17,21 @@ python pridict2_pegRNA_design.py single \
 
 # Batch input from CSV:
 # PRIDICT2's --input-dir defaults to ./input, NOT the current directory -- the CSV must live there
-# (or pass --input-dir explicitly). --output-dir must also already exist before running with
-# --summarize (it lists existing .csv files there first; a missing directory raises FileNotFoundError).
+# (or pass --input-dir explicitly). --output-dir must also already exist AND hold no .csv file at all
+# before running with --summarize (it lists existing .csv files there first: a missing directory
+# raises FileNotFoundError, and a directory containing any .csv raises "Output directory is not
+# empty" -- so a SECOND --summarize run into the same --output-dir always fails; use a fresh dir).
 mkdir -p input predictions
 mv variants_to_design.csv input/
 # CSV columns: sequence_name, editseq (NOT "sequence" -- see SKILL.md Failure Modes)
 python pridict2_pegRNA_design.py batch \
     --input-fname variants_to_design.csv \
     --output-dir predictions/ \
-    --cores 4 \
+    --cores 3 \
     --summarize K562                                          # takes a cell-line value ('K562' or 'HEK'); a bare flag crashes argparse
+# --cores defaults to 3 and the tool documents 3 as the MAXIMUM ("Maximum 3 cores to prevent memory
+# issues", pridict2_pegRNA_design.py line 1111). The value is passed straight through unvalidated, so
+# a higher number is accepted silently and then risks the memory exhaustion the cap exists to avoid.
 
 # Output: per-pegRNA predictions in predictions/<sequence_name>_pegRNA_Pridict_full.csv
 # Real columns (verified against actual output, not the names above earlier drafts guessed):
@@ -63,7 +68,7 @@ def load_pridict2_predictions(prediction_dir):
 | Cell line / Cas9 expression | Variable; piloting required |
 | Cell cycle phase | S/G2 = higher efficiency |
 
-**Critical insight from Mathis 2025:** Chromatin context is a major locus-level determinant that sequence-only predictors miss, which is why ePRIDICT is designed to be combined with PRIDICT2.0 rather than replace it -- the pairing helps most in regions of lower chromatin accessibility. For genome-scale screens, validate predictions empirically at representative loci.
+**Critical insight from Mathis 2025:** Chromatin context is a major locus-level determinant that sequence-only predictors miss, which is why ePRIDICT is designed to be combined with PRIDICT2.0 rather than replace it -- the pairing helps most in regions of lower chromatin accessibility. Run it on the positions PRIDICT2 selected (`references/epridict-chromatin.md`); for genome-scale screens, validate predictions empirically at representative loci.
 
 **PRIDICT2's reported `Spacer-Sequence` forces a synthetic 5'-G** for U6-promoter transcription (source: `pridict2_pegRNA_design.py`, `protospacerseq = 'G' + original_seq[...]`) -- confirmed against real output, where the reported spacer matched true genomic sequence at 19/20 positions, the sole mismatch being the 5'-most base. If your spacer's true genomic first base isn't G, the ordered oligo will still differ from genomic sequence there; this is expected, not a bug.
 
@@ -86,12 +91,13 @@ MLH1_c677,GAGCTGAGC(A/G)GAGGCTCTTGAAGC...
 EOF
 
 # Step 2: run PRIDICT2 batch (--summarize takes a cell-line value, not a bare flag;
-# --output-dir must already exist -- --summarize lists .csv files there before the run starts,
-# and a missing directory raises FileNotFoundError there rather than a "nothing found" no-op)
+# --output-dir must already exist and be free of .csv files -- --summarize lists .csv files there
+# before the run starts, so a missing directory raises FileNotFoundError and a directory already
+# holding a previous run's .csv raises "Output directory is not empty" rather than a no-op)
 python pridict2_pegRNA_design.py batch \
     --input-fname variants.csv \
     --output-dir predictions/ \
-    --cores 8 \
+    --cores 3 \
     --summarize K562
 ```
 
