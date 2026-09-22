@@ -18,7 +18,7 @@ Tell the AI agent what to do:
 
 ### Library Design
 
-> "Design a CBE saturation library tiling BRCA1 RING domain (amino acids 1-100). 10-15 sgRNAs per amino acid where at least one C in the editing window (positions 4-8) hits the target codon. Annotate each sgRNA with predicted target + bystander variants. Output library.tsv with sgRNA, target_aa, target_variant, bystander_variants columns."
+> "Design a CBE saturation library tiling BRCA1 RING domain (amino acids 1-100). 10-15 sgRNAs per amino acid where at least one C in the editing window (positions 4-8) hits the target codon. Annotate each sgRNA with target + bystander editable-base positions. Output library.tsv with sgRNA, target_aa, target_positions, bystander_positions columns."
 
 > "I need to install MLH1 c.677A>G as a single intended variant. CBE won't work (need ABE). Find ABE7.10 or ABE8e sgRNAs that place A at position 5 with no bystanders. If no zero-bystander spacer exists, list candidates sorted by bystander_count and recommend prime editor as alternative."
 

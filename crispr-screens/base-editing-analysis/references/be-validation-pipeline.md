@@ -15,7 +15,7 @@ pip install -r requirements.txt
 # The batch file is tab-delimited with columns: name, fastq_r1, amplicon_seq, guide_seq
 # (plus optional -w, -wc, --exclude_bp_from_left/right).
 docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crispresso2 \
-    CRISPRessoBatch --batch_settings batch_file.txt --skip_failed --base_edit
+    CRISPRessoBatch --batch_settings batch_file.txt --skip_failed --base_editor_output
 
 # Step 2: run the notebooks in order against the CRISPResso2 output
 #   notebooks/01_BEV_allele_frequencies.ipynb
