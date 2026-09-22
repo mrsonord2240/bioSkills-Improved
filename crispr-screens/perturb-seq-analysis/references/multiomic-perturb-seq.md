@@ -13,8 +13,12 @@ here: it is for embedding/LSI, and its cell-wise reweighting distorted the Wilco
 
 ```python
 # Peak-to-gene linking (which differential peak sits near which differential gene) needs a
-# genome annotation file: muon.atac.pp.add_peak_annotation(mdata, annotation_file) followed by
-# muon.atac.tl.rank_peaks_groups(...) adds nearest-gene/distance columns automatically. Without
-# an annotation file, report differential genes (PyDESeq2, Pertpy Unified Framework section
-# above) and differential peaks (peaks.tsv, above) separately, as here.
+# genome annotation file (columns: peak, gene, distance, peak_type):
+#   muon.atac.tl.add_peak_annotation(mdata, annotation_file)     # muon 0.1.9: it is in .tl, not .pp
+#   muon.atac.tl.rank_peaks_groups(mdata, groupby=..., add_peak_type=True, add_distance=True)
+# That puts the nearest-gene / peak-type / distance annotations in
+# .uns['rank_genes_groups'] keyed by group -- they are NOT columns of
+# sc.get.rank_genes_groups_df. Without an annotation file, report differential genes (PyDESeq2,
+# Pertpy Unified Framework section above) and differential peaks (peaks.tsv, above) separately,
+# as here.
 ```

@@ -34,7 +34,9 @@ sc.pp.normalize_total(adata, target_sum=1e4)
 sc.pp.log1p(adata)
 adata.layers['log_normalized'] = adata.X.copy()
 sc.pp.highly_variable_genes(adata, n_top_genes=2000)
-sc.tl.pca(adata, use_highly_variable=True)
+sc.tl.pca(adata, mask_var='highly_variable')   # scanpy >=1.12: `use_highly_variable` is deprecated;
+                                               # mask_var='highly_variable' is its exact replacement
+                                               # (verified: byte-identical X_pca on papalexi_2021)
 
 # === MIXSCAPE ESCAPER FILTERING ===
 # Compute perturbation signature: cell_expression - mean(K NTC neighbors)

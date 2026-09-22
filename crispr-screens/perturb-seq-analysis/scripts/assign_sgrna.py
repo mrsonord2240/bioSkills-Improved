@@ -11,13 +11,14 @@ def assign_sgrna(adata, sgrna_counts_layer='sgrna_counts', threshold=10):
     '''Per-cell sgRNA assignment. Returns single assignment or 'multiplet'/'none'.'''
     import numpy as np
     counts = adata.layers[sgrna_counts_layer]  # cells x sgRNAs
-    above_thresh = counts >= threshold
-    n_sgrna_per_cell = above_thresh.sum(axis=1)
+    # Works for a dense array or a scipy sparse layer (the usual 10X / FeatureBarcode case).
+    # sparse sum/argmax return an (cells, 1) matrix, so ravel both -- a 2-D index array raises
+    # pyarrow.lib.ArrowInvalid when it reaches .obs, and a 2-D mask raises AxisError from .sum().
+    n_sgrna_per_cell = np.asarray((counts >= threshold).sum(axis=1)).ravel()
+    top_sgrna = np.asarray(adata.var_names)[np.asarray(counts.argmax(axis=1)).ravel()]
     assignments = np.where(
         n_sgrna_per_cell == 0, 'none',
-        np.where(n_sgrna_per_cell == 1,
-                  [adata.var_names[i] for i in counts.argmax(axis=1)],
-                  'multiplet'))
+        np.where(n_sgrna_per_cell == 1, top_sgrna, 'multiplet'))
     adata.obs['sgrna_assignment'] = assignments
     return adata
 
