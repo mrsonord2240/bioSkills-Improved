@@ -18,6 +18,10 @@ Before using code patterns, verify installed versions match. If versions differ:
 If code throws ImportError, AttributeError, or TypeError, introspect the installed
 package and adapt the example to match the actual API rather than retrying.
 
+Install: `pip install scipy statsmodels numpy pandas matplotlib scikit-learn`; in R `BiocManager::install("ropls")` and `install.packages(c("mixOmics", "lme4", "qvalue"))`.
+
+Before any group test, settle: the scaling (Pareto vs unit-variance is a hypothesis, not a default), whether the normalization imposed closure (total-area/PQN), technical vs biological zeros, and the experimental unit (the subject, not the injection).
+
 # Metabolomics Statistical Analysis
 
 **"Tell me which metabolites separate my groups"** -> run an honest univariate test with dependence-aware FDR AND a permutation-validated multivariate model, then reconcile the two.
@@ -202,7 +206,7 @@ plt.xlabel('log2 fold change'); plt.ylabel('-log10(p)')
 - **Trigger:** BH or Bonferroni applied as if the features were independent.
 - **Mechanism:** Pathway co-regulation plus adducts/isotopologues/fragments make features strongly correlated; one signal lights up its whole cluster, and closure (after sample-wise normalization) injects negative correlations.
 - **Symptom:** A "200 significant metabolites" list that encodes a handful of independent signals; over-conservative threshold from Bonferroni-on-features.
-- **Fix:** Effective-number-of-tests or permutation FDR (Peluso 2021); collapse features to compounds before counting hits; report independent-signal counts.
+- **Fix:** Effective-number-of-tests or permutation FDR (Peluso 2021); collapse features to compounds before counting hits; report independent-signal counts. The compound-level BH count still has a non-zero false-discovery rate by construction (an audit run at n=25/group with 90 compounds gave 1 false compound among the collapsed hits) -- report it as FDR-controlled, never as "0 false hits".
 
 ### Log with zeros / detection-rate confound
 - **Trigger:** Half-min (or zero) imputation followed by log, especially when detection rate differs between groups.
