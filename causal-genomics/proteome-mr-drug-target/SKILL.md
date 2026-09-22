@@ -100,7 +100,7 @@ Report (STROBE-MR): cis-MR estimate + 95% CI, PP.H4, PAV-excluded estimate, plat
 
 ## Phenome-Wide Drug-Target MR
 
-Hold the cis-pQTL instrument set fixed, loop outcomes over a curated endpoint list (FinnGen DF12, Open Targets trait map or a phecode hierarchy), Bonferroni over the number of endpoints. Code and rationale in `references/phewas.md`.
+Hold the cis-pQTL instrument set fixed, loop outcomes over a curated endpoint list (FinnGen DF12, Open Targets trait map or a phecode hierarchy), Bonferroni over the number of endpoints. Rationale in `references/phewas.md`; run `Rscript scripts/phewas_curated_endpoints.R <pqtl.tsv> <endpoints.tsv> <out.tsv>` (needs an OpenGWAS token).
 
 ## Cis-MR Standard Workflow
 
@@ -108,56 +108,7 @@ Hold the cis-pQTL instrument set fixed, loop outcomes over a curated endpoint li
 
 **Approach:** Extract cis-pQTLs in +/-500 kb of the gene -> compute F per instrument from exposure -> clump within window at r2 < 0.1 -> harmonise with outcome -> run TwoSampleMR -> run coloc.abf on the same window -> PAV-annotate via VEP -> report panel.
 
-```r
-library(TwoSampleMR); library(coloc); library(ieugwasr)
-
-cis_window_kb <- 500  # +/- 500 kb per Schmidt 2020 standard cis-window
-gene_chr <- 1; gene_start <- 55039548; gene_end <- 55064852  # PCSK9 hg38
-
-pqtl <- read.table('ukbppp_pcsk9.tsv', header = TRUE)
-pqtl_cis <- subset(pqtl, CHR == gene_chr &
-    POS > (gene_start - cis_window_kb * 1000) &
-    POS < (gene_end + cis_window_kb * 1000) &
-    P < 5e-8)
-
-pqtl_cis$f_stat <- (pqtl_cis$BETA / pqtl_cis$SE)^2  # F from exposure (Burgess 2011)
-pqtl_cis <- subset(pqtl_cis, f_stat >= 10)  # Staiger-Stock 1997 weak-IV floor
-
-exposure_dat <- format_data(pqtl_cis, type = 'exposure',
-    snp_col = 'SNP', beta_col = 'BETA', se_col = 'SE',
-    effect_allele_col = 'A1', other_allele_col = 'A2', eaf_col = 'EAF', pval_col = 'P')
-
-clumped <- ld_clump(
-    dplyr::tibble(rsid = exposure_dat$SNP, pval = exposure_dat$pval.exposure),
-    clump_r2 = 0.1, clump_kb = cis_window_kb,  # cis-MR clumping per Schmidt 2020
-    plink_bin = genetics.binaRies::get_plink_binary(),
-    bfile = '1kg_EUR/EUR'
-)
-exposure_dat <- subset(exposure_dat, SNP %in% clumped$rsid)
-
-outcome_dat <- read_outcome_data('cad_gwas.tsv', snps = exposure_dat$SNP, sep = '\t',
-    snp_col = 'SNP', beta_col = 'BETA', se_col = 'SE',
-    effect_allele_col = 'A1', other_allele_col = 'A2', eaf_col = 'EAF', pval_col = 'P')
-
-dat <- harmonise_data(exposure_dat, outcome_dat, action = 2)
-
-primary <- mr(dat, method_list = c('mr_wald_ratio', 'mr_ivw',
-                                    'mr_egger_regression', 'mr_weighted_median'))
-
-# Triangulation step 1: colocalization on the same window
-gwas_window <- read.table('cad_gwas_pcsk9_window.tsv', header = TRUE)
-pqtl_window <- read.table('ukbppp_pcsk9_full_window.tsv', header = TRUE)
-
-coloc_res <- coloc.abf(
-    dataset1 = list(beta = pqtl_window$BETA, varbeta = pqtl_window$SE^2,
-                    snp = pqtl_window$SNP, type = 'quant', N = 54219, sdY = 1),
-    dataset2 = list(beta = gwas_window$BETA, varbeta = gwas_window$SE^2,
-                    snp = gwas_window$SNP, type = 'cc', N = 122733, s = 0.34),
-    p1 = 1e-4, p2 = 1e-4, p12 = 5e-6  # conservative p12 for drug-target
-)
-
-cat('PP.H4 =', coloc_res$summary['PP.H4.abf'], '\n')
-```
+The complete workflow is `examples/cis_pqtl_mr.R` (cis-window extraction, F filter, PAV flag, clumping, harmonisation, MR panel, correlated IVW, coloc.abf, PAV-excluded rerun, decision summary). Edit the target block at its top and the `data/` paths, then run `Rscript examples/cis_pqtl_mr.R`.
 
 ## Cis-IVW with Correlated Instruments
 
@@ -245,7 +196,7 @@ remotes::install_github('rondolab/MR-PRESSO')
 conda install -c bioconda ensembl-vep
 vep_install -a cf -s homo_sapiens -y GRCh38 -c $HOME/.vep
 
-# 1000 Genomes EUR plink reference for local clumping / LD matrix (bfile prefix '1kg_EUR/EUR' in the code above).
+# 1000 Genomes EUR plink reference for local clumping / LD matrix (bfile prefix '1kg_EUR/EUR' in `examples/cis_pqtl_mr.R` and `references/correlated-instruments.md`).
 # Same panel the OpenGWAS API uses, per the ieugwasr local-LD vignette (link live 2026-09-21, ~1.5 GB).
 # Use this when OpenGWAS needs a token or is unreachable.
 curl -O http://fileserve.mrcieu.ac.uk/ld/1kg.v3.tgz

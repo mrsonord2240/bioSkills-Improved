@@ -1,6 +1,6 @@
 # Correlated cis-pQTL Instruments
 
-Moved verbatim from SKILL.md (`dat` comes from the Standard Workflow block in SKILL.md). Read when several cis-pQTLs in the window are correlated (r2 0.1 to 0.7), for the `mr_ivw` namespace and sign-alignment caveats, or for the robust and Patel 2023 alternatives.
+Moved verbatim from SKILL.md (one pointer edited: `dat` comes from `examples/cis_pqtl_mr.R`). Read when several cis-pQTLs in the window are correlated (r2 0.1 to 0.7), for the `mr_ivw` namespace and sign-alignment caveats, or for the robust and Patel 2023 alternatives.
 
 ## Cis-IVW with Correlated Instruments
 
@@ -11,7 +11,7 @@ Moved verbatim from SKILL.md (`dat` comes from the Standard Workflow block in SK
 ```r
 library(MendelianRandomization); library(ieugwasr)
 
-# Harmonised SNPs only, so the matrix rows match the beta vectors (dat comes from the Standard Workflow above)
+# Harmonised SNPs only, so the matrix rows match the beta vectors (dat comes from `examples/cis_pqtl_mr.R`)
 ld <- ld_matrix(dat$SNP, bfile = '1kg_EUR/EUR', plink_bin = genetics.binaRies::get_plink_binary())
 
 mr_obj <- mr_input(bx = dat$beta.exposure, bxse = dat$se.exposure,
