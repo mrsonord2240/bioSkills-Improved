@@ -78,7 +78,7 @@ E-values scale with database size (Karlin & Altschul 1990 PNAS 87:2264) -- the s
 
 ## Composition-Based Statistics (CBS)
 
-Compositional bias inflates significance for low-complexity proteins. Default `composition_based_statistics=2` (Yu&Altschul 2005) is correct for most cases; switch to `composition_based_statistics=3` for protein queries under 30 aa, where mode 2 over-corrects (used in the Short peptide search pattern below). For known compositional bias (coiled-coil regions, signal peptides), CBS=2 is appropriate but consider hard-masking with SEG. Full mode table and mechanism (Yu et al. 2006): `references/statistics.md`.
+Compositional bias inflates significance for low-complexity proteins. Default `composition_based_statistics=2` (Yu&Altschul 2005) is correct for most cases; switch to `composition_based_statistics=3` for protein queries under 30 aa, where mode 2 over-corrects (used in the Short peptide search pattern below). For known compositional bias (coiled-coil regions, signal peptides), CBS=2 is appropriate but consider hard-masking with SEG (`filter='S'` in `qblast()`); extreme bias still inflates scores and shows up as many "significant" hits to unrelated low-complexity proteins. Full mode table and mechanism (Yu et al. 2006): `references/statistics.md`.
 
 ## The `max_target_seqs` trap
 
@@ -111,7 +111,9 @@ For very short query proteins (e.g. proteomics-identified peptides), BLOSUM45 + 
 | Done | RID + results retained | Fetch XML |
 | Expired | RID purged | 24-36h after completion |
 
-`NCBIWWW.qblast()` handles polling internally with a fixed retry interval. For long-running searches (>5 min) or batches, submit and capture the RID, then poll independently to avoid blocking. The RID is visible at `https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Get&RID=...` for 24-36 hours.
+`NCBIWWW.qblast()` handles polling internally with a fixed retry interval. For long-running searches (>5 min) or batches, submit and capture the RID, then poll independently to avoid blocking (`scripts/blast_rid.py`, see "Programmatic RID polling" below). The RID is visible at `https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Get&RID=...` for 24-36 hours.
+
+**Latency is not fixed.** A small blastn against `refseq_select_rna` takes about a minute (62 s measured), but permissive-cutoff, large-`hitlist_size` or low-word-size searches (PAM30 + `word_size=2` + `expect=1000` measured 181 s once and 1141 s (19 min) another time, on an unchanged query pattern) can run many times longer, and any search waits behind a busy NCBI queue (the same small blastn measured 62 s on a quiet day and 33 min on a busy one). A multi-minute wait on those combinations is not a hang: keep polling the RID rather than resubmitting, and only give up on `Status=FAILED`/`UNKNOWN` or after your own timeout.
 
 ## Code patterns
 
@@ -246,27 +248,18 @@ def top_hits(record, min_identity=0.5, min_coverage=0.7, top_n=10):
 
 ### Programmatic RID polling for long jobs
 
-```python
-import time
+**Goal:** Submit a long job, keep the RID, poll without blocking, resume later.
 
-handle = NCBIWWW.qblast('tblastn', 'nr', query, hitlist_size=500, format_type='XML')
-# Bio.Blast handles polling internally; for explicit control use the REST API directly
-# or save and re-parse the RID URL
+**Approach:** `qblast()` never exposes the RID, so use the NCBI BLAST URL API directly (`scripts/blast_rid.py`, stdlib only): `Put` returns RID + RTOE, `SearchInfo` returns `Status=WAITING|READY|FAILED|UNKNOWN`, `Get` returns the XML. It waits RTOE, polls at most once per 60 s, refuses queries without a defline, and exits with the NCBI error text on a rejected submit.
+```bash
+python scripts/blast_rid.py run --query q.fa --program blastn --db refseq_select_rna --hitlist 500 --expect 1e-10 --out hits.xml
+python scripts/blast_rid.py submit --query q.fa --program tblastn --db nr      # prints RID; later: status RID / fetch RID --out hits.xml
 ```
+The saved XML parses with `NCBIXML.read()` (see `examples/save_and_parse.py`).
 
 ## Failure modes
 
-### `max_target_seqs` misinterpretation
-- **Trigger:** Setting `hitlist_size=10` and assuming top 10 by E-value.
-- **Mechanism:** It's an early-termination param; can miss legitimate top hits.
-- **Symptom:** Different "top 10" between hitlist=10 and hitlist=500 filtered.
-- **Fix:** Always set `hitlist_size=500+` and post-filter; cite Shah 2019.
-
-### Cross-database E-value comparison
-- **Trigger:** Comparing E from a `nt` search against E from a `swissprot` search.
-- **Mechanism:** E scales linearly with database size; comparison is meaningless.
-- **Symptom:** Misleading rankings between two analyses.
-- **Fix:** Compare bit-scores instead, or set the same database for both.
+`max_target_seqs` misinterpretation and cross-database E-value comparison are covered in "The `max_target_seqs` trap" and "E-value interpretation" above.
 
 ### Megablast for cross-species
 - **Trigger:** Default `megablast` (word=28) on a cross-species DNA query.
@@ -286,12 +279,6 @@ handle = NCBIWWW.qblast('tblastn', 'nr', query, hitlist_size=500, format_type='X
 - **Symptom:** Job stuck in queue, eventually fails.
 - **Fix:** Split into smaller queries; or switch to `local-blast` / DIAMOND / MMseqs2.
 
-### Compositional bias inflates E
-- **Trigger:** Protein query with low-complexity region (coiled-coil, signal peptide).
-- **Mechanism:** Default CBS=2 handles most cases, but extreme bias still inflates scores.
-- **Symptom:** Many "significant" hits to unrelated low-complexity proteins.
-- **Fix:** Confirm CBS=2 is on; consider hard-masking with `filter='S'` (SEG).
-
 ### Empty FASTA defline submitted
 - **Trigger:** Sending `sequence` as a raw string without `>id\n`.
 - **Mechanism:** BLAST accepts the anonymous query, but the search runs markedly slower server-side.
@@ -307,7 +294,6 @@ handle = NCBIWWW.qblast('tblastn', 'nr', query, hitlist_size=500, format_type='X
 | No hits | Wrong program / database type | Verify query and DB molecule types match |
 | Empty XML | RID expired | Re-submit; RIDs purge after 24-36h |
 | 1000s of low-complexity hits | CBS disabled or extreme bias | CBS=2; consider SEG filter |
-| Cross-DB E mismatch | Comparing E across DBs | Use bit-score instead |
 | `ValueError: ... Gap existence and extension values of 11 and 1 not supported for PAM30` | Non-BLOSUM62 matrix (e.g. PAM30) without setting `gapcosts` | Set `gapcosts='9 1'` for PAM30 (see word-size/gap-cost table) |
 | `ValueError: Program specified is megablast. Expected one of blastn, blastp, blastx, tblastn, tblastx` | `program=` set to `'megablast'`/`'dc-megablast'` directly | Use `program='blastn', megablast=True` (+ `template_type`/`template_length` for dc-megablast) |
 
