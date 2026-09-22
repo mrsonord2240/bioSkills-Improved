@@ -93,7 +93,7 @@ Benchmark result (Mueller-Dott 2025): across ~19 methods, simple z-score (KSEA/R
 | Scenario | Recommended | Why |
 |---|---|---|
 | Phospho-only run, want regulated sites | Acquire a PAIRED global proteome -> MSstatsPTM `groupComparisonPTM` -> require significance in `ADJUSTED.Model` | Unadjusted site changes are confounded with protein abundance |
-| No global proteome available | Report site changes as UNADJUSTED (`PTM.Model`; `ADJUSTED.Model` is absent) and flag the confound explicitly; optionally `use_unmod <- TRUE` (passed as `use_unmod_peptides`) uses unmodified peptides co-enriched in the PTM runs as a weak protein proxy, which needs those unmodified rows kept in the evidence -- label those results proxy-adjusted | Cannot separate occupancy from abundance; do not claim "regulation" |
+| No global proteome available | Report site changes as UNADJUSTED (`PTM.Model`; `ADJUSTED.Model` is absent) and flag the confound explicitly; optionally `use_unmod=TRUE` on `scripts/msstatsptm_labelfree.R` (passed as `use_unmod_peptides`) uses unmodified peptides co-enriched in the PTM runs as a weak protein proxy, which needs those unmodified rows kept in the evidence -- label those results proxy-adjusted | Cannot separate occupancy from abundance; do not claim "regulation" |
 | TMT / isobaric plexes (enriched + global) | Same MSstatsPTM route with `labeling_type = 'TMT'`, `dataSummarizationPTM_TMT`, `groupComparisonPTM(data.type = 'TMT')`, and a `Condition = 'Norm'` reference channel in EVERY plex (`references/tmt-isobaric.md`) | The adjustment is identical; only the converter, the summarization function and the test branch differ |
 | More than one TMT plex | Refuse to compare until each plex carries the pooled reference channel; `reference_norm = TRUE` bridges them | Reporter ratios are meaningful only within a plex |
 | Between-method phospho difference | Suspect chemistry (TiO2 vs Fe-IMAC mono/multi bias) BEFORE biology | Enrichment is a confounded filter |
@@ -113,41 +113,23 @@ Default when uncertain: localize with the search engine's probability (class I >
 | `references/kinase-activity-ksea.md` | Scoring kinase activity from the adjusted site fold-changes with KSEAapp: PX layout, FC direction, infinite-fold-change and prior-coverage guards |
 | `references/ptm-sea.md` | Scoring PTMsigDB kinase/perturbation/pathway signatures with ssGSEA2.0: GCT construction, CLI call, reading results, what was checked |
 
+Runnable code lives in `scripts/`, each with a header (purpose, inputs, usage):
+
+| Script | Does |
+|---|---|
+| `scripts/msstatsptm_labelfree.R` | Class-I filter, MSstatsPTM label-free adjustment, TREAT-style calls; writes `adjusted_sites.csv` |
+| `scripts/msstatsptm_tmt.R` | The same for TMT/isobaric plexes; writes `adjusted_sites_tmt.csv` |
+| `scripts/ksea_scores.R` | KSEA z-scores per kinase from `adjusted_sites.csv` and a kinase-substrate prior, with the failure guards |
+| `scripts/motif_enrichment.py` | Fisher + BH motif enrichment against an experiment-matched background |
+| `scripts/ptmsea.py` | Build the PTM-SEA GCT from `Sequence window` and read ssGSEA2.0 scores back |
+
 ## Expand the MaxQuant Site Table Before Any Quant
 
 **Goal:** Produce a long, multiplicity-resolved, class-I-filtered phosphosite intensity matrix from `Phospho (STY)Sites.txt`.
 
 **Approach:** Each site row spreads its quant across `Intensity___1/___2/___3` (singly/doubly/triply-phospho forms, THREE underscores); the collapsed base `Intensity` mixes phospho-states and can mask a switch between forms. Per-run columns are `Intensity <experiment>___<n>`; the aggregated `Intensity___<n>` (no experiment name) is the sum over runs and must NOT be melted as a run. Drop Reverse/contaminant, filter `Localization prob`, then melt the per-run, per-multiplicity columns into rows.
 
-```python
-import os
-import re
-import pandas as pd
-import numpy as np
-
-# Filename has a SPACE in the modification name in current MaxQuant; accept either form.
-sites_file = next(f for f in ['Phospho (STY)Sites.txt', 'Phospho(STY)Sites.txt'] if os.path.exists(f))
-phospho = pd.read_csv(sites_file, sep='\t', low_memory=False)
-
-# Newer MaxQuant uses 'Potential contaminant'; older uses 'Contaminant'.
-contaminant_col = 'Potential contaminant' if 'Potential contaminant' in phospho.columns else 'Contaminant'
-phospho = phospho[(phospho['Reverse'] != '+') & (phospho[contaminant_col] != '+')]
-
-CLASS_I_PROB = 0.75  # Olsen 2006 class-I convention; comparability standard, not a calibrated FLR
-phospho = phospho[phospho['Localization prob'] >= CLASS_I_PROB].copy()
-
-gene = phospho['Gene names'].where(phospho['Gene names'].notna(), phospho['Protein'])
-phospho['site_id'] = gene.str.split(';').str[0] + '_' + phospho['Amino acid'] + phospho['Position'].astype(int).astype(str)
-
-# Per-run multiplicity columns 'Intensity <run>___<n>' (THREE underscores); the space after 'Intensity'
-# excludes the aggregated 'Intensity___<n>' sum-over-runs columns.
-mult_cols = [c for c in phospho.columns if re.fullmatch(r'Intensity .+___[123]', c)]
-long = phospho.melt(id_vars=['site_id', 'Amino acid', 'Position', 'Localization prob'], value_vars=mult_cols, var_name='run_multiplicity', value_name='intensity')
-long['multiplicity'] = long['run_multiplicity'].str.split('___').str[-1]
-long['run'] = long['run_multiplicity'].str.replace(r'___[123]$', '', regex=True).str.replace(r'^Intensity ', '', regex=True)
-long = long[long['intensity'] > 0]
-long['log2_intensity'] = np.log2(long['intensity'])
-```
+The runnable recipe is `examples/phospho_analysis.py`: it reads the sites table (spaced or no-space filename), drops Reverse/contaminant rows, keeps `Localization prob` >= 0.75 (`CLASS_I_PROB`), builds `site_id` from gene (or protein) + residue + position, and melts the per-run columns `Intensity <run>___[123]` into a long table with `multiplicity`, `run` and `log2_intensity`. It builds a synthetic table in a temp dir; to run it on your data point `path` at your own `Phospho (STY)Sites.txt`.
 
 ## Protein-Level Adjustment with MSstatsPTM
 
@@ -155,66 +137,11 @@ long['log2_intensity'] = np.log2(long['intensity'])
 
 **Approach:** MSstatsPTM carries TWO datasets -- a PTM dataset (enriched) and a PROTEIN dataset (global/unenriched). `groupComparisonPTM` fits independent linear models to each and returns a list of THREE: `PTM.Model` (unadjusted), `PROTEIN.Model`, and `ADJUSTED.Model`. The adjustment is `dFC_adj = dFC_PTM - dFC_protein` with `SE_adj = sqrt(SE_PTM^2 + SE_protein^2)`, so adjustment ADDS uncertainty -- a site can be significant unadjusted yet lose significance after adjustment. A confident regulation call requires significance in `ADJUSTED.Model`.
 
-```r
-library(MSstatsPTM)
-rd <- function(f) read.table(f, sep = '\t', header = TRUE, quote = '')
-
-use_unmod <- FALSE   # TRUE only when no global run exists (weak proxy, see Decision Tree)
-
-# The converter uses the best-localized sequence as is and keeps unmodified peptides from the
-# enriched runs, so apply the class-I rule to the enriched evidence FIRST: keep rows carrying the
-# modification whose best site probability (from 'Phospho (STY) Probabilities') is >= 0.75.
-# The use_unmod proxy needs the unmodified rows, so keep those too when it is on.
-ev <- rd('evidence_phospho.txt')
-site_prob <- vapply(regmatches(ev$Phospho..STY..Probabilities,
-                               gregexpr('(?<=\\()[0-9.]+(?=\\))', ev$Phospho..STY..Probabilities, perl = TRUE)),
-                    function(p) if (length(p)) max(as.numeric(p)) else NA_real_, numeric(1))
-is_mod <- grepl('Phospho \\(STY\\)', ev$Modified.sequence)
-keep <- is_mod & !is.na(site_prob) & site_prob >= 0.75
-if (use_unmod) keep <- keep | !is_mod
-ev <- ev[keep, ]
-
-# Converters are <Tool>toMSstatsPTMFormat and return a list with $PTM and $PROTEIN.
-# MaxQtoMSstatsPTMFormat reads the MaxQuant 'evidence.txt' (NOT the Phospho (STY)Sites
-# table -- the pandas multiplicity-expansion above is a SEPARATE workflow); the FASTA maps
-# peptides back to site coordinates. $PROTEIN is built ONLY when `evidence_prot` (the GLOBAL
-# run's evidence) is given together with its proteinGroups and annotation.
-input <- MaxQtoMSstatsPTMFormat(
-  evidence = ev,
-  annotation = read.csv('annotation_ptm.csv'),
-  fasta_path = 'uniprot_human.fasta',
-  evidence_prot = rd('evidence_global.txt'),
-  proteinGroups = rd('proteinGroups_global.txt'),
-  annotation_protein = read.csv('annotation_protein.csv'),
-  mod_id = '\\(Phospho \\(STY\\)\\)',
-  which_proteinid_ptm = 'Proteins',
-  which_proteinid_protein = 'Proteins',
-  use_unmod_peptides = use_unmod
-)
-stopifnot('PROTEIN' %in% names(input))   # no protein dataset -> nothing to adjust against
-
-# append defaults to TRUE and requires a log file, so set it FALSE when use_log_file = FALSE
-summarized <- dataSummarizationPTM(input, use_log_file = FALSE, append = FALSE)
-
-# data.type is 'LabelFree' (DDA/DIA label-free) or 'TMT' -- NOT the converter's labeling_type 'LF'.
-# Pass an explicit contrast: the default pairwise Label is 'Control vs Treatment' (log2FC = Control - Treatment).
-# Columns must follow the sorted Condition levels.
-contrast <- matrix(c(-1, 1), nrow = 1, dimnames = list('Treatment vs Control', c('Control', 'Treatment')))
-result <- groupComparisonPTM(summarized, data.type = 'LabelFree', contrast.matrix = contrast)
-
-# Three models; the adjusted one is the deliverable. Keep site rows only (Protein_<residue><position>).
-adjusted <- result$ADJUSTED.Model
-adjusted <- adjusted[grepl('_[STY][0-9]+', adjusted$Protein), ]
-
-# A claim of "changed more than 2-fold" needs the threshold INSIDE the test (TREAT-style), not
-# adj.pvalue < 0.05 & |log2FC| > 1 as a post-hoc double filter, whose FDR refers to log2FC != 0.
-lfc <- 1
-adjusted$pvalue_lfc <- pt((abs(adjusted$log2FC) - lfc) / adjusted$SE, adjusted$DF, lower.tail = FALSE)
-adjusted$adj.pvalue_lfc <- p.adjust(adjusted$pvalue_lfc, method = 'BH')
-regulated <- adjusted[!is.na(adjusted$adj.pvalue_lfc) & adjusted$adj.pvalue_lfc < 0.05, ]
-
-# How much of each call was protein-driven: compare PTM.Model vs ADJUSTED.Model.
+```bash
+Rscript scripts/msstatsptm_labelfree.R dir=<data_dir> out=<out_dir>   # writes <out_dir>/adjusted_sites.csv
 ```
+
+`scripts/msstatsptm_labelfree.R` runs the whole route, with the traps in its comments: class-I pre-filter on the enriched evidence (best `Phospho (STY) Probabilities` >= 0.75; unmodified rows kept only with `use_unmod=TRUE`); `MaxQtoMSstatsPTMFormat` with the global run's `evidence_prot`, `proteinGroups` and annotation, then `stopifnot('PROTEIN' %in% names(input))`; `dataSummarizationPTM(use_log_file = FALSE, append = FALSE)`; an explicit `Treatment vs Control` contrast; `groupComparisonPTM(data.type = 'LabelFree')`; site rows of `ADJUSTED.Model` only (`Protein_<residue><position>`); and the TREAT-style test `pt((|log2FC| - lfc) / SE, DF)` with BH, in place of a post-hoc `adj.pvalue < 0.05 & |log2FC| > 1` double filter (whose FDR refers to log2FC != 0). Compare `PTM.Model` against `ADJUSTED.Model` to see how much of each call was protein-driven. For TMT plexes see `references/tmt-isobaric.md`.
 
 ## A Note on Home-Grown Ascore
 
@@ -238,7 +165,7 @@ def illustrative_localization_score(matched_site_ions, total_ions, depth_p=0.04)
 **Trigger:** Differential testing on a phospho-only run with no paired global proteome. **Mechanism:** `log2FC(PTM_observed) = log2FC(occupancy) + log2FC(protein)`; the two terms are inseparable. **Symptom:** Pathway-coherent "regulated sites" that are pure protein-abundance changes (cyclins/histones in cell cycle, stabilized substrates under drug). **Fix:** Run a matched global proteome and adjust via MSstatsPTM; route the protein-level quant to quantification.
 
 ### Collapsing the MaxQuant multiplicity
-**Trigger:** Quantifying on base `Intensity` instead of `Intensity___1/___2/___3`. **Mechanism:** The collapsed column mixes singly/doubly/triply-phospho forms of the same site. **Symptom:** A switch between forms is masked: the singly-phospho form dropping while the doubly-phospho form rises reads as no change (synthetic test: collapsed +0.16 log2, ___1 -1.40, ___2 +1.56). **Fix:** Expand multiplicity to long form (Perseus "Expand site table" or the melt above) before any stats.
+**Trigger:** Quantifying on base `Intensity` instead of `Intensity___1/___2/___3`. **Mechanism:** The collapsed column mixes singly/doubly/triply-phospho forms of the same site. **Symptom:** A switch between forms is masked: the singly-phospho form dropping while the doubly-phospho form rises reads as no change (synthetic test: collapsed +0.16 log2, ___1 -1.40, ___2 +1.56). **Fix:** Expand multiplicity to long form (Perseus "Expand site table" or the melt in `examples/phospho_analysis.py`) before any stats.
 
 ### Treating identification as localization
 **Trigger:** Reporting sites at peptide FDR without a localization threshold. **Mechanism:** Isobaric positional isomers share precursor mass and peptide score; CID/ion-trap neutral loss (-98 Da) starves site-determining ions. **Symptom:** A 1% peptide FDR result with a much higher true site error. **Fix:** Filter localization probability (class I >=0.75) in EVERY route, including the evidence fed to MSstatsPTM; report an empirical global FLR (LuciPHOr2/DeepFLR), prefer HCD/EThcD. Empirical FLR needs the spectra (mzML); from MaxQuant txt tables alone, report only the model-based expected FLR `mean(1 - Localization prob)` over the accepted sites and label it as such -- it misses mis-assignment sources the search model does not know about.
@@ -281,7 +208,7 @@ def illustrative_localization_score(matched_site_ions, total_ions, depth_p=0.04)
 | `z.score` NaN for every kinase from `KSEA.Scores` | a site with log2FC -Inf/Inf (missing in one condition) entered PX; FC = 0 passes `is.finite(FC)` | drop rows with non-finite `log2FC` before building PX |
 | `arguments imply differing number of rows: 0, 1` while building PX | the non-finite-`log2FC` filter emptied the table, and `Peptide = 'NULL'` is a length-1 literal against zero-length columns | guard `nrow(ks) == 0` with a message about one-condition sites, and use `rep('NULL', nrow(ks))` |
 | `no rows to aggregate` from `KSEA.Scores` | the prior overlaps the site list in 0 or 1 place -- usually the abbreviated `data(KSData)`, a non-HUGO `Gene` column, or residues written `pS473`/`Ser473` | count `paste(Gene, Residue.Both)` against `paste(SUB_GENE, SUB_MOD_RSD)` before calling and stop with the coverage number |
-| `Can't assign 4 names to a 0-column data.table` with `use_unmod_peptides = TRUE` | the evidence pre-filter removed every unmodified row | set `use_unmod <- TRUE` so unmodified rows are kept; the class-I rule applies to modified rows only |
+| `Can't assign 4 names to a 0-column data.table` with `use_unmod_peptides = TRUE` | the evidence pre-filter removed every unmodified row | pass `use_unmod=TRUE` to `scripts/msstatsptm_labelfree.R` so unmodified rows are kept; the class-I rule applies to modified rows only |
 | Site signs inverted in KSEA / up-down calls | Default pairwise Label `Control vs Treatment` means log2FC = Control - Treatment | Check `adjusted$Label` or pass an explicit `contrast.matrix` |
 | Protein names without a site suffix in `ADJUSTED.Model` | Unmodified peptides from the enriched runs entered `$PTM` | Pre-filter evidence to modified rows; drop rows without `_<residue><position>` |
 | KeyError / NaN on `Gene names` | Column is FASTA-dependent, absent without gene annotation | Guard with `.notna()` and fall back to `Protein` |
