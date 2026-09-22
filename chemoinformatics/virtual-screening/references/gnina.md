@@ -1,5 +1,13 @@
 # GNINA reference (moved from SKILL.md)
 
+**Verified 2026-09-21** on GNINA 1.3.3 (`gnina.cuda12.8.static`), run through WSL2 with real GPU
+passthrough (this machine has an RTX 5070 Ti) — no Docker needed, contrary to an earlier pass's
+assumption. Docked benzamidine against the 3PTB fixture at this Skill's own recorded box (center
+-1.52/14.47/17.47, size 20/20/20 A, `--cnn_scoring rescore`): base affinity -6.01 kcal/mol, matching
+the Vina-only run's -5.978 on the same fixture, with a real CNN pose score (0.9646) and CNN affinity
+(3.593) confirming the neural net actually scored on GPU. See the env's `TOOLS.md` for the install
+(`cuda-toolkit=12.8` as one package, not individual libraries).
+
 ## GNINA with CNN Scoring (modern default)
 
 ```bash
