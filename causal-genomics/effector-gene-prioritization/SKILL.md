@@ -152,6 +152,7 @@ Read the file when the task needs that method; the routine flow (decision tree, 
 | `references/opentargets-l2g.md` | Querying Open Targets L2G (Platform vs legacy schema; L2G exists only for GWAS-type credible sets) |
 | `references/pops.md` | Running PoPS (Windows rename, needs genome-wide multi-chromosome MAGMA input) |
 | `references/cs2g-lookup.md` | Reading cS2G scores for credible-set rsIDs (`examples/cs2g_lookup.py`) |
+| `references/flames.md` | Running FLAMES (XGBoost + PoPS integrative scorer) on a fine-mapped credible set |
 
 ## Multi-Evidence Integration: Concordance Scoring
 
@@ -213,7 +214,7 @@ Concordance scoring is conservative; some real causal genes score 2-of-6 because
 - **PoPS**: `git clone https://github.com/FinucaneLab/pops`. Python; ships with feature matrix download instructions. Pre-built feature matrix at the releases page.
 - **cS2G**: Pre-computed gene scores downloadable from zenodo.org/records/7754032 (cS2G_UKBB.zip / cS2G_1000GEUR.zip). No install; lookup table.
 - **DEPICT**: `git clone https://github.com/perslab/depict`. Java + Python; legacy method, see Pers 2015.
-- **FLAMES**: Recent (Schipper M et al 2025 Nat Genet 57:323); check the publication's GitHub for the current install path.
+- **FLAMES**: `git clone https://github.com/Marijn-Schipper/FLAMES` (checked HEAD `159e83a`, 2026-08-25, version 1.1.3). `conda env create -f environment.yml` (Python 3.8.13) then `pip install -r requirements.txt`; needs the ~1.7 GB annotation-data bundle from zenodo.org/records/12635505 (`Annotation_data.tar.gz`) plus the bundled GTEx tissue file. See `references/flames.md` for the verified commands and real output.
 - **INQUISIT**: Originally for breast cancer (Fachal 2020 Nat Genet 52:56); see the paper's supplementary methods for adaptation to other traits.
 - **ABC**: `git clone https://github.com/broadinstitute/ABC-Enhancer-Gene-Prediction`. Python; see atac-seq/enhancer-gene-linking for the full pipeline.
 - **ENCODE-rE2G**: `git clone https://github.com/EngreitzLab/ENCODE_rE2G`. Snakemake; see atac-seq/enhancer-gene-linking.
