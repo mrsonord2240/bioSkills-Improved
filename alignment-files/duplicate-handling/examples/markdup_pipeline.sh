@@ -49,10 +49,13 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 STATS="${OUTPUT%.bam}.markdup_stats.txt"
 
+# Stats go to a temp path first: markdup opens -f for writing as soon as the pipe starts, before an
+# upstream failure (e.g. a missing input) reaches it, so writing straight to $STATS left an empty file
+# behind on a failed run. Move it beside $OUTPUT only once the whole pipeline has actually succeeded.
 samtools collate -O -u -@ "$THREADS" "$INPUT" "$TMP/collate" | \
     samtools fixmate -m -u -@ "$THREADS" - - | \
     samtools sort -u -@ "$THREADS" -T "$TMP/sort" - | \
-    samtools markdup -@ "$THREADS" -d "$OPTICAL_DIST" --use-read-groups -f "$STATS" - "$TMP/marked.bam"
+    samtools markdup -@ "$THREADS" -d "$OPTICAL_DIST" --use-read-groups -f "$TMP/markdup_stats.txt" - "$TMP/marked.bam"
 
 # markdup never drops records (no -r): the output must have exactly as many as the input.
 n_in=$(samtools view -c "$INPUT")
@@ -63,6 +66,7 @@ if [ "$n_in" -eq 0 ] || [ "$n_in" -ne "$n_out" ]; then
 fi
 
 mv "$TMP/marked.bam" "$OUTPUT"
+mv "$TMP/markdup_stats.txt" "$STATS"
 echo "Indexing..."
 samtools index "$OUTPUT"
 
