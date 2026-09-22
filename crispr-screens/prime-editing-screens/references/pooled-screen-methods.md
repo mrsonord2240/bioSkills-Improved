@@ -1,6 +1,6 @@
 # Pooled-Screen Methods: PRIME, MOSAIC and PE-BE Cross-Validation
 
-Moved verbatim from SKILL.md. Read when planning a pooled PE screen, a saturation-mutagenesis library, or a BE-PE concordance analysis.
+Moved from SKILL.md. Read when planning a pooled PE screen, a saturation-mutagenesis library, or a BE-PE concordance analysis.
 
 ## PRIME Pooled Screen Methodology
 
@@ -33,20 +33,10 @@ Moved verbatim from SKILL.md. Read when planning a pooled PE screen, a saturatio
 
 **Approach:** Design parallel BE library for the same variants; run both screens; intersect hits.
 
-```python
-import numpy as np
-import pandas as pd
-
-# BE screen output (target conversion + bystander)
-be_hits = pd.read_csv('be_screen_hits.tsv', sep='\t')
-# PE screen output (intended edit + scaffold-incorp + indel)
-pe_hits = pd.read_csv('pe_screen_hits.tsv', sep='\t')
-
-# Intersect on intended variant
-concordant = be_hits.merge(pe_hits, on='variant_id', suffixes=('_be', '_pe'))
-# Filter to high-confidence: both methods call variant + same direction
-concordant['high_confidence'] = (concordant['be_fdr'] < 0.05) & (concordant['pe_fdr'] < 0.05) & \
-                                 (np.sign(concordant['be_lfc']) == np.sign(concordant['pe_lfc']))
+```bash
+# Inner-joins on variant_id; high_confidence = both FDR < 0.05 and the same sign of LFC.
+# Columns needed: be_fdr, be_lfc (BE file) and pe_fdr, pe_lfc (PE file).
+python scripts/crossvalidate_pe_be.py be_screen_hits.tsv pe_screen_hits.tsv --fdr 0.05
 ```
 
 **Critical:** PE-only hits in BE-coverable variants are suspect (BE should detect them). PE-only hits in non-BE-coverable variants (e.g., transversions) are genuinely PE-unique.

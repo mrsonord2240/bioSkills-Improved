@@ -1,6 +1,6 @@
 # PRIDICT2 Batch CLI and pegRNA Library Filtering
 
-Moved verbatim from SKILL.md. Read when running PRIDICT2 (single or batch), parsing its output, or filtering a pegRNA library.
+Moved from SKILL.md. Read when running PRIDICT2 (single or batch), parsing its output, or filtering a pegRNA library.
 
 ## PRIDICT and PRIDICT2 pegRNA Efficiency Prediction
 
@@ -97,19 +97,8 @@ python pridict2_pegRNA_design.py batch \
 
 **If the summary file is empty (just `""`) the run still exited 0** -- see Failure Modes, "Batch run exits 0 with an empty summary file", for the three causes.
 
-```python
-# Step 3: parse and filter
-import pandas as pd
-predictions = pd.read_csv('predictions/<timestamp>_summary_K562_batch_summary.csv')
-
-# Filter to pegRNAs with predicted efficiency > 50% (library-inclusion convention).
-# Real column is PRIDICT2_0_editing_Score_deep_K562 (0-100 scale), not "predicted_editing_efficiency".
-filtered = predictions[predictions['PRIDICT2_0_editing_Score_deep_K562'] > 50]
-print(f'pegRNAs passing PRIDICT2 >50%: {len(filtered)} / {len(predictions)}')
-
-# Pick top 3 per intended edit
-top3 = (filtered.sort_values(['sequence_name', 'PRIDICT2_0_editing_Score_deep_K562'],
-                              ascending=[True, False])
-                 .groupby('sequence_name').head(3))
-top3.to_csv('peg_library_filtered.csv', index=False)
+```bash
+# Step 3: parse and filter. The score column is PRIDICT2_0_editing_Score_deep_K562 (0-100 scale, not
+# "predicted_editing_efficiency"); 50 is a project-chosen library-inclusion cutoff; keeps top 3 per intended edit.
+python scripts/filter_pridict2_summary.py predictions/<timestamp>_summary_K562_batch_summary.csv     --threshold 50 --top 3 --out peg_library_filtered.csv
 ```
