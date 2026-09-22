@@ -56,7 +56,7 @@ Tell the AI agent what to do:
 9. Flag low-efficacy guides (X1 <0.3) and genes where all guides are weak (re-design candidates)
 10. Cross-validate with MAGeCK / BAGEL2: identify high-confidence hits in agreement, single-tool hits flagged for orthogonal validation
 11. Decide if Chronos is preferred (cancer-line multi-cell-line screens with CN bias)
-12. Report the JACKS output files (`<outprefix>_gene_JACKS_results.txt`, `_gene_std_JACKS_results.txt`, `_grna_JACKS_results.txt`, `_gene_pval_JACKS_results.txt` only with `--ctrl_genes`, and the `.pickle`), plus, as agent-written summaries rather than JACKS outputs, the low-efficacy guide list for re-design and the JACKS-vs-MAGeCK comparison table
+12. Report the JACKS output files (`<outprefix>_gene_JACKS_results.txt`, `_gene_std_JACKS_results.txt`, `_grna_JACKS_results.txt`, `_gene_pval_JACKS_results.txt` only with `--ctrl_genes`, `_logfoldchange_means.txt`/`_logfoldchange_std.txt` unless `--reffile` was used, and the `.pickle`), plus, as agent-written summaries rather than JACKS outputs, the low-efficacy guide list for re-design and the JACKS-vs-MAGeCK comparison table
 
 ## Related Skills
 

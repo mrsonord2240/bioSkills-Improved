@@ -113,6 +113,8 @@ python run_JACKS.py \
 #   jacks_out_gene_pval_JACKS_results.txt p-values (only with --ctrl_genes; the CLI's --n_pseudo defaults to 2000)
 #   jacks_out_grna_JACKS_results.txt      sgRNA-level: header `sgrna`, `X1`, `X2`
 #   jacks_out_JACKS_results_full.pickle  full posterior for downstream
+#   jacks_out_logfoldchange_means.txt, _logfoldchange_std.txt  raw per-sgRNA log-fold-change vs
+#                                          control, mean and std across replicates; written unless --reffile is given
 ```
 
 ## Output Interpretation
