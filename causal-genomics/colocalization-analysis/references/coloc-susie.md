@@ -33,28 +33,11 @@ dimnames(R) <- list(snp_ids, snp_ids)
 
 **Approach:** Run SuSiE on each trait's summary statistics with ancestry-matched LD; verify LD-z-score consistency; coloc-test each pair of credible sets.
 
-```r
-library(coloc); library(susieR)
-
-# Same MHC / chr 8 inversion gate as the coloc.abf pipeline -- flag_excluded_region()
-# is defined in the Standard coloc.abf Pipeline above; call it here too before
-# running runsusie()/coloc.susie() on this locus.
-
-# Diagnostic: z-score vs LD consistency MUST be checked
-z_gwas <- gwas_df$BETA / gwas_df$SE
-lam_gwas <- susieR::estimate_s_rss(z=z_gwas, R=ld_matrix, n=gwas_n)
-if (lam_gwas > 0.05) stop('LD reference mismatched to z-scores; lambda=', lam_gwas)
-
-s1 <- runsusie(list(beta=gwas_df$BETA, varbeta=gwas_df$SE^2,
-                    snp=gwas_df$SNP, position=gwas_df$POS,
-                    type='cc', s=0.3, N=50000, LD=ld_matrix), L=10)
-s2 <- runsusie(list(beta=eqtl_df$BETA, varbeta=eqtl_df$SE^2,
-                    snp=eqtl_df$SNP, position=eqtl_df$POS,
-                    type='quant', sdY=1, N=500, LD=ld_matrix), L=10)
-
-res_susie <- coloc.susie(s1, s2)   # NULL if no overlapping CS
-# res_susie$summary rows: each (hit1, hit2) pair of credible sets
+```bash
+Rscript scripts/coloc_susie.R gwas.tsv eqtl.tsv ld.tsv --gwas-type cc --gwas-s 0.3 --gwas-n 50000     --eqtl-type quant --eqtl-sdy 1 --eqtl-n 500 --L 10 --out coloc_susie_out
 ```
+
+`scripts/coloc_susie.R` runs the MHC / chr 8 gate (`scripts/flag_excluded_region.R`), checks SNP order across the two tables and the LD matrix, stops if `estimate_s_rss` lambda > 0.05 (`--lambda-max`), runs `runsusie` on each trait with the same LD, then `coloc.susie`; each row of the result is one (hit1, hit2) credible-set pair. `ld.tsv` is the signed r matrix with SNP ids as first column and header.
 
 LD matrix MUST be in the same SNP order as the beta vector; mis-ordering silently produces nonsense.
 

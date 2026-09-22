@@ -97,7 +97,7 @@ Methodology evolves; verify the current Open Targets Genetics, eQTL Catalogue, a
 
 **Fix (MHC):** Use HLA-imputed classical alleles via SNP2HLA / HIBAG / HLA-TAPAS, then HLA-coloc (Butler-Laporte 2024 medRxiv) -- NOT coloc on SNPs in MHC. OR exclude MHC from genome-wide coloc and report HLA association at the haplotype/allele level. **Fix (chr 8 inversion):** Exclude chr8:8.1-11.9 Mb or pre-condition on inversion genotype before coloc. Never report a single coloc PP.H4 in either region without this caveat.
 
-**Enforce programmatically, do not rely on remembering the coordinates:** call `flag_excluded_region()` (defined in the Standard coloc.abf Pipeline below) on the locus before running coloc.abf/coloc.susie, and abort/redirect rather than compute a naive PP.H4 when it returns non-NA.
+**Enforce programmatically, do not rely on remembering the coordinates:** call `flag_excluded_region()` (`scripts/flag_excluded_region.R`, already called by `scripts/coloc_abf.R` and `scripts/coloc_susie.R`) on the locus before running coloc.abf/coloc.susie, and abort/redirect rather than compute a naive PP.H4 when it returns non-NA.
 
 ### Underpowered eQTL (N < 200)
 
@@ -165,52 +165,11 @@ Required reporting: PP.H4 at default priors + p12 range over which PP.H4 stays a
 
 **Approach:** Extract a 1 Mb window centred on the GWAS lead; harmonise alleles between datasets; format coloc input lists with `type` ('quant' or 'cc'), sample size `N`, and either `sdY` (quant) or `s` (cc); run coloc.abf; run sensitivity() over the p12 grid.
 
-```r
-library(coloc)
-
-# Programmatic MHC / chr 8 inversion gate -- run BEFORE coloc.abf or coloc.susie.
-# Prose alone is not a safeguard: this is the same kind of hard stop() as the
-# estimate_s_rss lambda > 0.05 check below, applied to the "single-causal
-# assumption breaks" regions documented in the MHC / HLA + chr 8 inversion
-# failure mode.
-flag_excluded_region <- function(chr, pos_bp, build = 'hg38') {
-  if (build != 'hg38') stop('flag_excluded_region: liftover to hg38 first -- this Skill only documents hg38 MHC / chr8 inversion boundaries')
-  chr <- gsub('^chr', '', as.character(chr))
-  if (chr == '6' && pos_bp >= 25000000 && pos_bp <= 35000000) return('MHC')
-  if (chr == '8' && pos_bp >= 8100000  && pos_bp <= 11900000) return('chr8_inversion')
-  NA_character_
-}
-
-region_flag <- flag_excluded_region(chr = gwas_df$CHR[1], pos_bp = gwas_df$POS[which.min(gwas_df$P)])
-if (!is.na(region_flag)) {
-  stop(sprintf(
-    'Locus is in the %s exclusion zone -- standard coloc PP.H4 is not interpretable here. Use HLA-coloc (Butler-Laporte 2024) for MHC, or pre-condition on inversion genotype for chr8; do not report a naive coloc.abf/coloc.susie result.',
-    region_flag))
-}
-
-# Inputs: harmonised gwas_df and eqtl_df with SNP, BETA, SE, MAF, N, POS columns
-# Both must share the same SNP set and allele coding (verify with harmonise step)
-
-gwas_input <- list(
-    beta=gwas_df$BETA, varbeta=gwas_df$SE^2,
-    snp=gwas_df$SNP, position=gwas_df$POS,
-    type='cc',           # case-control GWAS
-    s=0.30,              # case fraction
-    N=50000)
-
-eqtl_input <- list(
-    beta=eqtl_df$BETA, varbeta=eqtl_df$SE^2,
-    snp=eqtl_df$SNP, position=eqtl_df$POS,
-    type='quant',        # quantitative eQTL
-    sdY=1,               # SD(expression); 1 if standardised, else estimate from MAF+varbeta
-    N=500)
-
-res <- coloc.abf(dataset1=gwas_input, dataset2=eqtl_input,
-                  p1=1e-4, p2=1e-4, p12=5e-6)   # conservative p12
-
-print(res$summary)
-sens <- coloc::sensitivity(res, rule='H4 > 0.75')   # generates plot + table
+```bash
+Rscript scripts/coloc_abf.R gwas.tsv eqtl.tsv --gwas-type cc --gwas-s 0.30 --gwas-n 50000     --eqtl-type quant --eqtl-sdy 1 --eqtl-n 500 --p12 5e-6 --out coloc_out
 ```
+
+`scripts/coloc_abf.R` reads two harmonised tables (SNP, CHR, POS, BETA, SE; same SNP set and order; see `references/allele-harmonisation.md`), runs the MHC / chr 8 gate (`scripts/flag_excluded_region.R`, a hard `stop()`, run before any coloc call), builds the coloc input lists (`beta`, `varbeta`, `snp`, `position`, `type`, `N`, plus `s` for cc or `sdY` for quant), runs `coloc.abf` (p1 = p2 = 1e-4, conservative p12 = 5e-6) and `sensitivity(res, rule='H4 > 0.75')`, and writes `<out>_summary.tsv`, `<out>_snps.tsv` and `<out>_sensitivity.pdf`.
 
 `sdY` semantics: when omitted, coloc estimates from `MAF` and `varbeta`; supplying `sdY=1` ASSUMES the trait is already standardised (eQTL with inverse-normal-transformed expression). Mismatch produces silently wrong Bayes factors -- the most common silent failure.
 
@@ -266,6 +225,17 @@ Read the file when the row or step it serves is in play; SKILL.md alone covers a
 | `references/hyprcoloc.md` | Many traits or tissues clustered at one locus |
 | `references/lead-snp-swap.md` | The GWAS and QTL lead SNPs differ; diagnosing window-centring bias |
 | `references/reporting.md` | Writing up a result: reviewer pushback responses and the reporting template |
+
+## Scripts
+
+| Script | Use |
+|--------|-----|
+| `scripts/harmonise.R` | Harmonise two summary-stat tables (CLI or `source()` for `harmonise()`) |
+| `scripts/flag_excluded_region.R` | MHC / chr 8 inversion gate; sourced by the two coloc scripts |
+| `scripts/coloc_abf.R` | Gate, `coloc.abf`, p12 sensitivity for one locus |
+| `scripts/coloc_susie.R` | Gate, LD-consistency check, `runsusie` x2, `coloc.susie` |
+
+Runnable demos on simulated data are in `examples/`.
 
 ## References
 

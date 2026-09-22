@@ -10,26 +10,12 @@ Mismatched effect alleles silently invert signs of betas, collapsing PP.H4 into 
 4. Drop palindromic SNPs (A/T or C/G) at MAF > 0.42; their strand cannot be inferred from coding alone (TwoSampleMR `harmonise_data` standard cutoff).
 5. Verify genome build alignment (hg19 vs hg38 must match; lift over if not).
 
-```r
-harmonise <- function(df1, df2) {
-    comp <- function(a) c(A='T', T='A', C='G', G='C')[a]
-    m <- merge(df1, df2, by='SNP', suffixes=c('.1','.2'))
-    palindromic <- (m$A1.1 %in% c('A','T') & m$A2.1 %in% c('A','T')) |
-                   (m$A1.1 %in% c('C','G') & m$A2.1 %in% c('C','G'))
-    # Non-palindromic strand mismatch: complement dataset 2's alleles, then treat as same/flip
-    strand <- !palindromic & m$A1.1 == comp(m$A1.2) & m$A2.1 == comp(m$A2.2) |
-              !palindromic & m$A1.1 == comp(m$A2.2) & m$A2.1 == comp(m$A1.2)
-    strand[is.na(strand)] <- FALSE
-    a1 <- ifelse(strand, comp(m$A1.2), m$A1.2); a2 <- ifelse(strand, comp(m$A2.2), m$A2.2)
-    m$A1.2 <- unname(a1); m$A2.2 <- unname(a2)
-    same <- m$A1.1 == m$A1.2 & m$A2.1 == m$A2.2
-    flip <- m$A1.1 == m$A2.2 & m$A2.1 == m$A1.2
-    m$BETA.2[flip] <- -m$BETA.2[flip]
-    m$MAF.2[flip] <- 1 - m$MAF.2[flip]
-    keep <- (same | flip) & !(palindromic & m$MAF.1 > 0.42)
-    m[keep, ]
-}
+```bash
+Rscript scripts/harmonise.R gwas.tsv eqtl.tsv harmonised.tsv     # columns SNP, A1, A2, BETA, MAF
+# or in R: source('scripts/harmonise.R'); m <- harmonise(df1, df2)
 ```
+
+`harmonise()` (`scripts/harmonise.R`) merges on SNP, resolves same / flip / strand-complement coding for non-palindromic pairs, negates `BETA.2` (and sets `MAF.2 = 1 - MAF.2`) on flips, and drops unresolvable pairs and palindromic SNPs at MAF > 0.42. Output columns are suffixed `.1` / `.2`.
 
 Harmonisation pitfalls to watch for:
 
