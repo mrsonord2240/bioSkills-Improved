@@ -74,35 +74,17 @@ Method choice is contested (see References). Bokulich 2018 found naive Bayes and
 **Approach:** Run the RDP naive Bayes (8-mer, 100 bootstraps) against a DADA2-formatted reference to a genus-level call, leaving ranks NA below `minBoot`; then attempt species ONLY by exact match against a species reference - never inferring species from the noisy read.
 
 ```r
-library(dada2)
-seqtab_nochim <- readRDS('seqtab_nochim.rds')
-
-# assignTaxonomy() runs an RDP-style naive Bayes classifier with 100 BOOTSTRAP RESAMPLES per
-# sequence -- inherently stochastic. set.seed() before EVERY call (DADA2's own tutorial does
-# this immediately before this exact call) -- without it, two runs on the same input differ at
-# the genus call for ~2-3% of ASVs. Verified: with set.seed() before each call, repeated runs
-# are reproducible at the genus rank; any fixed integer works, 100 is just a convention here.
-# This is NOT bitwise identity at every rank: ~2/770 cells at Kingdom/Order can still differ
-# between seeded runs, and multithread=FALSE does not remove that residual (checked on 770 ASVs).
-set.seed(100)
-
-# minBoot 50 = the DADA2 default and the RDP recommendation for reads <=250 nt; tutorials
-# often use 80 (a stricter CHOICE, not the default). Raising it truncates to shallower but
-# more reliable ranks; ranks below the threshold are returned as NA, not guessed.
+set.seed(100)   # before EVERY assignTaxonomy() call, see below
 taxa <- assignTaxonomy(seqtab_nochim, 'silva_nr99_v138.1_train_set.fa.gz', minBoot = 50, tryRC = TRUE, multithread = TRUE)
-
-# Sanity check before trusting the table: a wrong-region/wrong-marker or mis-formatted reference,
-# or bad orientation, returns all-NA calls with no error or warning. To confirm reproducibility,
-# repeat set.seed(100) + assignTaxonomy() once and diff the Genus column (examples/assign_silva.R
-# does both checks, with an optional rerun).
-genus_frac <- mean(!is.na(taxa[, 'Genus']))
-if (genus_frac == 0) stop('assignTaxonomy returned no genus calls: check reference format, region and marker')
-
-# addSpecies assigns species by EXACT (100%) match against a species reference. It does NOT
-# license a species name from a noisy read - it reports a species only when the ASV is
-# identical to a reference over the amplicon, else leaves it NA. This is the honest 16S path.
-taxa <- addSpecies(taxa, 'silva_species_assignment_v138.1.fa.gz')
+taxa <- addSpecies(taxa, 'silva_species_assignment_v138.1.fa.gz')   # exact match only
 ```
+
+Complete script with the checks below: `Rscript examples/assign_silva.R seqtab_nochim.rds train.fa.gz species.fa.gz taxa.rds [rerun]`.
+
+- **Seed.** `assignTaxonomy()` runs 100 stochastic bootstrap resamples per sequence; `set.seed()` before EVERY call (DADA2's own tutorial does this) - without it two runs on the same input differ at the genus call for ~2-3% of ASVs. Seeded runs are reproducible at the genus rank; any fixed integer works, 100 is a convention. This is NOT bitwise identity at every rank: ~2/770 cells at Kingdom/Order can still differ between seeded runs, and `multithread=FALSE` does not remove that residual (checked on 770 ASVs).
+- **`minBoot`.** 50 is the DADA2 default and the RDP recommendation for reads <=250 nt; tutorials often use 80 (a stricter CHOICE, not the default). Raising it truncates to shallower but more reliable ranks; ranks below the threshold are returned as NA, not guessed.
+- **Sanity check before trusting the table.** A wrong-region/wrong-marker or mis-formatted reference, or bad orientation, returns all-NA calls with no error or warning: stop if `mean(!is.na(taxa[, 'Genus'])) == 0`. To confirm reproducibility, repeat `set.seed(100)` + `assignTaxonomy()` once and diff the Genus column (the example's `rerun` argument does this).
+- **`addSpecies`** assigns species by EXACT (100%) match against a species reference. It does NOT license a species name from a noisy read: a species is reported only when the ASV is identical to a reference over the amplicon, else NA. This is the honest 16S path.
 
 The reference FASTA must be DADA2-formatted (rank-labelled headers) AND ideally trimmed to the amplicon region; a full-length SILVA training set on V4 reads is the Trap-1 failure mode below. For ITS, use a UNITE DADA2 reference and do NOT trim ITS to a fixed length (it is variable-length).
 
@@ -116,33 +98,11 @@ Full workflow (pre-trained or from-scratch `LearnTaxa()`, seeded `IdTaxa()`, pos
 
 **Approach:** In-silico PCR the reference to the primer-bounded region with extract-reads, train a naive-Bayes classifier on the extracted reads, then classify at the default confidence (0.7), which truncates each lineage to the deepest rank clearing the threshold.
 
-```bash
-# 1. Extract the V4 (515F/806R) region from a full-length reference (matched k-mer composition)
-qiime feature-classifier extract-reads \
-    --i-sequences silva-138-99-seqs.qza \
-    --p-f-primer GTGYCAGCMGCCGCGGTAA --p-r-primer GGACTACNVGGGTWTCTAAT \
-    --p-min-length 50 --p-max-length 0 \
-    --o-reads ref-seqs-515-806.qza
+Complete script (SILVA 138 reference, 515F/806R primers; edit the variables at its top): `bash examples/assign_qiime2_region.sh`. Its three steps:
 
-# 2. Train the naive-Bayes classifier on the EXTRACTED region (or download the region-matched
-#    pre-trained .qza built for THIS QIIME2 release - never a different release, see below).
-#    MEMORY: training against a full, un-subsampled reference (SILVA/GTDB, 400K+ sequences) needs
-#    tens of GB of RAM and can OOM-kill the process on constrained hardware. If it does, subsample
-#    the extracted reference (e.g. a random ~60,000-sequence subset) before training, or train on
-#    a smaller/pre-filtered reference.
-qiime feature-classifier fit-classifier-naive-bayes \
-    --i-reference-reads ref-seqs-515-806.qza \
-    --i-reference-taxonomy silva-138-99-tax.qza \
-    --o-classifier silva-138-99-515-806-nb-classifier.qza
-
-# 3. Classify. --p-confidence default 0.7: below it the lineage is truncated to a shallower,
-#    more confident rank. 0 = compute but never truncate (deepest always); 'disable' = skip.
-qiime feature-classifier classify-sklearn \
-    --i-classifier silva-138-99-515-806-nb-classifier.qza \
-    --i-reads rep-seqs.qza \
-    --p-confidence 0.7 --p-read-orientation auto --p-n-jobs 1 \
-    --o-classification taxonomy.qza
-```
+1. `qiime feature-classifier extract-reads --i-sequences silva-138-99-seqs.qza --p-f-primer GTGYCAGCMGCCGCGGTAA --p-r-primer GGACTACNVGGGTWTCTAAT --p-min-length 50 --p-max-length 0 --o-reads ref-seqs-515-806.qza` extracts the V4 (515F/806R) region from a full-length reference so the k-mer composition matches the reads.
+2. `qiime feature-classifier fit-classifier-naive-bayes --i-reference-reads ref-seqs-515-806.qza --i-reference-taxonomy silva-138-99-tax.qza --o-classifier silva-138-99-515-806-nb-classifier.qza` trains on the EXTRACTED region (or download the region-matched pre-trained `.qza` built for THIS QIIME2 release - never a different release, see below). MEMORY: training against a full, un-subsampled reference (SILVA/GTDB, 400K+ sequences) needs tens of GB of RAM and can OOM-kill the process on constrained hardware. If it does, subsample the extracted reference (e.g. a random ~60,000-sequence subset) before training, or train on a smaller/pre-filtered reference.
+3. `qiime feature-classifier classify-sklearn --i-classifier silva-138-99-515-806-nb-classifier.qza --i-reads rep-seqs.qza --p-confidence 0.7 --p-read-orientation auto --p-n-jobs 1 --o-classification taxonomy.qza`. `--p-confidence` default 0.7: below it the lineage is truncated to a shallower, more confident rank. 0 = compute but never truncate (deepest always); 'disable' = skip.
 
 `--p-n-jobs >1` multiplies memory (each job holds a copy of the classifier); a full-length SILVA classifier is multi-GB, so reduce `--p-n-jobs` / `--p-reads-per-batch` if OOM-killed, or use the smaller region-extracted classifier.
 
@@ -170,7 +130,7 @@ Remove Mitochondria/Chloroplast/domain-unassigned features after assignment and 
 
 | File | Read when |
 |------|-----------|
-| `references/decipher-idtaxa.md` | classifying with DECIPHER IDTAXA, or training a `LearnTaxa()` set for a marker/region with no pre-trained `.RData` |
+| `references/decipher-idtaxa.md` (runs `scripts/idtaxa_classify.R`) | classifying with DECIPHER IDTAXA, or training a `LearnTaxa()` set for a marker/region with no pre-trained `.RData` |
 | `references/organelle-filtering.md` | the table is host-associated/plant, or a large read fraction is labelled Mitochondria/Chloroplast |
 
 ## Per-Method Failure Modes
