@@ -89,6 +89,8 @@ Default when uncertain: plot the RAW per-sample boxplots, ID counts, total signa
 | `references/diann-level1.md` | RT-fit and FWHM per run from a DIA-NN report (`diann_level1`) |
 | `references/qc-report-template.md` | Writing up the QC result: exclusion log, with/without table |
 
+Code lives in `scripts/` (run from the Skill folder, or `sys.path.insert(0, "scripts")` and import): `raw_qc.py` (raw per-sample QC, contaminant strip), `matrix_metrics.py`, `pca_batch.py`, `diann_level1.py`. Each has a CLI and a header saying inputs and usage.
+
 ## Inspect Raw Signal and Remove Contaminants Before Normalizing
 
 **Goal:** Catch loading/injection failures and strip contaminant/decoy rows while they are still visible -- before normalization erases them.
@@ -98,56 +100,16 @@ Default when uncertain: plot the RAW per-sample boxplots, ID counts, total signa
 Which column is un-normalized: MaxQuant `Intensity <sample>` (`LFQ intensity <sample>` is already MaxLFQ-normalized and hides a 3x-low load); DIA-NN `Precursor.Quantity` (not `Precursor.Normalised` or `PG.MaxLFQ`); TMT raw reporter intensities before any channel/global normalization. Search engines write missing values as 0 (MaxQuant intensities, DIA-NN `PG.MaxLFQ`), so convert 0 to NaN before counting IDs or missingness.
 
 ```python
-import pandas as pd
-import numpy as np
-
-contaminant_flags = ['Potential contaminant', 'Reverse', 'Only identified by site']
-
-def strip_contaminant_rows(protein_groups):
-    keep = pd.Series(True, index=protein_groups.index)
-    for col in contaminant_flags:
-        match = next((c for c in protein_groups.columns if c.lower() == col.lower()), None)  # MaxQuant casing varies by version -- match case-insensitively
-        if match is not None:
-            keep &= protein_groups[match].fillna('') != '+'  # MaxQuant marks flagged rows with a literal '+'
-    return protein_groups[keep]
-
-def raw_sample_qc(raw_intensities, sample_groups):
-    raw = raw_intensities.replace(0, np.nan)  # MaxQuant/DIA-NN write missing as 0; zeros are NOT quantified
-    qc = pd.DataFrame({
-        'n_quantified': raw.notna().sum(),
-        'total_signal': raw.sum(),
-        'median_intensity': raw.median(),
-        'missing_pct': 100 * raw.isna().sum() / len(raw)})
-    group = sample_groups.reindex(qc.index)
-    sizes = group.value_counts()
-    singletons = sorted(sizes[sizes < 2].index.astype(str))
-    if singletons:
-        # A group of one IS its own median: fold and ids would be exactly 1.000 and the flag
-        # could never fire. Say so and fall back to the all-sample baseline for those samples.
-        print(f'WARNING: single-sample group(s) {singletons}: the within-group loading rule cannot '
-              'fire there, so those samples are compared to the ALL-sample median instead. A loading '
-              'difference that tracks condition is NOT detectable in a design with no replicates.')
-        baseline = group.where(group.map(sizes) >= 2, 'ALL')
-    else:
-        baseline = group
-    qc['baseline'] = baseline
-    qc['loading_rule'] = np.where(baseline == 'ALL', 'fallback_all_samples', 'within_group')
-    qc['fold_total_vs_group'] = qc['total_signal'] / qc.groupby(baseline)['total_signal'].transform('median')
-    qc['ids_vs_group'] = qc['n_quantified'] / qc.groupby(baseline)['n_quantified'].transform('median')
-    qc['flag'] = (qc['fold_total_vs_group'] <= 0.5) | (qc['ids_vs_group'] < 0.8)  # >=2x low total, or >20% fewer IDs
-    return qc
-
-def contaminant_fraction(protein_groups, intensity_cols, flag_col='Potential contaminant'):
-    flagged = protein_groups[flag_col].fillna('') == '+'
-    raw = protein_groups[intensity_cols].replace(0, np.nan)
-    return 100 * raw[flagged].sum() / raw.sum()  # percent of summed raw intensity, per sample
+import sys; sys.path.insert(0, "scripts")
+from raw_qc import strip_contaminant_rows, raw_sample_qc, contaminant_fraction  # scripts/raw_qc.py
+qc = raw_sample_qc(raw_intensities, sample_groups)  # or: python scripts/raw_qc.py proteinGroups.txt sample_annotation.csv
 ```
 
 Read the boxplots before normalizing, but apply the loading rule to TOTAL raw signal and ID count, not the boxplot median: a sample with total signal >=2x below its group median, or an ID count more than 15-20% below it, is a loading/injection failure to exclude, not to rescale. Left-censoring removes a low-loaded sample's weakest values, so its median looks less shifted than it is (synthetic test: 0.41x total but 0.62x median). Judge the contaminant fraction against the lab's own baseline for that sample type and check whether it differs between groups; there is no universal cutoff (PTXQC's 1% threshold belongs to its user-defined special-contaminant plot, not the general contaminant score). Keratin and trypsin autolysis dominate LOW-INPUT samples (single-cell, IPs, gel bands) because they are a roughly fixed absolute amount whose fractional share explodes as load shrinks.
 
 Record every sample this rule flags, and every one you keep despite a flag, in the exclusion log (`references/qc-report-template.md`): the metric and value, the threshold, the decision, and who approved it.
 
-With ONE run per condition the within-group form of this rule is inert -- every sample is its own group median, so `fold_total_vs_group` is exactly 1.0 and nothing can flag. The function above falls back to the all-sample median and prints a warning; report that fallback, and report that a loading difference which tracks condition is not separable from biology in that design.
+With ONE run per condition the within-group form of this rule is inert -- every sample is its own group median, so `fold_total_vs_group` is exactly 1.0 and nothing can flag. `raw_sample_qc` falls back to the all-sample median and prints a warning; report that fallback, and report that a loading difference which tracks condition is not separable from biology in that design.
 
 ## TMT Channel Balance Within Each Plex
 
