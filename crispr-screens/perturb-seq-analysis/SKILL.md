@@ -56,21 +56,9 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 
 **Approach:** Threshold per-cell sgRNA reads at ≥10 (Pertpy convention); cells exceeding the threshold for exactly one sgRNA are assigned that perturbation; cells with multiple sgRNAs above threshold are flagged as multiplets for filtering or combinatorial analysis.
 
-```python
-# sgRNA assignment via threshold counting
-def assign_sgrna(adata, sgrna_counts_layer='sgrna_counts', threshold=10):
-    '''Per-cell sgRNA assignment. Returns single assignment or 'multiplet'/'none'.'''
-    import numpy as np
-    counts = adata.layers[sgrna_counts_layer]  # cells x sgRNAs
-    above_thresh = counts >= threshold
-    n_sgrna_per_cell = above_thresh.sum(axis=1)
-    assignments = np.where(
-        n_sgrna_per_cell == 0, 'none',
-        np.where(n_sgrna_per_cell == 1,
-                  [adata.var_names[i] for i in counts.argmax(axis=1)],
-                  'multiplet'))
-    adata.obs['sgrna_assignment'] = assignments
-    return adata
+```bash
+python scripts/assign_sgrna.py sgrnas.h5ad --layer sgrna_counts --threshold 10 --out assigned.h5ad
+# writes .obs['sgrna_assignment'] = sgRNA name | 'multiplet' | 'none'; or import assign_sgrna() from the script
 ```
 
 ## Escaper Cell Filtering (Mixscape)
@@ -79,37 +67,12 @@ def assign_sgrna(adata, sgrna_counts_layer='sgrna_counts', threshold=10):
 
 **Mixscape algorithm:** For each perturbed cell, compute a "perturbation signature" = (its expression) - (mean of K nearest non-targeting-control cells). This signature isolates the perturbation effect from cell-state variation. Cells with perturbation signature similar to NTC distribution are escapers.
 
-```python
-import pertpy as pt
-import scanpy as sc
-
-# adata is a scRNA-seq AnnData with 'sgrna_assignment' column
-# Pertpy 0.6+ Mixscape API (verify against installed pertpy with help(pt.tl.Mixscape))
-mixscape = pt.tl.Mixscape()
-mixscape.perturbation_signature(
-    adata=adata,
-    pert_key='sgrna_assignment',     # .obs column with sgRNA target per cell
-    control='NTC',                   # match this to whatever your data's NTC label actually is
-    n_neighbors=20,                  # K neighbors for KNN-NTC subtraction
-    random_state=0,                  # forwarded to pynndescent.NNDescent -- omitting it makes
-                                      # X_pert non-deterministic across reruns (verified: 5/2000
-                                      # cells drifted between two unseeded runs on identical input)
-)
-# Writes .layers['X_pert'] with perturbation-signature-corrected expression
-
-# Filter escapers: classify perturbed cells as KO (true perturbation) or NP (non-perturbed/escaper)
-mixscape.mixscape(
-    adata=adata,
-    pert_key='sgrna_assignment',     # pert_key (not 'labels' in modern pertpy)
-    control='NTC',
-    new_class_name='mixscape_class', # .obs column to write
-)
-# Defaults to layer='X_pert' (output of perturbation_signature)
-
-# Keep only KO cells for downstream analysis
-# (mixscape_class holds '<gene> KO'; the bare label is in mixscape_class_global)
-adata_ko = adata[adata.obs['mixscape_class_global'].isin(['KO'])].copy()
-print(f'KO cells: {adata_ko.n_obs} ({adata_ko.n_obs/(adata.obs["sgrna_assignment"] != "NTC").sum():.1%} of perturbed)')
+```bash
+# input: normalized, log1p'd AnnData; NTC label must match your data's actual control label
+python scripts/mixscape_filter.py normalized.h5ad --pert-key sgrna_assignment --control NTC --out ko_cells.h5ad
+# writes .layers['X_pert'], .obs['mixscape_class'] ('<gene> KO' / '<gene> NP' / control) and
+# .obs['mixscape_class_global'] (KO / NP / control); --out holds the KO cells. Seeded (random_state=0)
+# so X_pert is reproducible; pertpy >= 1.0.
 ```
 
 **Critical:** Mixscape can fail when the perturbation has weak phenotype; empirically Mixscape detects perturbations with log-fold-change <-0.5 (depletion) reliably, but weaker effects collapse into the NTC distribution. For genome-wide screens, run Mixscape per perturbation; for low-effect perturbations, trust the assignment without filtering.
@@ -122,47 +85,13 @@ SCEPTRE (NB GLM + conditional resampling, calibrated FDR) is the low-MOI DE meth
 
 **Pertpy** (https://pertpy.readthedocs.io) integrates Mixscape, distance-based perturbation comparison, EdgeR/PyDESeq2/WilcoxonTest DE, and factor models in a single AnnData-based interface. For SCEPTRE specifically, invoke the R sceptre package separately (Pertpy does not wrap it).
 
+The end-to-end recipe (load papalexi_2021, merge `gene_target` from the MuData, keep raw counts in `layers['counts']`,
+Mixscape with `control='NT'`, per-perturbation PyDESeq2 contrasts) is `examples/run_pertpy.py`. The DE call it makes:
+
 ```python
-import pertpy as pt
-import scanpy as sc
-
-# Load data
-mdata = pt.dt.papalexi_2021()      # returns a MuData object (rna/adt/hto/gdo modalities)
-adata = mdata['rna']  # built-in example from Mixscape paper
-# The per-cell target-gene label ('gene_target', with control cells labeled 'NT') lives on the
-# top-level MuData.obs, not on the rna modality's own .obs -- merge it in (verified: same
-# obs_names/order across mdata and mdata['rna']).
-adata.obs['gene_target'] = mdata.obs['gene_target']
-adata.layers['counts'] = adata.X.copy()  # PyDESeq2 needs raw counts -- save before normalizing
-
-# Standard scRNA-seq preprocessing (scanpy)
-sc.pp.normalize_total(adata, target_sum=1e4)
-sc.pp.log1p(adata)
-sc.pp.highly_variable_genes(adata, n_top_genes=2000)
-
-# Mixscape escaper filtering (writes .layers['X_pert'] and .obs['mixscape_class'])
-# NOTE: papalexi_2021()'s own non-targeting-control label is literally 'NT' (not the 'NTC'
-# placeholder used elsewhere in this Skill) -- always match `control=` to your data's actual label.
-ms = pt.tl.Mixscape()
-ms.perturbation_signature(adata, pert_key='gene_target', control='NT', n_neighbors=20, random_state=0)
-ms.mixscape(adata, pert_key='gene_target', control='NT')
-
-# Filter to KO cells
-adata_ko = adata[adata.obs['mixscape_class_global'].isin(['KO', 'NT'])].copy()
-
-# Pseudobulk differential expression via pertpy (PyDESeq2 backend)
-# pertpy >= 1.0: build the contrast with .contrast(column, baseline, group_to_compare), then pass
-# the resulting vector to test_contrasts(); result columns are log_fc / p_value / adj_p_value
-# (checked on pertpy 1.3.0 -- see Version Compatibility).
-# layer='counts': PyDESeq2 requires raw (near-integer) counts -- pointing it at log-normalized
-# data raises "ValueError: Non-zero elements of the matrix must be close to integer values."
-# (verified: reproduced this exact error on real data, then fixed it by adding the counts layer).
-de = pt.tl.PyDESeq2(adata_ko, design='~gene_target', layer='counts')
+de = pt.tl.PyDESeq2(adata_ko, design='~gene_target', layer='counts')   # raw counts, not log-normalized
 de.fit()
-results_df = de.test_contrasts(de.contrast('gene_target', 'NT', 'GENE_X'))
-
-# For calibrated SCEPTRE on low-MOI single-cell data, use R sceptre directly
-# (Barry 2024 Genome Biol; not bundled in pertpy)
+results_df = de.test_contrasts(de.contrast('gene_target', 'NT', 'GENE_X'))   # log_fc / p_value / adj_p_value
 ```
 
 ## Genome-Wide Perturb-Seq (Replogle 2022)

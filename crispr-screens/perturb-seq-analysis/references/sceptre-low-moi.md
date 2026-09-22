@@ -7,24 +7,14 @@
 3. Resample the pert_indicator (conditional on counts) 500-1000 times; compute permutation null
 4. Get FDR via permutation; not parametric
 
-```r
-library(sceptre)
+Pipeline (current sceptre API, composable steps): `import_data` -> `set_analysis_parameters` -> `assign_grnas` ->
+`run_qc` -> `run_calibration_check` -> `run_discovery_analysis` -> `get_result`. Inputs: response (gene x cell) matrix,
+gRNA matrix, `grna_target_data_frame`, technical covariates (batch, n_genes, etc.), `discovery_pairs`.
 
-# Input: sce object or sparse matrix + metadata
-# Required: gene_expression_matrix, perturbation_indicator (binary per cell per pert),
-#           technical_factors (batch, n_genes, etc.)
-
-# For each gene + perturbation pair:
-# Current sceptre API is a pipeline of composable steps:
-sceptre_object <- import_data(response_matrix, grna_matrix, grna_target_data_frame,
-                              moi = 'low', extra_covariates = covariates_df)
-sceptre_object <- set_analysis_parameters(sceptre_object, discovery_pairs = pairs_df)
-sceptre_object <- assign_grnas(sceptre_object)
-sceptre_object <- run_qc(sceptre_object)
-sceptre_object <- run_calibration_check(sceptre_object)
-sceptre_object <- run_discovery_analysis(sceptre_object)
-results <- get_result(sceptre_object, analysis = 'run_discovery_analysis')
-# Output: per-gene-per-pert p-value, log-fold-change, FDR
+```bash
+Rscript scripts/run_sceptre.R input.rds results.tsv     # input.rds: list(response_matrix, grna_matrix, grna_target_data_frame, extra_covariates, discovery_pairs)
+Rscript scripts/run_sceptre.R --example results.tsv     # sceptre's bundled lowmoi_example_data
 ```
+Output: per-gene-per-perturbation table (`p_value`, `log_2_fold_change`, `significant`, ...).
 
 **Advantage over MAST:** SCEPTRE's permutation NB GLM is the only method that maintains calibrated FDR in pooled-screen scRNA-seq (Barry 2024 benchmark). MAST and Wilcoxon are over-confident due to data sparsity.
