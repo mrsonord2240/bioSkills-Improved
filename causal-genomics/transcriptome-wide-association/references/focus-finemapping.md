@@ -34,24 +34,11 @@ focus import custom_panel.pos fusion --tissue Whole_Blood --output custom_focus
 
 `focus import` needs `mygene` and `rpy2` installed (`pip install mygene rpy2`), and rpy2 needs R built as a shared library. Without them it logs only an ERROR-level message and leaves an empty DB (0 genes imported) instead of raising -- check the log and the DB's gene count. Where rpy2 is unavailable (e.g. the Windows R here), build the DB directly with pyfocus's own schema from a table `panel.tsv` (columns `gene chrom txstart txstop snp pos a1 a0 weight`, one row per gene-SNP weight); `focus finemap` reads the result as a normal DB (checked 2026-09-21, pyfocus 0.802, SQLAlchemy 2.0.54):
 
-```python
-import pandas as pd
-from pyfocus.models.db import load_db, RefPanel, build_model
-
-panel = pd.read_csv("panel.tsv", sep="\t")
-ssn = load_db("custom_focus.db")
-ref = RefPanel(ref_name="custom_panel", tissue="Whole_Blood", assay="rnaseq")
-for gene, g in panel.groupby("gene"):
-    snps = g.reset_index(drop=True)
-    snps["chrom"] = snps["chrom"].astype(str)
-    ssn.add(build_model(
-        gene_info=dict(geneid=gene, txid=gene, name=gene, type="protein_coding",
-                       chrom=str(g.chrom.iloc[0]), txstart=int(g.txstart.iloc[0]), txstop=int(g.txstop.iloc[0])),
-        snp_info=snps, db_ref_panel=ref, weights=g.weight.tolist(), ses=None,
-        attrs={"cv.R2": 0.1, "cv.R2.pval": 1e-4}, method="top1"))  # use each gene's real CV R2 and p
-ssn.add(ref)
-ssn.commit()
+```bash
+python <skill-dir>/scripts/build_focus_db.py panel.tsv custom_focus.db --ref-name custom_panel --tissue Whole_Blood
 ```
+
+The script writes one pyfocus model per gene (`method="top1"`); pass each gene's real CV R2 and p as optional `cv_r2` / `cv_r2_pval` columns of `panel.tsv` (defaults 0.1 and 1e-4 are placeholders).
 
 FOCUS PIPs depend on the per-locus prior probability that any gene is causal. Report a sensitivity scan over `--prior-prob`:
 
