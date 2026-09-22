@@ -11,6 +11,8 @@ modeltest-ng -i alignment.fasta -d nt -t ml
 modeltest-ng -i alignment.fasta -d aa -t ml -p 4
 ```
 
+Checked on ModelTest-NG 0.1.7: needs at least 3 real, non-ragged sequences (a 3-row toy example with `.`/lowercase characters, and A2M input with insert dots, both fail to parse — normalise and use a real alignment).
+
 ```python
 from Bio.Phylo.TreeConstruction import DistanceCalculator
 
