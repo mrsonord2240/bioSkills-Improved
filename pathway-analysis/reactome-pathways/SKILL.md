@@ -68,7 +68,7 @@ Second load-bearing fact: **only human is curated; every non-human pathway is or
 | The ORA-vs-GSEA decision itself, or null/benchmark theory | -> the category README | the cross-database method-selection fork lives there |
 | The DE list / ranking statistic itself | -> differential-expression/de-results | upstream, not enrichment |
 
-ReactomePA documents seven `organism` values: human, rat, mouse, celegans, yeast, zebrafish, fly. That is a ReactomePA ceiling, NOT a Reactome ceiling: reactome.db holds pathways for 16 species (checked on reactome.db 1.89.0, by the species prefix of `reactomePATHID2NAME`; no plants, one bacterium), and the web AnalysisService covers more. Do not conflate the two. Under the hood `organism` is resolved to an `org.*.db` package by `ReactomePA:::getDb` (about 22 names, e.g. chicken, arabidopsis) that must be installed; only the seven are documented, so treat any other name as untested.
+ReactomePA documents seven `organism` values: human, rat, mouse, celegans, yeast, zebrafish, fly. That is a ReactomePA ceiling, NOT a Reactome ceiling: reactome.db holds pathways for 16 species (checked on reactome.db 1.89.0, by the species prefix of `reactomePATHID2NAME`; no plants, one bacterium), and the web AnalysisService covers more. Do not conflate the two. Under the hood `organism` is resolved to an `org.*.db` package by `ReactomePA:::getDb` (about 22 names, e.g. chicken, arabidopsis) that must be installed; only the seven are documented, so treat any other name as untested. Mouse checked end to end on ReactomePA 1.50.0 with `org.Mm.eg.db` 3.20.0 installed: a planted mouse pathway (R-MMU, 34 genes plus 40 random genes) came back rank 1 (`p.adjust` 2e-72).
 
 ## Over-Representation Analysis (enrichPathway)
 
