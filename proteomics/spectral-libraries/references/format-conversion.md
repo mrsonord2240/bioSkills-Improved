@@ -8,21 +8,8 @@ Moved from SKILL.md. Read when converting a library between DIA-NN, OpenSWATH an
 
 **Approach:** Conversion is renaming columns AND reconciling units, not a copy. Check RT units (iRT ~ -25..150 vs normalized 0-1 vs minutes), intensity scaling (relative vs absolute), and modification notation (UniMod:35 vs +15.9949 vs Oxidation). For OpenSWATH, generate decoys with OpenSwathDecoyGenerator -- a target-only library has no null.
 
-```python
-import pandas as pd
-
-# Spectronaut -> DIA-NN column mapping; iRT and RelativeIntensity are renamed, not recomputed.
-SPECTRONAUT_TO_DIANN = {'ModifiedPeptide': 'ModifiedPeptide', 'iRT': 'iRT',
-                        'RelativeIntensity': 'LibraryIntensity', 'FragmentMz': 'ProductMz',
-                        'FragmentNumber': 'FragmentSeriesNumber', 'PrecursorMz': 'PrecursorMz',
-                        'PrecursorCharge': 'PrecursorCharge', 'FragmentCharge': 'FragmentCharge',
-                        'FragmentType': 'FragmentType', 'Genes': 'Genes'}
-
-def spectronaut_to_diann(lib):
-    out = lib.rename(columns=SPECTRONAUT_TO_DIANN)
-    assert out['iRT'].between(-50, 200).all(), 'RT not in iRT units; check column before converting'
-    return out
-```
+Column mapping and iRT-unit assertion: `python scripts/spectronaut_to_diann.py --in spectronaut.tsv --out diann.tsv`
+(renames `RelativeIntensity` to `LibraryIntensity`, `FragmentMz` to `ProductMz`, and so on; refuses input whose iRT is outside -50..200).
 
 **OpenSwathDecoyGenerator's real input requirements (verified on OpenMS 3.5.0):**
 `TargetedFileConverter` converts a TSV without complaint even when it is unusable. The transition
@@ -31,28 +18,10 @@ m/z (not placeholders), and a per-precursor grouping column -- `transition_group
 PeptideSequence + PrecursorCharge (`FullUniModPeptideName` also works). Without the grouping
 column, distinct peptides sharing a charge collapse into one `<Peptide id="_2">` group with no error
 (2 targets become 1), and the decoy step then fails or reports wrong counts. Missing `Annotation` or
-placeholder m/z gives `Number of decoy peptides: 0`. Check the peptide count after conversion:
+placeholder m/z gives `Number of decoy peptides: 0`.
 
-```python
-import pandas as pd
-from pyteomics import mass
-
-def build_openswath_tsv(peptides, path, n_frag=6):
-    """peptides: [(sequence, charge, protein, iRT)] -> OpenSWATH TSV of y-ion transitions."""
-    rows = []
-    for seq, z, prot, irt in peptides:
-        group = f'{seq}_{z}'  # unique per PeptideSequence + PrecursorCharge; required
-        for i in range(1, n_frag + 1):
-            rows.append({'PrecursorMz': mass.fast_mass(seq, charge=z),
-                         'ProductMz': mass.fast_mass(seq[-i:], ion_type='y', charge=1),  # real m/z
-                         'Tr_recalibrated': irt, 'transition_name': f'{group}_y{i}',
-                         'transition_group_id': group, 'decoy': 0, 'LibraryIntensity': 1000.0 / i,
-                         'PeptideSequence': seq, 'FullUniModPeptideName': seq,
-                         'ProteinName': prot, 'PrecursorCharge': z, 'FragmentType': 'y',
-                         'FragmentSeriesNumber': i, 'FragmentCharge': 1,
-                         'Annotation': f'y{i}^1'})  # literal Annotation; required
-    pd.DataFrame(rows).to_csv(path, sep='	', index=False)
-```
+`python scripts/build_openswath_tsv.py --peptides peptides.tsv --out library.tsv --n-frag 6` builds the TSV from
+a tab-separated peptide list with columns `sequence, charge, protein, irt`. Check the peptide count after conversion:
 
 ```bash
 TargetedFileConverter -in library.tsv -in_type tsv -out library.TraML -out_type TraML

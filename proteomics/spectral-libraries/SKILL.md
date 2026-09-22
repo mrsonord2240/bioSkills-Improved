@@ -119,7 +119,7 @@ def fit_irt_to_rt(anchor_irt, observed_rt):
 | File | Read when |
 |------|-----------|
 | `references/koina-prediction.md` | Predicting fragment intensities and iRT for a peptide list via Koina (Prosit/AlphaPeptDeep/MS2PIP/UniSpec), including peptide validation before the request |
-| `references/format-conversion.md` | Converting between DIA-NN, OpenSWATH and Spectronaut; building an OpenSWATH transition TSV; OpenSwathDecoyGenerator requirements and decoy method choice |
+| `references/format-conversion.md` | Converting between DIA-NN, OpenSWATH and Spectronaut; building an OpenSWATH transition TSV (`scripts/build_openswath_tsv.py`, `scripts/spectronaut_to_diann.py`); OpenSwathDecoyGenerator requirements and decoy method choice |
 | `references/library-qc-merge.md` | Reporting library size and merging libraries on the full transition key |
 
 ## Per-Method Failure Modes
