@@ -36,9 +36,13 @@ Moved verbatim from SKILL.md. Read when a cis-MR result looks platform-specific,
 
 **Fix:** Apply Steiger filtering on each cis-pQTL (`steiger_filtering()`); restrict to pre-symptomatic samples where possible (pediatric or early-adult cohorts); replicate in longitudinal cohorts measuring protein years before disease onset. Note: Steiger has its own caveat under unmeasured confounding (Lutz SM et al 2022 Genet Epidemiol 46:139); cross-validate via bidirectional cis-MR.
 
+`steiger_filtering()` needs `samplesize.exposure`/`samplesize.outcome` on `dat` (or, for a binary/log-odds outcome, `ncase.outcome`/`ncontrol.outcome`/`prevalence.outcome` instead). Neither `format_data()` nor `read_outcome_data()` add sample size by default -- including in this Skill's own `examples/cis_pqtl_mr.R` -- and without it `add_rsq()` silently produces no `rsq`/`effective_n` column, then `steiger_filtering()` crashes (`replacement has 0 rows, data has N`; checked on TwoSampleMR 0.7.9). Set it explicitly first.
+
 ```r
 library(TwoSampleMR)
 dat <- harmonise_data(exposure_pQTL, outcome_GWAS)
+dat$samplesize.exposure <- 54219    # UKB-PPP N here; use the real exposure GWAS N
+dat$samplesize.outcome <- 122733    # outcome GWAS N (e.g. CARDIoGRAMplusC4D)
 dat <- steiger_filtering(dat)
 dat_forward <- dat[dat$steiger_dir, ]   # drop reverse-direction SNPs
 dir_test <- directionality_test(dat_forward)
