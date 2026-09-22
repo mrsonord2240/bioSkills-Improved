@@ -125,9 +125,11 @@ BAGEL.py bf \
 
 Verified directly (build 115): a CV-default run (no `-b`) writes a 2-column `GENE\tBF`
 file; only `-b` adds `STD`/`NumObs`. If you need the STD diagnostic for guide-quality
-triage, you must opt into bootstrap -- `-b -NB 1000` takes roughly 20-25 minutes at
-genome scale (18k+ genes); the CV default runs in well under a minute but has no STD
-column.
+triage, you must opt into bootstrap -- timed directly at genome scale (18,053 genes,
+HAP1 TKOv3): ~2.2s/bootstrap iteration, so `-b -NB 1000` takes roughly 35-40 minutes
+(longer than an earlier estimate of 20-25 min); the CV default runs in well under a
+minute but has no STD column. Runtime is hardware- and load-dependent -- time a short
+run (`-NB 50`, a few minutes) first and extrapolate for your own machine.
 
 **Post-run check:** `python examples/check_bagel_inputs.py post bayes_factor.txt` exits 1 when more than 5% of the `BF` column is `nan` (swapped `-e`/`-n`, species mismatch or wrong `-c`), so an all-`nan` file is never read as "no essentials". Both checks were run on real HAP1 TKOv3 data: they pass on the correct call and fail on swapped `-e`/`-n` (18,053/18,053 `nan`; `-e` mean LFC +0.13 vs `-n` -2.67) and on the mouse CEG file (0/621 genes present).
 
