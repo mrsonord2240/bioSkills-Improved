@@ -203,36 +203,21 @@ ss <- sumstats(
     maf.filter = 0.01
 )
 
-# GenomicSEM internally detects the OS via Sys.info()[['sysname']] and chooses
-# PSOCK (Windows) vs FORK (Linux/Mac) clusters automatically; there is no user
-# `Operating=` argument. MPI=TRUE switches to an mpirun-based strategy for
-# cluster job submission. parallel=TRUE is the default.
-cfgwas <- commonfactorGWAS(
-    covstruc = ldsc_results,
-    SNPs = ss,
-    estimation = 'DWLS',
-    parallel = TRUE,
-    cores = 8,
-    MPI = FALSE
-)
-
-# cfgwas columns include rsID/chr/BP/MAF/A1/A2/est/se_c/Z_Estimate/Pval_Estimate (factor effect)
-# plus heterogeneity columns Q / Q_df / Q_pval. Q_pval IS the per-SNP heterogeneity
-# test (often referred to as Q_SNP in the literature; the column name in the data.frame is Q_pval).
-cfgwas$factor_sig <- cfgwas$Pval_Estimate < 5e-08
-cfgwas$qsnp_sig <- cfgwas$Q_pval < (0.05 / sum(cfgwas$factor_sig))
-cfgwas$factor_only <- cfgwas$factor_sig & !cfgwas$qsnp_sig
+saveRDS(ldsc_results, 'ldsc_results.rds'); saveRDS(ss, 'sumstats_snps.rds')
 ```
+
+```bash
+# commonfactorGWAS DWLS + ML cross-check + Q_SNP classification; last argument = cores
+Rscript scripts/commonfactor_gwas_qsnp.R ldsc_results.rds sumstats_snps.rds cfgwas_qsnp.tsv 8
+```
+
+Output: the leading `sumstats()` columns (`SNP`, `CHR`, `BP`, `MAF`, `A1`, `A2` ...), then `i`, `lhs`, `op`, `rhs`, `est`, `se_c`, `Z_Estimate`, `Pval_Estimate` (factor effect), `Q` / `Q_df` / `Q_pval` (`Q_pval` IS the per-SNP Q_SNP test), `fail`, `warning`, and the script's `factor_sig`, `qsnp_sig`, `factor_only_dwls`, `Q_pval_ML`, `factor_only`. Cluster and `MPI=` settings: `references/runtime-and-python-tools.md`.
 
 The "factor-only" subset (factor-significant AND Q_SNP non-significant) is the publication-grade set of common-factor SNPs.
 
 **Cross-check Q_pval with `estimation = 'ML'`; DWLS Q_pval is provisional.** On two synthetic panels (flat SE; MAF/N-driven SE) built without `ldsc()`, `commonfactorGWAS(estimation = 'DWLS')` returned Q_pval 0.91-0.96 for both 5 planted heterogeneous SNPs and 5 planted factor SNPs (no separation), while `'ML'` on the identical input separated them (heterogeneous 6e-83 to 6e-11, factor 0.28-0.48; GenomicSEM 0.0.5 + lavaan 0.6.19, re-audit Inputs 2 and 8). Whether that is a DWLS weakness or an artifact of synthetic V without per-SNP N is unsettled. So: when V/N come from anything other than a genuine `ldsc()` + `sumstats()` run, treat DWLS Q_pval as provisional; and even on real data, do not call a SNP factor-only on a DWLS Q_pval alone.
 
-```r
-cfgwas_ml <- commonfactorGWAS(covstruc = ldsc_results, SNPs = ss, estimation = 'ML', parallel = TRUE, cores = 8)
-cfgwas$Q_pval_ML <- cfgwas_ml$Q_pval[match(cfgwas$SNP, cfgwas_ml$SNP)]
-cfgwas$factor_only <- cfgwas$factor_sig & !cfgwas$qsnp_sig & cfgwas$Q_pval_ML > (0.05 / sum(cfgwas$factor_sig))
-```
+The script runs that ML pass itself and sets `factor_only` only when DWLS and ML Q_pval both clear the threshold.
 
 ## Common Errors
 

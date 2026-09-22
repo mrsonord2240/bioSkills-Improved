@@ -8,19 +8,7 @@ Running MTAG beside GenomicSEM, and what to do when the two disagree. Read it wh
 
 **Approach:** Run MTAG CLI on the same input sumstats; compare top hits with GenomicSEM factor hits. Report MaxFDR.
 
-```bash
-# MTAG CLI (Python)
-python mtag.py \
-    --sumstats trait1.txt,trait2.txt,trait3.txt \
-    --n_min 0 \
-    --out mtag_results
-# MTAG uses the signed Z by default; --use_beta_se was disabled upstream (raises a
-# RuntimeError since Dec 2021 due to beta-se bugs), so supply a Z column and omit it.
-
-# Check MaxFDR per trait
-grep -iE 'max ?fdr' mtag_results.log   # matches both the section header and the 'Max FDR of Trait' value lines
-# Each per-trait MTAG file: mtag_results_trait_<k>.txt
-```
+Run it with `examples/mtag_pipeline.sh`: the same `mtag.py` call (`--n_min 0`, signed Z; `--use_beta_se` is disabled upstream and raises a RuntimeError since Dec 2021), the `max ?fdr` grep of the MTAG log (matches both the section header and the `Max FDR of Trait` value lines), and a genome-wide-significant hit count per trait. Each per-trait MTAG file is `<out>_trait_<k>.txt`.
 
 If MaxFDR > 0.05 for any trait, MTAG results for that trait are unreliable; GenomicSEM with Q_SNP filtering is the more defensible report.
 
