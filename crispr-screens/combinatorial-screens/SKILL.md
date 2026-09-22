@@ -9,7 +9,7 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: MAGeCK 0.5.9+ (for MLE with interaction terms), Inzolia library annotation (Esmaeili Anvar 2024), pandas 2.2+, numpy 1.26+, scipy 1.12+, matplotlib 3.8+.
+Reference examples tested with: MAGeCK 0.5.9+ (for MLE with interaction terms), Inzolia library annotation (Esmaeili Anvar 2024), pandas 2.2+, numpy 1.26+, scipy 1.12+, matplotlib 3.8+, statsmodels 0.14+ (for `examples/gi_scoring.py`'s BH-FDR step).
 
 Before using code patterns, verify installed versions match. If versions differ:
 - CLI: `mageck --version`; `mageck mle --help`
@@ -81,7 +81,8 @@ Run `examples/gi_scoring.py` (reads `paired_lfc.tsv` = `cassette_id, gene_A, gen
 - GI z-score < -2: Synthetic lethal (double-KO more lethal than expected) -- candidate drug target combinations
 - GI z-score > 2: Synthetic rescue (double-KO less lethal than expected) -- compensatory pathway / paradoxical hit
 - GI z-score -1 to 1: No interaction; effects are additive
-- **Minimum pair count:** the z-score is normalized against the tested pairs themselves, so a small set gives an unstable null and the planted hits inflate the SD they are measured against. Use the z cutoff only with dozens of tested pairs (>= ~20-30) in which interactions are a small minority. For a handful of specific pairs, rank by raw `gi_score` instead (a z-score cannot reach |2| at all with 5 or fewer pairs). Checked on synthetic data (2 planted GI = -2.5 pairs, null GI SD 0.4, 200 reps): the z < -2 cutoff missed 393/400 planted hits at N=9, 89/400 at N=12, 0/400 at N >= 20; raw `gi_score` ranking put both planted pairs first at N=9.
+- **Minimum pair count:** the z-score is normalized against the tested pairs themselves, so a small set gives an unstable null and the planted hits inflate the SD they are measured against. Use the z cutoff only with a genome-scale set (dozens to hundreds of tested pairs, >= ~50) in which interactions are a small minority; the miss rate is still non-trivial at 20-30 pairs. For a handful of specific pairs, rank by raw `gi_score` instead (a z-score cannot reach |2| at all with 5 or fewer pairs). Checked on synthetic data (2 planted GI = -2.5 pairs, null GI SD 0.4, 1000 reps per N): the z < -2 cutoff missed 80% of planted hits at N=9, 37% at N=12, still 4% at N=20, 0.5% at N=30, and <=0.1% only from N=50 up; raw `gi_score` ranking put both planted pairs first at N=9.
+- **Multiple testing at genome scale:** the raw z<-2/z>2 cutoff only looks safe when a handful of very large-effect true hits dominate the population variance and thereby suppress noise from crossing the threshold -- that is an artifact of a lucky effect size, not FDR control. Checked on synthetic data at Inzolia scale (4,435 pairs, per-pair GI noise SD 0.06): an all-null screen (no true interactions at all) produced 199-201 pairs falsely crossing |z|>2 by chance alone; 20 true hits at a modest, more realistic effect (GI=-0.3, SNR~5, vs. this Skill's own huge planted-effect test cases) gave 178 raw calls of which 158 (89%) were false, while Benjamini-Hochberg on the same z-scores recovered 17/20 true hits with 0 false positives. Before calling hits from a genome-scale run, convert each `gi_z` to a two-sided normal-tail p-value and apply BH: `pvals = 2 * scipy.stats.norm.sf(np.abs(gi_z)); reject, qvals, _, _ = statsmodels.stats.multitest.multipletests(pvals, alpha=0.05, method='fdr_bh')`. The raw cutoff alone is adequate only for the small, hand-curated pair sets described under Minimum pair count, where every candidate is inspected individually anyway.
 
 ## Run Combinatorial Screen Analysis (MAGeCK MLE with Interaction Indicator)
 
@@ -225,6 +226,7 @@ For high-stakes synthetic-lethal hits (drug-target nomination), validate by:
 | Cannot compute GI | No singletons in library | Re-design to include all-singletons |
 | GI scores noisy | Library skew | Standard library QC; aggregate cassettes |
 | Many false "rescue" GIs | Saturation in linear-space | Use log-space (LFC) GI scoring |
+| Too many SL/rescue calls at genome scale | Raw z-cutoff has no FDR control (see Multiple testing at genome scale, above) | Apply BH-FDR across all tested pairs' z-scores before calling hits |
 | Drug-target paralog shows no GI in screen | Cell-line-specific buffering | Cross-validate with multiple lines |
 
 ## References
