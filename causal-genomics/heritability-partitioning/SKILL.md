@@ -10,9 +10,20 @@ author: GPTomics
 ## Version Compatibility
 
 Reference examples tested with: LDSC v3.0.1 (`CBIIT/ldsc`, `main` branch, commit `1f09cf0c`, Python
-3.9+ -- see "Tool Install Notes"), LDAK 6.0+, BOLT-LMM 2.4.1+, GCTA 1.94+, HESS 0.5.4+, HDL 1.4.0+ (R;
-GitHub `zhenin/HDL`), Popcorn 1.0+ (Python; brielin/Popcorn), baselineLD_v2.2 annotations
+3.9+ -- see "Tool Install Notes"), LDAK 6.3, BOLT-LMM 2.5 (see caveat below), GCTA 1.94.1 (verified
+2026-09-21, see "Per-Method Reference Files"), HESS 0.5.4-beta (verified 2026-09-21 with the Python 3
+patches in `references/hess-local-h2.md` -- upstream has no separate "Python 3 branch"), HDL 1.4.0+ (R;
+GitHub `zhenin/HDL`; blocked here on a ~5 GB reference-panel download, not attempted), Popcorn 1.1
+(verified 2026-09-21, see `references/popcorn-transancestry.md`), baselineLD_v2.2 annotations
 (alkesgroup.broadinstitute.org/LDSCORE).
+
+**BOLT-LMM download URL was stale and is now fixed**: `alkesgroup.broadinstitute.org/BOLT-LMM/downloads/BOLT-LMM_v2.4.1.tar.gz`
+404s -- the current release moved to `.../downloads/BOLT-LMM_v2.5.tar.gz`, with older versions under
+`.../downloads/old/`. Checked 2026-09-21. **Also found (2026-09-21): the v2.5 Linux binary segfaults
+immediately on this machine's WSL environment, even on `bolt --help`** -- not confirmed whether this is
+a CPU-feature or glibc incompatibility specific to this host; building from the bundled `src/` was not
+attempted (needs a C++ toolchain and Intel MKL). Treat BOLT-REML as unverified on this environment;
+verify the binary with `bolt --help` before relying on it elsewhere.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `python -c 'import <module>; help(<module>)'`
@@ -79,9 +90,9 @@ Methodology evolves; benchmark consensus shifts. Verify against current Yengo 20
 | Two-trait genetic correlation from sumstats, no overlap | HDL (primary) + cross-trait LDSC (secondary) | HDL ~60% lower variance; LDSC robust under any overlap; HDL in `references/hdl-genetic-correlation.md`, LDSC rg in `references/cross-trait-ldsc.md` |
 | Two-trait rg with sample overlap > 5% | Cross-trait LDSC | HDL biased by overlap; LDSC intercept absorbs overlap; how to run and read `gcov_int` in `references/cross-trait-ldsc.md` |
 | Individual-level biobank h2, N > 100k | BOLT-REML | Better precision; multi-component partition |
-| Smaller individual-level cohort, N 5-50k | GCTA-GREML | Gold-standard REML; PCGC if case-control < 20% prevalence |
+| Smaller individual-level cohort, N 5-50k | GCTA-GREML | Gold-standard REML; PCGC if case-control < 20% prevalence; pipeline in `references/gcta-greml.md` |
 | Local heritability and bivariate local rg | HESS | Per-locus resolution; identifies hotspots for follow-up; pipeline in `references/hess-local-h2.md` |
-| Trans-ancestry rg / cross-population h2 | Popcorn | Designed for trans-ethnic; LD scores per population |
+| Trans-ancestry rg / cross-population h2 | Popcorn | Designed for trans-ethnic; LD scores per population; pipeline in `references/popcorn-transancestry.md` |
 | Functional enrichment claim depends on model | Report BOTH LDSC and LDAK SumHer | Per Gazal 2019; model-dependence is real; LDAK pipeline in `references/ldak-sumher.md` |
 | Case-control GWAS with low prevalence | LDSC on liability scale (--samp-prev --pop-prev) | Observed-scale h2 understates liability-scale truth |
 | Single-cell ATAC cell-type prioritization | S-LDSC with per-cluster ATAC peaks as annotations | Cross-reference atac-seq/single-cell-atac for peak generation |
@@ -97,10 +108,15 @@ Load only the file for the method in use (each holds the pipeline, install line,
 | HDL genetic correlation (R) | `references/hdl-genetic-correlation.md` |
 | Cell-type / tissue prioritization (`--h2-cts`, `.ldcts` manifest, Bonferroni) | `references/cell-type-prioritization.md` |
 | Cross-trait LDSC rg (`--rg`, `gcov_int` under sample overlap) | `references/cross-trait-ldsc.md` |
+| GCTA-GREML (individual-level h2) | `references/gcta-greml.md` |
+| Popcorn (trans-ancestry rg) | `references/popcorn-transancestry.md` |
 | Failure modes: intercept misread, non-EUR LD scores, collinear annotations | `references/ldsc-failure-modes.md` |
 | Runtime and hardware per method | `references/computational-footprint.md` |
 
-Total h2, partitioned S-LDSC and the case-control liability rule stay in this file. BOLT-REML, GCTA-GREML, graphREML and Popcorn carry no pipeline here beyond the taxonomy row, decision tree and install notes.
+Total h2, partitioned S-LDSC and the case-control liability rule stay in this file. BOLT-REML and
+graphREML carry no pipeline here beyond the taxonomy row, decision tree and install notes (BOLT-REML's
+binary is unverified on this Skill's own environment -- see "Version Compatibility"; graphREML needs an
+LDGM reference this environment does not have).
 
 ## LDSC Intercept Interpretation (Postdoc Nuance)
 
@@ -230,15 +246,15 @@ and prints real, checkable regression output for each.
 LDAK, HESS and HDL install notes live in their `references/` files (see "Per-Method Reference Files").
 
 ```bash
-# BOLT-LMM / BOLT-REML
-wget https://alkesgroup.broadinstitute.org/BOLT-LMM/downloads/BOLT-LMM_v2.4.1.tar.gz
-
-# GCTA
-wget https://yanglab.westlake.edu.cn/software/gcta/bin/gcta-1.94.1-linux-kernel-3-x86_64.zip
-
-# Popcorn
-git clone https://github.com/brielin/Popcorn.git && cd Popcorn && pip install .
+# BOLT-LMM / BOLT-REML (checked 2026-09-21: the old v2.4.1 URL below 404s; current release is v2.5,
+# older versions moved under .../downloads/old/)
+wget https://storage.googleapis.com/broad-alkesgroup-public/BOLT-LMM/downloads/BOLT-LMM_v2.5.tar.gz
+# Segfaults immediately (even --help) on this Skill's own verification environment (WSL, 2026-09-21) --
+# not yet root-caused; verify with `bolt --help` before trusting the binary on a new machine.
 ```
+
+GCTA-GREML and Popcorn each have their own pipeline, install and worked example: see "Per-Method
+Reference Files" below (`references/gcta-greml.md`, `references/popcorn-transancestry.md`).
 
 ## References
 
