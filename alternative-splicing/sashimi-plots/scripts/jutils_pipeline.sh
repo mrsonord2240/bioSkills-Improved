@@ -3,7 +3,8 @@
 # Usage: jutils_pipeline.sh JUTILS_DIR RMATS_DIR META.tsv BAM_LIST.tsv ANNOTATION.gtf COORDINATE OUT_DIR
 #   META.tsv sample<TAB>condition   BAM_LIST.tsv sample<TAB>bam<TAB>condition   COORDINATE chr:start-end
 #   The heatmap needs >= 2 events passing --q-value (Env Q, default 0.05); with fewer it prints "Skipping" and writes nothing.
-# Writes OUT_DIR/{jutils_out,hm,sh,vn}. The leafcutter/MntJULiP/MAJIQ converters follow `jutils.py convert-results --help`.
+# Writes OUT_DIR/{jutils_out,hm,sh,vn}. This script covers rMATS input; the leafcutter/MntJULiP/MAJIQ
+# converters (--leafcutter-dir/--mntjulip-dir/--majiq-dir) are documented and verified in references/jutils.md.
 set -euo pipefail
 [ $# -eq 7 ] || { sed -n '2,6p' "$0" >&2; exit 2; }
 ju=$(cd "$1" && pwd)/jutils.py; rmats=$2; meta=$3; bams=$4; gtf=$5; coord=$6; out=$7; Q=${Q:-0.05}
