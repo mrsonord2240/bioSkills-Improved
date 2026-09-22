@@ -39,7 +39,7 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 | Perturb-multiome (10X) | 2021+ | scRNA + scATAC simultaneously | scRNA + ATAC | Low | Direct capture from sgRNA cassette |
 | Replogle GW Perturb-seq (2022, *Cell*) | 2022 | Multiplexed CRISPRi with sgRNA barcoding | scRNA-seq | 1 sgRNA/cell | Direct capture |
 
-**Decision rule:** Standard scRNA + sgRNA at low cost -> CROP-seq. Genome-wide CRISPRi screens -> Replogle's CRISPRi + 10X 3' direct-capture protocol, the gold standard (>2.5M cells; the genome-scale K562 screen targeted ~9,866 expressed genes in Replogle 2022). Protein readout -> Perturb-CITE-seq. Chromatin readout -> Perturb-multiome. Hashed cells + sgRNA -> ECCITE-seq. Low-throughput pilot -> original Dixit Perturb-seq.
+**Decision rule:** Standard scRNA + sgRNA at low cost -> CROP-seq. Genome-wide CRISPRi screens -> Replogle's CRISPRi + 10X 3' direct-capture protocol, the gold standard (>2.5M cells; the genome-scale K562 screen targeted ~9,866 expressed genes in Replogle 2022). Protein readout -> Perturb-CITE-seq. Chromatin readout -> Perturb-multiome. Hashed cells + sgRNA -> ECCITE-seq. Low-throughput pilot -> original Dixit Perturb-seq. Genome-scale design and budget: `references/genome-wide-perturb-seq.md`; chromatin readout analysis: `references/multiomic-perturb-seq.md`.
 
 ## MOI and sgRNA Assignment
 
@@ -116,34 +116,7 @@ print(f'KO cells: {adata_ko.n_obs} ({adata_ko.n_obs/(adata.obs["sgrna_assignment
 
 ## SCEPTRE for Low-MOI Differential Expression
 
-**Why this matters:** Standard differential-expression tools (DESeq2, MAST) assume Gaussian-mixture distribution and fail at single-cell scale with sparse, zero-inflated data. SCEPTRE (Katsevich Lab, 2021; low-MOI variant Barry 2024 Genome Biol) uses a negative-binomial GLM with conditional resampling:
-
-1. Per gene, fit NB GLM: `log(expr_g) ~ pert_indicator + technical_factors`
-2. Compute z-score for the perturbation coefficient
-3. Resample the pert_indicator (conditional on counts) 500-1000 times; compute permutation null
-4. Get FDR via permutation; not parametric
-
-```r
-library(sceptre)
-
-# Input: sce object or sparse matrix + metadata
-# Required: gene_expression_matrix, perturbation_indicator (binary per cell per pert),
-#           technical_factors (batch, n_genes, etc.)
-
-# For each gene + perturbation pair:
-# Current sceptre API is a pipeline of composable steps:
-sceptre_object <- import_data(response_matrix, grna_matrix, grna_target_data_frame,
-                              moi = 'low', extra_covariates = covariates_df)
-sceptre_object <- set_analysis_parameters(sceptre_object, discovery_pairs = pairs_df)
-sceptre_object <- assign_grnas(sceptre_object)
-sceptre_object <- run_qc(sceptre_object)
-sceptre_object <- run_calibration_check(sceptre_object)
-sceptre_object <- run_discovery_analysis(sceptre_object)
-results <- get_result(sceptre_object, analysis = 'run_discovery_analysis')
-# Output: per-gene-per-pert p-value, log-fold-change, FDR
-```
-
-**Advantage over MAST:** SCEPTRE's permutation NB GLM is the only method that maintains calibrated FDR in pooled-screen scRNA-seq (Barry 2024 benchmark). MAST and Wilcoxon are over-confident due to data sparsity.
+SCEPTRE (NB GLM + conditional resampling, calibrated FDR) is the low-MOI DE method of choice, run in R. Full method and code: `references/sceptre-low-moi.md`.
 
 ## Pertpy Unified Framework
 
@@ -194,78 +167,24 @@ results_df = de.test_contrasts(de.contrast('gene_target', 'NT', 'GENE_X'))
 
 ## Genome-Wide Perturb-Seq (Replogle 2022)
 
-**Replogle 2022 *Cell* 185:2559** demonstrated genome-wide Perturb-seq:
-- >2.5M cells total; the genome-scale K562 screen targeted ~9,866 expressed genes (with a 2,057-gene essential subset)
-- CRISPRi via dCas9-KRAB
-- Native 10X 3' direct-capture for sgRNA
-- Median >100 cells per perturbation as screened (Replogle 2022)
-- Cluster-based analysis of perturbed cells reveals gene-program organization
-
-**Scaling principles (calibrated to Replogle 2022's actual scope -- ~9,866 expressed genes -- not a generic "genome-scale" constant):**
-- Cells per perturbation: 500-1,000 minimum for stable DE (Replogle's own screen ran leaner, at a median >100 cells/pert, trading DE power for genome-wide breadth -- see Failure Modes below)
-- 10X channels: 10-30 channels at 5,000-10,000 cells each
-- Cost: ~$50-100K
-
-**Scaling to a different target gene count:** the figures above assume ~9,866 genes and scale roughly linearly: `figure x (target_genes / 9866)`. A literal ~19,000-protein-coding-gene design (this Skill's own usage-guide.md example) is ~1.9x that scope: **~$95-190K, ~19-57 channels** -- not the unscaled $50-100K/10-30 channels. For an explicit cell/channel budget from first principles instead of Replogle's leaner per-pert average, use `cells_needed = target_genes x cells_per_perturbation (500-1,000) / cells_per_channel (5,000-10,000)`; this DE-power-first route will exceed Replogle's own screened-scale numbers.
-
-```python
-# Replogle-style genome-wide design
-# Each cell -> 1 library element (low MOI)
-# Each gene -> 1 dual-sgRNA CRISPRi element (2 distinct sgRNAs per element)
-# Replogle 2022 retained >2.5M cells at a median >100 cells per perturbation
-# Total: ~9,900 expressed genes x 1 element = ~9,900 elements
-
-```
+Genome-scale CRISPRi design, cell/channel budget and the scaling formula for a different gene count: `references/genome-wide-perturb-seq.md`.
 
 ## Factor-Based Analysis
 
-For complex perturbation responses, decompose the per-cell perturbation effect into shared latent factors:
-
-```python
-import pertpy as pt
-
-# FR-Perturb ("Factorize-Recover") decomposes perturbation effects into shared factors.
-# It is NOT part of pertpy: it is a standalone CLI from douglasyao/FR-Perturb
-# (Yao et al. 2023 Nat Biotechnol). Run it outside Python:
-#   python run_FR_Perturb.py --input <expression> --perturbations <matrix> --out <prefix>
-```
+Shared-factor decomposition of perturbation effects (FR-Perturb, standalone CLI): `references/factor-decomposition.md`.
 
 ## Multiomic Perturb-seq (RNA + ATAC)
 
-**For chromatin readout:** Use 10X Multiome with CRISPRi/a; sgRNA assignment via the same scATAC-seq library. This section assumes already-quantified RNA (genes x cells) and ATAC (peaks x cells) count matrices for the same cells (shared `obs_names`) -- peak calling from raw fragment files is upstream of this Skill (ArchR or Signac in R, or CellRanger ARC).
+RNA + ATAC Perturb-seq (10X Multiome): propagate the Mixscape call to the ATAC modality and test differential accessibility: `references/multiomic-perturb-seq.md`.
 
-```python
-import muon as mu
-import scanpy as sc
-import pertpy as pt
+## Reference Files
 
-mdata = mu.MuData({'rna': adata_rna, 'atac': adata_atac})  # shared obs_names = shared cells
-
-# RNA side: sgRNA assignment + Mixscape escaper filtering exactly as in the sections above,
-# writing .obs['mixscape_class'] (e.g. 'GENE_A KO') on mdata['rna']. Propagate the per-target
-# call to the ATAC modality via the shared cell index -- do NOT use the pooled
-# 'mixscape_class_global' here, which merges different target genes' KO cells together and
-# dilutes any perturbation-specific chromatin signal.
-mdata['atac'].obs['mixscape_class'] = mdata['rna'].obs['mixscape_class']
-
-# ATAC side: differential accessibility per perturbation (KO vs NTC) on normalized counts.
-# TF-IDF (muon.atac.pp.tfidf) is for embedding/LSI clustering, not per-feature testing here --
-# verified empirically: its cell-wise reweighting distorted the Wilcoxon null on a planted-signal
-# synthetic dataset when one condition's total accessible-peak count shifted; normalize_total +
-# log1p recovered the planted differential peaks cleanly (5/5 in the top 5 by adjusted p-value).
-atac_pert = mdata['atac'][mdata['atac'].obs['mixscape_class'].isin(['GENE_A KO', 'NTC'])].copy()
-sc.pp.normalize_total(atac_pert)
-sc.pp.log1p(atac_pert)
-sc.tl.rank_genes_groups(atac_pert, groupby='mixscape_class', groups=['GENE_A KO'],
-                         reference='NTC', method='wilcoxon')
-peak_result = sc.get.rank_genes_groups_df(atac_pert, group='GENE_A KO')
-
-# Peak-to-gene linking (which differential peak sits near which differential gene) needs a
-# genome annotation file: muon.atac.pp.add_peak_annotation(mdata, annotation_file) followed by
-# muon.atac.tl.rank_peaks_groups(...) adds nearest-gene/distance columns automatically. Without
-# an annotation file, report differential genes (PyDESeq2, Pertpy Unified Framework section
-# above) and differential peaks (peak_result, above) separately, as here.
-```
+| File | Read when |
+|------|-----------|
+| `references/sceptre-low-moi.md` | Calibrated single-cell DE for a low-MOI screen (R `sceptre` pipeline) |
+| `references/genome-wide-perturb-seq.md` | Designing or budgeting a genome-scale CRISPRi Perturb-seq (Replogle 2022) |
+| `references/factor-decomposition.md` | Decomposing perturbation effects into shared factors (FR-Perturb) |
+| `references/multiomic-perturb-seq.md` | RNA + ATAC (10X Multiome) Perturb-seq: differential accessibility per perturbation |
 
 ## Failure Modes
 
