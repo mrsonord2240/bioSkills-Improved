@@ -26,29 +26,12 @@ Verify cell-type structure is preserved (not just modality overlap); adversarial
 
 **Approach:** Preprocess the three datasets in their native pipelines (query ATAC only TF-IDF), build the bridge reference from the scRNA reference plus the multiome bridge, find anchors by projecting the query into the bridge's ATAC LSI space, then transfer labels and project onto the reference UMAP.
 
-```r
-library(Seurat)
-library(Signac)
-
-# rna:   labelled scRNA reference (meta.data$celltype), NormalizeData/ScaleData/RunPCA, RunUMAP(return.model = TRUE)
-# multi: paired multiome bridge with 'RNA' (normalized) and 'ATAC' (RunTFIDF, RunSVD -> 'lsi') assays
-# atac:  unpaired scATAC query on the SAME peak set as the bridge's ATAC assay, RunTFIDF only
-bridge <- PrepareBridgeReference(
-    reference = rna, bridge = multi,
-    reference.reduction = 'pca', reference.dims = 1:20,
-    normalization.method = 'LogNormalize',          # 'SCT' if the reference and bridge RNA were SCTransformed
-    bridge.ref.assay = 'RNA', bridge.query.assay = 'ATAC',
-    supervised.reduction = 'slsi', laplacian.reduction.dims = 1:20)
-
-# dims start at 2: drop LSI_1 ONLY if DepthCor confirms it tracks depth (see `references/multiome-mofa.md`)
-anchors <- FindBridgeTransferAnchors(extended.reference = bridge, query = atac,
-                                     reduction = 'lsiproject', dims = 2:20)
-
-# reference = the object PrepareBridgeReference RETURNED, not the original scRNA object
-# (the anchorset lives in its 'Bridge' assay; passing the original errors "assay ... does not match")
-atac <- MapQuery(anchorset = anchors, reference = bridge, query = atac,
-                 refdata = list(celltype = 'celltype'), reduction.model = 'umap')
-# predicted.celltype, predicted.celltype.score, and ref.umap are now on the query
+```bash
+Rscript scripts/seurat_bridge_integration.R rna.rds multi.rds atac.rds bridge_query.rds   # optional: ndims first_lsi_dim SCT|LogNormalize
 ```
+
+Inputs, all Seurat objects saved with `saveRDS`: `rna.rds` is the labelled scRNA reference (`meta.data$celltype`; NormalizeData/ScaleData/RunPCA, and `RunUMAP(return.model = TRUE)`); `multi.rds` is the paired multiome bridge with `RNA` (normalized) and `ATAC` (RunTFIDF, RunSVD -> `lsi`) assays; `atac.rds` is the unpaired scATAC query on the SAME peak set as the bridge's ATAC assay, RunTFIDF only. The output query carries `predicted.celltype`, `predicted.celltype.score` and `ref.umap`.
+
+The script starts the ATAC dims at 2 (drops LSI_1): keep that only if DepthCor confirms it tracks depth (see `references/multiome-mofa.md`), otherwise pass `1` as `first_lsi_dim`. It uses `normalization.method = 'LogNormalize'`; pass `SCT` if the reference and bridge RNA were SCTransformed. `MapQuery` must take the object `PrepareBridgeReference` RETURNED as `reference`, not the original scRNA object (the anchorset lives in its `Bridge` assay; passing the original errors "assay ... does not match").
 
 Checked on Seurat 5.5.0 / Signac 1.17.1 with synthetic three-population data (300 reference RNA cells, 300 bridge multiome cells, 300 ATAC-only query cells, planted marker genes and peaks): 81% of query cells recovered their true type with `LogNormalize` (chance is 33%), 75% with `SCT`. Check `predicted.celltype.score` before trusting the transferred labels.

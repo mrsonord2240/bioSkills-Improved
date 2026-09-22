@@ -105,9 +105,9 @@ Read the file for the method you are running; `SKILL.md` above decides which met
 | File | Read when |
 |---|---|
 | `references/cite-seq-dsb-wnn.md` | CITE-seq: denoising ADT with DSB from the raw matrix, then WNN joint clustering (Seurat). Runnable end to end: `examples/cite_seq_analysis.R` |
-| `references/scvi-totalvi-multivi.md` | Training totalVI (CITE-seq denoising + DE) or MultiVI (mosaic, RNA+ATAC partially observed) with scvi-tools |
+| `references/scvi-totalvi-multivi.md` | Training totalVI (CITE-seq denoising + DE) or MultiVI (mosaic, RNA+ATAC partially observed) with scvi-tools. Runs `scripts/totalvi_cite_seq.py`, `scripts/multivi_mosaic.py` |
 | `references/multiome-mofa.md` | 10x Multiome RNA + ATAC WNN (Signac LSI), or MOFA+ shared/specific factors |
-| `references/unpaired-glue-bridge.md` | Unpaired scRNA + scATAC: GLUE, or Seurat v5 bridge integration through a multiome bridge |
+| `references/unpaired-glue-bridge.md` | Unpaired scRNA + scATAC: GLUE, or Seurat v5 bridge integration through a multiome bridge. Runs `scripts/seurat_bridge_integration.R` |
 
 ## MuData Housekeeping
 
