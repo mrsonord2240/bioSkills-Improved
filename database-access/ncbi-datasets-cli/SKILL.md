@@ -52,9 +52,9 @@ dataformat --version  # bundled companion tool; broken on 18.37.0, see Version C
 |---|---|---|
 | Genome assembly download | yes | — |
 | All reference genomes for a taxon | yes | — |
-| Gene record metadata (multi-species) | yes | — |
-| Ortholog data for a gene | yes (`datasets summary gene ... --ortholog <taxon|all>`) | OrthoDB / Compara for tree-aware orthology |
-| Virus data (assemblies, metadata) | yes (`datasets download virus`) | — |
+| Gene record metadata (multi-species) | yes (see `references/gene-orthologs.md`) | — |
+| Ortholog data for a gene | yes (`datasets summary gene ... --ortholog <taxon|all>`; see `references/gene-orthologs.md`) | OrthoDB / Compara for tree-aware orthology |
+| Virus data (assemblies, metadata) | yes (`datasets download virus`; see `references/virus-genomes.md`) | — |
 | Annotation files (GFF3, GTF) for a genome | yes | — |
 | Protein records (curated, with cross-refs) | partial | UniProt REST for richer annotation |
 | PubMed | no | `entrez-search` / `entrez-fetch` |
@@ -92,7 +92,7 @@ dataformat --version  # bundled companion tool; broken on 18.37.0, see Version C
 | `--api-key XXX` | Optional API key (raises rate limit) |
 | `--no-progressbar` | For non-interactive use |
 
-For very large pulls (1000+ genomes), `--dehydrated` is the right choice: download the metadata stubs first, then run `datasets rehydrate` later or pull URLs in parallel from the manifest.
+For very large pulls (1000+ genomes), `--dehydrated` is the right choice: download the metadata stubs first, then run `datasets rehydrate` later or pull URLs in parallel from the manifest. The workflow, the aria2c conversion of `fetch.txt` and the post-transfer size check (`rehydrate` does not verify existing files) are in `references/dehydrated-bulk.md`. `download` itself validates the zip checksum (`--fast-zip-validation` skips it).
 
 ## JSON-lines output + dataformat
 
@@ -111,48 +111,13 @@ prefixes (e.g. `assminfo-level`, `assmstats-scaffold-n50`, `assmstats-contig-n50
 `assmstats-total-sequence-len`) and the gene catalog uses `tax-name` (not `taxname`); there is no
 `nomenclature-authority-symbol` field on this build.
 
-## When to use --dehydrated for cloud workflows
+## Reference Files
 
-The "dehydrated" mode separates data discovery from data transfer:
-
-1. **Discover**: `datasets download genome taxon human --reference --dehydrated --filename human.zip` (fast; ~MB).
-2. **Inspect**: `unzip -p human.zip ncbi_dataset/fetch.txt` -- a TSV of all URLs to pull.
-3. **Pull**: either `datasets rehydrate --directory ./human/`, or `aria2c` for parallel pull.
-   `fetch.txt` is 3 tab-separated columns (`<url>`, a `0` placeholder, `<path relative to
-   ncbi_dataset/>`), not aria2c's input format -- convert it first (see the bulk pattern below).
-   After an aria2c pull, size-check the files (see Checksum verification): `rehydrate` will not.
-
-This is essential for HPC / cloud pipelines where inspection of the pending transfer is needed before committing the I/O.
-
-## Checksum verification
-
-`datasets download` validates the downloaded zip's checksum by default (`--fast-zip-validation`
-skips it). This replaces the `md5sum -c` step that assembly_summary.txt-based scraping needed.
-
-**`datasets rehydrate` does not verify anything already on disk** (checked on 18.37.0, 2026-09-21).
-It downloads only files missing from `ncbi_dataset/data/`; a file that exists at the expected path
-counts as "already rehydrated" whatever its content. After an `aria2c` pull that is the dangerous
-case: a throttled or blocked transfer can write an HTML error page (a few KB) at the correct path,
-`aria2c` reports success, and rehydrate says `All N files already rehydrated`. Reproduced by
-overwriting a rehydrated `.fna` with 4 bytes -- rehydrate left it untouched.
-
-Check sizes yourself against the byte lengths the CLI recorded in `dataset_catalog.json`
-(`uncompressedLengthBytes`), delete any
-mismatching file, and rehydrate again to re-fetch just those:
-
-```bash
-python3 - ncbi_dataset/data <<'PY'    # arg: the dehydrated package's ncbi_dataset/data dir
-import json, os, sys
-root = sys.argv[1]
-for asm in json.load(open(os.path.join(root, 'dataset_catalog.json')))['assemblies']:
-    for f in asm['files']:
-        p = root + '/' + f['filePath']
-        if not os.path.exists(p) or os.path.getsize(p) != int(f['uncompressedLengthBytes']):
-            print(p)                  # bad or missing: rm it, then `datasets rehydrate --directory <pkg>`
-PY
-```
-
-`examples/bulk_dehydrated.sh` runs this check and the delete-and-rehydrate retry automatically.
+| File | Read when |
+|---|---|
+| `references/dehydrated-bulk.md` | Pulling hundreds of genomes or more, transferring with aria2c or `datasets rehydrate`, or verifying files after a transfer |
+| `references/gene-orthologs.md` | A gene request spans more than one species, or asks for orthologs (`--ortholog`) |
+| `references/virus-genomes.md` | Virus assemblies, metadata or proteins (`datasets download virus`) |
 
 ## Code patterns
 
@@ -175,72 +140,6 @@ unzip -q human_grch38.zip -d human_grch38/
 ls -lh human_grch38/ncbi_dataset/data/GCF_000001405.40/
 ```
 
-### Bulk download all reference bacterial genomes
-
-**Goal:** Pull every RefSeq reference bacterial assembly with annotation.
-
-**Approach:** `--dehydrated` first for inspection; rehydrate with parallel pull.
-
-**Reference (NCBI Datasets CLI 18.37.0, checked 2026-09-19):**
-```bash
-#!/bin/bash
-# Step 1: dehydrated discovery
-datasets download genome taxon Bacteria \
-    --reference --annotated --assembly-source RefSeq \
-    --include genome,gff3,protein \
-    --dehydrated --filename bact_refs.zip
-
-unzip -q bact_refs.zip -d bact_refs/
-wc -l bact_refs/ncbi_dataset/fetch.txt   # how many files will be pulled
-
-# Step 2: parallel pull via aria2 (or datasets rehydrate). aria2c input is "<url>\n  out=<path>";
-# the path is fetch.txt column 3 and already starts with data/, so --dir is ncbi_dataset/
-awk -F'\t' '{print $1"\n  out="$3}' bact_refs/ncbi_dataset/fetch.txt > bact_refs/aria2_input.txt
-aria2c --input-file=bact_refs/aria2_input.txt \
-       --dir=bact_refs/ncbi_dataset/ \
-       --max-concurrent-downloads=8 \
-       --retry-wait=5
-
-# Step 3: size-check, delete mismatches, rehydrate -- see Checksum verification, or use
-# examples/bulk_dehydrated.sh, which does all three steps.
-```
-
-### Gene metadata across species
-
-`--taxon` on `summary gene symbol` is **single-species only** (it picks which species' gene record
-to resolve the symbol against; default `human`) -- it does not accept a clade like `Mammalia` and
-errors outright if you try (`gene requires an at-or-below-species-level taxon`). The only mechanism
-this subcommand has for a genuinely multi-species pull is `--ortholog <taxon|all>`, which accepts
-any taxonomic rank (not just `all`) and returns NCBI's ortholog set for that clade -- one
-representative gene per species, limited to vertebrates and insects:
-
-```bash
-datasets summary gene symbol BRCA1 \
-    --ortholog Mammalia \
-    --as-json-lines \
-  | dataformat tsv gene --fields gene-id,symbol,tax-name,description,chromosomes \
-  > brca1_mammals.tsv
-
-head brca1_mammals.tsv
-```
-
-Verified live (18.37.0): this returns 272 real rows across Mammalia (human, mouse, rat, dog, cow,
-macaque, chimp, opossum, pig, ...). Outside vertebrates/insects, or for a single specific species,
-loop `--taxon <species>` per species instead.
-
-### Find orthologs for a gene
-
-```bash
-datasets summary gene symbol BRCA1 --taxon human --ortholog all --as-json-lines \
-  | dataformat tsv gene --fields gene-id,symbol,tax-name,description \
-  > brca1_orthologs.tsv
-```
-
-`--ortholog` takes a required value (`all`, or one or more taxa) -- a bare `--ortholog` flag is
-consumed as swallowing the next flag's value and fails with a misleading "taxonomy name not exact"
-error. It returns NCBI's ortholog set (a single representative per species; tree-aware orthology
-with multiple co-orthologs is in `ortholog-inference` / Compara / OMA).
-
 ### Filter assemblies by quality and date
 
 ```bash
@@ -260,13 +159,11 @@ import subprocess
 import json
 from pathlib import Path
 
-
 def datasets_summary(subcommand, *args):
     '''Run `datasets summary` and parse JSON-lines stdout.'''
     cmd = ['datasets', 'summary', subcommand, *args, '--as-json-lines']
     out = subprocess.run(cmd, capture_output=True, text=True, check=True)
     return [json.loads(line) for line in out.stdout.strip().split('\n') if line]
-
 
 def datasets_download(subcommand, *args, out='dataset.zip', include=None):
     cmd = ['datasets', 'download', subcommand, *args, '--filename', out]
@@ -274,7 +171,6 @@ def datasets_download(subcommand, *args, out='dataset.zip', include=None):
         cmd += ['--include', ','.join(include)]
     subprocess.run(cmd, check=True)
     return Path(out)
-
 
 genomes = datasets_summary('genome', 'taxon', 'Escherichia coli', '--reference')
 print(f'{len(genomes)} reference E. coli assemblies')
@@ -287,23 +183,6 @@ datasets_download('genome', 'accession', 'GCF_000005845.2',
                   out='ecoli_k12.zip',
                   include=['genome', 'gff3', 'protein'])
 ```
-
-### Virus genomes
-
-**Reference (NCBI Datasets CLI 18.37.0, checked 2026-09-21):**
-```bash
-# Metadata first (RefSeq only), then download; virus uses `genome taxon`, not `accession`
-datasets summary virus genome taxon "Zika virus" --refseq --as-json-lines   | dataformat tsv virus-genome --fields accession,virus-name,length,host-name,release-date
-
-datasets download virus genome taxon "Zika virus" --refseq     --include genome,cds,protein --filename zika.zip --no-progressbar
-unzip -q zika.zip -d zika/    # ncbi_dataset/data/{genomic.fna,cds.fna,protein.faa,data_report.jsonl}
-```
-
-Default package is `genomic.fna` + `data_report.jsonl`; `--include` adds `cds`, `protein` (and
-`annotation`, which yields `annotation_report.jsonl`). Filters: `--refseq`, `--complete-only`,
-`--host`, `--geo-location`, `--released-after`, `--lineage` (SARS-CoV-2 only). Field names come from
-`dataformat tsv virus-genome --help` (`--fields` accepts quoted `*` wildcards). Live run on
-2026-09-21: 2 RefSeq Zika genomes (NC_012532.1, NC_035889.1).
 
 ### Comparison vs E-utilities
 
