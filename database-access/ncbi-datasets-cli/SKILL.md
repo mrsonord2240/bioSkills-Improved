@@ -153,35 +153,12 @@ datasets summary genome taxon "Salmonella enterica" \
 
 ### Python wrapper
 
-**Reference (NCBI Datasets CLI 18.37.0, checked 2026-09-19):**
-```python
-import subprocess
-import json
-from pathlib import Path
+`scripts/datasets_wrapper.py` (checked on NCBI Datasets CLI 18.37.0, 2026-09-19) wraps `datasets summary`
+(JSON-lines parsed into dicts; keys are snake_case, e.g. `assembly_stats.contig_n50`) and
+`datasets download` (returns the zip path). Import `datasets_summary` / `datasets_download`, or run:
 
-def datasets_summary(subcommand, *args):
-    '''Run `datasets summary` and parse JSON-lines stdout.'''
-    cmd = ['datasets', 'summary', subcommand, *args, '--as-json-lines']
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return [json.loads(line) for line in out.stdout.strip().split('\n') if line]
-
-def datasets_download(subcommand, *args, out='dataset.zip', include=None):
-    cmd = ['datasets', 'download', subcommand, *args, '--filename', out]
-    if include:
-        cmd += ['--include', ','.join(include)]
-    subprocess.run(cmd, check=True)
-    return Path(out)
-
-genomes = datasets_summary('genome', 'taxon', 'Escherichia coli', '--reference')
-print(f'{len(genomes)} reference E. coli assemblies')
-for g in genomes[:3]:
-    acc = g.get('accession')
-    n50 = g.get('assembly_stats', {}).get('contig_n50')  # snake_case JSON keys, not camelCase
-    print(f'  {acc}  N50={n50}')
-
-datasets_download('genome', 'accession', 'GCF_000005845.2',
-                  out='ecoli_k12.zip',
-                  include=['genome', 'gff3', 'protein'])
+```bash
+python scripts/datasets_wrapper.py --taxon "Escherichia coli" --accession GCF_000005845.2 --out ecoli_k12.zip --include genome,gff3,protein
 ```
 
 ### Comparison vs E-utilities

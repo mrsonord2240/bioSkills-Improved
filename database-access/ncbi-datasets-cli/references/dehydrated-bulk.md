@@ -51,26 +51,10 @@ PY
 
 **Approach:** `--dehydrated` first for inspection; rehydrate with parallel pull.
 
-**Reference (NCBI Datasets CLI 18.37.0, checked 2026-09-19):**
+`examples/bulk_dehydrated.sh` runs all three steps (checked on NCBI Datasets CLI 18.37.0, 2026-09-21):
+dehydrated discovery, the `fetch.txt` -> aria2c input conversion (path is column 3, `--dir` is
+`ncbi_dataset/`) with an `out=0` sanity check, then the size check and delete-and-rehydrate retry.
+
 ```bash
-#!/bin/bash
-# Step 1: dehydrated discovery
-datasets download genome taxon Bacteria \
-    --reference --annotated --assembly-source RefSeq \
-    --include genome,gff3,protein \
-    --dehydrated --filename bact_refs.zip
-
-unzip -q bact_refs.zip -d bact_refs/
-wc -l bact_refs/ncbi_dataset/fetch.txt   # how many files will be pulled
-
-# Step 2: parallel pull via aria2 (or datasets rehydrate). aria2c input is "<url>\n  out=<path>";
-# the path is fetch.txt column 3 and already starts with data/, so --dir is ncbi_dataset/
-awk -F'\t' '{print $1"\n  out="$3}' bact_refs/ncbi_dataset/fetch.txt > bact_refs/aria2_input.txt
-aria2c --input-file=bact_refs/aria2_input.txt \
-       --dir=bact_refs/ncbi_dataset/ \
-       --max-concurrent-downloads=8 \
-       --retry-wait=5
-
-# Step 3: size-check, delete mismatches, rehydrate -- see Checksum verification, or use
-# examples/bulk_dehydrated.sh, which does all three steps.
+examples/bulk_dehydrated.sh Bacteria bact_refs.zip bact_refs 8    # taxon, zip, dest dir, threads
 ```
