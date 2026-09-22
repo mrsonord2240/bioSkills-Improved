@@ -36,6 +36,8 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 | Hanna 2021 / Cuella-Martin 2021 design and results | `references/published-screens.md` |
 | Post-process CRISPResso2 BE amplicon output with the Broad notebooks | `references/be-validation-pipeline.md` |
 
+Runnable code lives in `scripts/` (each has a header with inputs and a usage line; the reference files above show the invocation): `behive_predict.py`, `find_be_spacers.py`, `filter_by_editing_efficiency.py`, `deconvolute_bystander.py`, `aggregate_variant_scores.py`. `examples/base_editing_analysis.sh` has the CRISPResso2 CLI runs.
+
 ## Base Editor Chemistry Selection
 
 | Editor | Reaction | Editing window | Indel byproduct rate | When to use |
