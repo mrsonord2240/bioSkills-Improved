@@ -62,7 +62,7 @@ Read the file for the method chosen in the decision table; the LIANA consensus, 
 
 | File | Read when |
 |------|-----------|
-| `references/cellphonedb.md` | Permutation specificity p-values and rigorous complex handling (human); includes the Windows `__main__` guard and `debug_seed` / `threads=1` reproducibility settings |
+| `references/cellphonedb.md` | Permutation specificity p-values and rigorous complex handling (human); runs `scripts/cellphonedb_statistical.py` (Windows `__main__` guard, `debug_seed` / `threads=1` reproducibility) |
 | `references/cellchat.md` | Pathway-level probabilities, sender/receiver/mediator roles (R) |
 | `references/nichenet.md` | Which sender ligand explains the receiver's DE response (R) |
 
@@ -153,35 +153,14 @@ sampling noise alone flags pairs. A stratified random split of one PBMC dataset 
 (same cell numbers and composition), repeat the comparison, and report the real gained/lost count against the null
 distribution. Treat pairs that are also gained/lost in >=50% of null splits as noise.
 
-```python
-import numpy as np
-from collections import Counter
-
-def robust_set(ad):
-    li.mt.rank_aggregate(ad, groupby='cell_type', resource_name='consensus',
-                         expr_prop=0.1, use_raw=False, n_perms=1000, verbose=False)
-    res = ad.uns['liana_res']
-    sig = res[(res['specificity_rank'] < 0.05) & (res['magnitude_rank'] < 0.05)]
-    return set(zip(sig['source'], sig['target'], sig['ligand_complex'], sig['receptor_complex']))
-
-def gained_lost(ad):
-    a, b = (robust_set(ad[ad.obs['condition'] == c].copy()) for c in ('control', 'stimulated'))
-    return b - a, a - b
-
-rng = np.random.default_rng(1337)
-n_null, null_counts, pair_freq = 10, [], Counter()
-for _ in range(n_null):
-    null = adata.copy()
-    null.obs['condition'] = null.obs.groupby('cell_type', observed=True)['condition']         .transform(lambda s: rng.permutation(s.values)).values
-    g, l = gained_lost(null)
-    null_counts.append(len(g) + len(l))
-    pair_freq.update(g | l)
-
-print('real gained+lost:', len(gained) + len(lost), '| null median:', np.median(null_counts), 'range:', min(null_counts), max(null_counts))
-noise_prone = {p for p in gained | lost if pair_freq[p] / n_null >= 0.5}
+```bash
+python scripts/condition_stability.py adata.h5ad --cond-a control --cond-b stimulated \
+    --groupby cell_type --condition condition --n-null 10 --out stability.tsv
 ```
 
-A real gained+lost count inside the null range is not evidence of a condition effect. Report only gained/lost pairs outside `noise_prone`.
+`scripts/condition_stability.py` recomputes the real gained/lost set, runs the within-cell-type null splits, prints the real count against the null range, and writes each pair with its null frequency and a `noise_prone` flag. It runs 2 x (1 + n-null) LIANA fits, so allow several minutes.
+
+A real gained+lost count inside the null range is not evidence of a condition effect. Report only gained/lost pairs with `noise_prone` False.
 
 ## Threshold and Permutation Rationale
 
