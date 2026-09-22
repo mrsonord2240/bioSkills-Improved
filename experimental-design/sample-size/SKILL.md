@@ -121,27 +121,13 @@ summary(disp_vec)                                        # use the MEDIAN as a s
 
 **Approach:** `estParam` characterizes the pilot count matrix; `RNAseq.SimOptions.2grp` builds a simulation config from those estimates plus a target fold change; `runSims` simulates each candidate replicate number; `comparePower` reports power/FDR by replicate number.
 
-```r
-library(PROPER)
-set.seed(20260918)
-counts_mat <- as.matrix(pilot_counts)
-oldClass(counts_mat) <- "matrix"        # work around PROPER::estParam's `class(X) %in% c(...)` check,
-                                         # which errors on R >= 4.0's matrix/array dual class (verified PROPER 1.38.0)
-params <- estParam(counts_mat, type = 1)
-sim.opts <- RNAseq.SimOptions.2grp(ngenes = nrow(counts_mat), seqDepth = params$seqDepth,
-                                    lBaselineExpr = params$lmean, lOD = params$lOD,
-                                    p.DE = 0.05, lfc = log2(1.5), sim.seed = 20260918)
-simres <- runSims(Nreps = c(3, 6, 10, 20), nsims = 20, sim.opts = sim.opts, DEmethod = "DESeq2")
-# comparePower counts a DE gene as a target only if abs(lfc) > delta (STRICT). runSims planted every DE gene at
-# exactly lfc = log2(1.5), so delta = log2(1.5) leaves ZERO target genes and power.marginal is all NaN.
-# Put delta just below the planted fold change:
-powres <- comparePower(simres, alpha.type = "fdr", alpha.nominal = 0.05,
-                       stratify.by = "expr", target.by = "lfc", delta = log2(1.5) - 0.01)
-names(powres)                           # 16-field list; there is no `powerAveraged` (`$` on a missing name returns NULL silently)
-powres$Nreps1                           # replicate numbers, same order as the rows below
-rowMeans(powres$power.marginal, na.rm = TRUE)   # power.marginal is Nreps x nsims; this is marginal power per Nreps
-summaryPower(powres)                    # PROPER's own table: nominal vs actual FDR, marginal power, avg TD/FD per Nreps
+Run `scripts/proper_power.R` (args: pilot counts CSV, `reps`, `nsims`, `fc`, `max_genes`, `seed`):
+
+```bash
+r.sh scripts/proper_power.R pilot_counts.csv 3,6,10,20 20 1.5   # estParam -> RNAseq.SimOptions.2grp -> runSims -> comparePower
 ```
+
+The script carries the `oldClass(counts_mat) <- "matrix"` workaround above, sets `delta = log2(fc) - 0.01` (`comparePower` counts a DE gene as a target only if `abs(lfc) > delta`, STRICT, and `runSims` plants every DE gene at exactly `log2(fc)`, so `delta = log2(fc)` leaves ZERO target genes and `power.marginal` is all NaN), and prints `names(powres)` (16 fields; there is no `powerAveraged`, and `$` on a missing name returns NULL silently), `powres$Nreps1`, `rowMeans(powres$power.marginal, na.rm = TRUE)` (`power.marginal` is Nreps x nsims) and `summaryPower(powres)` (PROPER's own table: nominal vs actual FDR, marginal power, avg TD/FD per Nreps).
 
 Read the row where marginal power first reaches 0.80 as the sample size per group; if none does, raise the top `Nreps`. Verified on PROPER 1.38.0 (6v6 synthetic pilot, 2,500 genes, `nsims = 8`): with `delta = log2(1.5) - 0.01` marginal power was 0.006 / 0.060 / 0.22 / 0.61 at n = 3 / 6 / 10 / 20 (actual FDR 0.74 / 0.48 / 0.20 / 0.11), while `delta = log2(1.5)` returned `NaN` for every cell. `power.marginal` can also be `NaN` when `nsims` is very low or a simulation has no true discoveries; raise `nsims` before trusting a cell. Interpret the FDR-aware result as in "When No n Is Reachable".
 
@@ -151,25 +137,15 @@ Read the row where marginal power first reaches 0.80 as the sample size per grou
 
 **Approach:** Aggregate (sum) each donor's cell-level counts per gene into one pseudobulk sample per donor, then size donors exactly like a bulk RNA-seq study — `ssizeRNA_vary`/PROPER on the pseudobulk dispersions. This needs only DESeq2/edgeR + ssizeRNA/PROPER, already installed for the bulk route, and is the fallback when `powsimR` is not installed (see Version Compatibility).
 
-```r
-library(DESeq2); library(ssizeRNA)
-set.seed(20260918)
-# cell_counts: named list, one genes x cells matrix per donor (from the scRNA-seq count matrix, split by donor)
-pseudobulk <- sapply(cell_counts, rowSums)               # genes x donors -- sum, not mean, across cells
-coldata <- data.frame(condition = donor_condition)       # one condition label per donor, aligned to pseudobulk's columns
-dds <- DESeqDataSetFromMatrix(pseudobulk, coldata, ~ condition)
-dds <- DESeq(dds)
-disp_vec <- dispersions(dds); mu_vec <- rowMeans(counts(dds, normalized = TRUE))
-keep <- is.finite(disp_vec) & is.finite(mu_vec) & mu_vec > 0
-disp_vec <- disp_vec[keep]; mu_vec <- mu_vec[keep]
+Run `scripts/pseudobulk_donor_ssize.R` (args: `cell_counts.rds` = named list of one genes x cells matrix per donor, `donor_condition.csv` with columns `donor,condition`, then `fc`, `fdr`, `power`, `maxN`, `seed`):
 
-res <- ssizeRNA_vary(nGenes = length(mu_vec), pi0 = 0.95, mu = mu_vec, disp = disp_vec,
-                     fc = 1.5, fdr = 0.05, power = 0.80, maxN = 200)
-res$ssize[, "ssize"]                                      # minimum DONORS per group -- NOT cells
-# Verified on synthetic 8-donor pilot (donor dispersion 0.35, 150 cells/donor): pseudobulk median
-# dispersion recovered at 0.32; donor count from ssizeRNA_vary = 84 at fc=1.5 (comparable order to
-# the bulk case above -- donors are the same statistical unit as bulk replicates once pseudobulked).
+```bash
+r.sh scripts/pseudobulk_donor_ssize.R cell_counts.rds donor_condition.csv 1.5 0.05 0.80 200   # sum per donor -> DESeq2 dispersions -> ssizeRNA_vary
 ```
+
+It sums (not means) cells per gene per donor, fits DESeq2 on the donor-level pseudobulk, and reports the minimum DONORS per group -- NOT cells.
+
+Verified on synthetic 8-donor pilot (donor dispersion 0.35, 150 cells/donor): pseudobulk median dispersion recovered at 0.32; donor count from `ssizeRNA_vary` = 84 at fc=1.5 (comparable order to the bulk case above -- donors are the same statistical unit as bulk replicates once pseudobulked).
 
 ## When No n Is Reachable
 
