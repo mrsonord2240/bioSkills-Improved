@@ -138,7 +138,7 @@ For Phred-scaled aligners (BWA, minimap2), MAPQ Q maps to ~10^(-Q/10) probabilit
 **There is no universal "drop ambiguous" threshold.** `-q 1` removes only MAPQ 0, which is the multi-mapper value for BWA and minimap2 alone; it leaves Bowtie2 and HISAT2 multi-mappers (MAPQ 1) and STAR multi-mappers (MAPQ 1 and 3) in.
 Where the aligner writes an `NH` tag (STAR, HISAT2), `-e '[NH]==1'` selects uniquely mapped alignments on any MAPQ scale. BWA, Bowtie2 and minimap2 write no `NH`, and the expression then silently returns nothing.
 
-Checked on a 60 kb synthetic genome with planted exact and diverged repeats (BWA 0.7.19, Bowtie2 2.5.5, HISAT2 2.2.3, minimap2 2.31, STAR 2.7.11b): the "drop ambiguous" threshold above removed 400/400 exact-repeat reads for every aligner, whereas `-q 1` kept 399/400 (Bowtie2), 374/400 (HISAT2) and 80/400 (STAR). `-e '[NH]==1'` matched `-q 255` on STAR and removed 400/400 on HISAT2. On a real STAR RNA-seq BAM, MAPQ 255 coincided with `NH==1` for all 5768 records. The pbmm2 row was not run.
+Checked on a 60 kb synthetic genome with planted exact and diverged repeats (BWA 0.7.19, Bowtie2 2.5.5, HISAT2 2.2.3, minimap2 2.31, STAR 2.7.11b): the "drop ambiguous" threshold above removed 400/400 exact-repeat reads for every aligner, whereas `-q 1` kept 399/400 (Bowtie2), 374/400 (HISAT2) and 80/400 (STAR). `-e '[NH]==1'` matched `-q 255` on STAR and removed 400/400 on HISAT2. On a real STAR RNA-seq BAM, MAPQ 255 coincided with `NH==1` for all 5768 records. pbmm2 26.2.99 (`--preset CCS`) on a synthetic reference with a planted 3 kb exact repeat: 5/5 reads drawn from a unique region got MAPQ 60, 4/4 reads drawn from inside the repeat got MAPQ 0.
 
 ## Filter by Region
 
