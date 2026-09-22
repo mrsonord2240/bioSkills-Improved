@@ -35,10 +35,12 @@ Read a file only when the request needs that method; everything every request ne
 |------|-----------|
 | `references/mr-presso.md` | Running MR-PRESSO, extracting outlier SNPs, choosing `NbDistribution` |
 | `references/mvmr-conditional-f.md` | Any multivariable MR or mediation MR; conditional F, `qhet_mvmr` fallback |
-| `references/mrlap-overlap-correction.md` | Sample overlap suspected (UKB-on-UKB) or sumstats-only correction of winner's curse + weak IV |
+| `references/mrlap-overlap-correction.md` | Sample overlap suspected (UKB-on-UKB), or sumstats-only correction of winner's curse + weak IV (includes the winner's curse mechanism and fix) |
 | `references/simex-egger-nome.md` | `I^2_GX < 0.9` and Egger must be reported |
 | `references/bidirectional-steiger.md` | Reverse MR, Steiger filtering or directionality, a Steiger flag that contradicts biology |
 | `references/cis-mr-and-binary-outcomes.md` | Drug-target cis-MR, binary or case-only outcomes, collider bias in stratified MR |
+| `references/cohorts-and-reviewer-pushback.md` | Choosing a biobank/ancestry, or answering a reviewer's overlap/weak-IV/pleiotropy/reverse-causation/InSIDE critique |
+| `references/tool-installation.md` | A package is missing or fails to install; setting up local clumping |
 | `references/bibliography.md` | Citing a method |
 
 ## Statistical Model Taxonomy
@@ -122,11 +124,9 @@ cis-MR restricts instruments to the cis window (+/-500 kb, clump r2 < 0.1, coloc
 
 **Trigger:** Discovery GWAS is the source of both instrument selection and effect-size estimates.
 
-**Mechanism:** SNPs that just cross 5e-8 in discovery have over-estimated effect sizes (regression toward the mean in independent replication); MR uses inflated `beta_X`, biasing causal estimate.
-
 **Symptom:** MR effect shrinks substantially when using effect sizes from an independent replication GWAS.
 
-**Fix:** (1) Three-sample design (discovery / replication-for-instrument-effect / outcome) where feasible. (2) When sumstats-only: MRlap (Mounier 2023), MR-SimSS (sample-splitting from sumstats), or RIVW (Ma 2023 Ann Statist 51:211 -- rerandomized IVW) jointly correct winner's curse + weak IVs + overlap. (3) Jiang 2023 IJE 52:1209 empirical magnitude: variant-level inflation ~50-400% near the genome-wide-significance threshold, dropping to <25% when the minimum P <= 1e-13.
+**Mechanism and fix:** regression toward the mean inflates `beta_X`; three-sample design, sumstats-only corrections (MRlap, MR-SimSS, RIVW) and the Jiang 2023 inflation magnitudes: `references/mrlap-overlap-correction.md`.
 
 ### NOME violation invalidating Egger
 
@@ -257,23 +257,9 @@ Reverse MR with an independent instrument set, `steiger_filtering()` (per SNP) a
 
 **Operational rule for publication:** Primary IVW + concordant Egger (or weighted median if NOME violated) + non-significant MR-PRESSO global test + Steiger correct direction = publication-ready evidence. CAUSE concordance is required when the exposure is polygenic and the prior on CHP is high (e.g. BMI -> outcome, lipids -> outcome). Single-method "significant IVW" claims should be downgraded to exploratory.
 
-## Cohort Gotchas
+## Cohort Gotchas and Anticipated Reviewer Pushback
 
-- UKB GWAS commonly include non-EUR participants; pan-UKB EUR/AFR/EAS/SAS subsets are separate releases. Mixing ancestries inflates instrument strength via population stratification rather than biology.
-- FinnGen DF12 (2024) cohort: Finnish founder effects produce narrower LD blocks and higher winner's curse magnitude than UKB at matched sample size.
-- MVP / GBMI / AoU: multi-ancestry meta-analyses; stratify by ancestry before MR or use ancestry-specific subsets.
-- UKB-on-UKB MR creates one-sample-equivalent bias regardless of "different GWAS file" appearance; use MRlap or move the outcome to an external cohort (FinnGen, BBJ, MVP).
-
-## Anticipated Reviewer Pushback
-
-| Pushback | Standard response |
-|----------|-------------------|
-| "Sample overlap between exposure and outcome GWAS?" | LDSC bivariate intercept reported; MRlap or sample-overlap-corrected IVW applied; document overlap fraction |
-| "Weak instruments (F < 10)?" | F computed from EXPOSURE; per-instrument and mean F reported; MR-RAPS used as sensitivity if mean F borderline |
-| "Horizontal pleiotropy?" | IVW + Egger + weighted median + weighted mode + MR-PRESSO; if rg > 0.3 also CAUSE (see pleiotropy-detection) |
-| "Reverse causation?" | Steiger filter applied; bidirectional MR ran; LCV gcp reported if rg > 0.3 |
-| "Pre-registered?" | OSF protocol filed; STROBE-MR all 20 items reported |
-| "InSIDE assumption?" | INstrument Strength Independent of Direct Effect -- pleiotropic effects alpha uncorrelated with instrument-exposure effects gamma. Tested via Egger intercept + CHP-aware sensitivity (CAUSE) |
+Ancestry mixing in UKB/FinnGen/MVP/GBMI/AoU, UKB-on-UKB one-sample-equivalent bias, and the standard responses to the six usual reviewer pushbacks (overlap, weak instruments, pleiotropy, reverse causation, pre-registration, InSIDE): `references/cohorts-and-reviewer-pushback.md`.
 
 ## Common Errors
 
@@ -293,23 +279,7 @@ Reverse MR with an independent instrument set, `steiger_filtering()` (per SNP) a
 
 ## Tool Installation Notes
 
-```r
-# CRAN-stable
-install.packages(c('remotes', 'MendelianRandomization', 'MVMR', 'coloc', 'simex'))
-
-# GitHub-only or recently archived
-remotes::install_github('MRCIEU/TwoSampleMR')          # primary orchestrator
-remotes::install_github('MRCIEU/ieugwasr')             # OpenGWAS client + local clumping
-remotes::install_github('rondolab/MR-PRESSO')          # never on CRAN
-remotes::install_github('qingyuanzhao/mr.raps')        # CRAN-archived 2025-03-01
-remotes::install_github('jean997/cause')               # depends on mixsqp; suggests Rfast
-remotes::install_github('cnfoley/mrclust')             # heterogeneity clusters
-remotes::install_github('LizaDarrous/lhcMR')           # bidirectional + heritable confounder
-remotes::install_github('HDTian/DRMR')                 # doubly-ranked stratification
-remotes::install_github('n-mounier/MRlap')             # joint overlap + winner's-curse + weak-IV correction
-```
-
-`TwoSampleMR::mr_raps()` is a thin wrapper that calls `mr.raps::mr.raps()` under the hood; the GitHub `mr.raps` install above is therefore required. The `MendelianRandomization` package does NOT export `mr_raps()` (verify with `ls('package:MendelianRandomization')`); only TwoSampleMR offers a MR-RAPS entry point. For local clumping, install plink2 (https://www.cog-genomics.org/plink/2.0/) and download a 1KG EUR (or matched-ancestry) reference bfile (prebuilt at https://mrcieu.github.io/ieugwasr/).
+`install.packages()` and `remotes::install_github()` lines for TwoSampleMR, MendelianRandomization, MVMR, MRPRESSO, mr.raps (CRAN-archived), cause, mrclust, lhcMR, DRMR, MRlap, simex, plus the plink2/1KG local-clumping note: `references/tool-installation.md`.
 
 ## STROBE-MR Reporting
 

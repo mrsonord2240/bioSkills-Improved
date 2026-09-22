@@ -1,6 +1,6 @@
 # MRlap: sample overlap, winner's curse and weak instruments
 
-Read when exposure and outcome GWAS may share samples (UKB-on-UKB, FinnGen-on-FinnGen) or only summary statistics are available. Verbatim from SKILL.md; the overlap decision rule is in "One-Sample vs Two-Sample Bias Direction".
+Read when exposure and outcome GWAS may share samples (UKB-on-UKB, FinnGen-on-FinnGen), only summary statistics are available, or winner's curse is suspected. Verbatim from SKILL.md; the overlap decision rule is in "One-Sample vs Two-Sample Bias Direction". The winner's curse block at the end continues SKILL.md "Winner's curse at P~5e-8" (its heading, trigger and symptom stay there).
 
 ### MRlap: unified correction for sample overlap + winner's curse + weak instruments
 
@@ -23,3 +23,9 @@ fit$LDSC$int_crosstrait                  # cross-trait LDSC intercept; ~0 means 
 ```
 
 **Decision rule -- prefer MRlap when:** (a) any sample overlap is suspected, (b) only sumstats are available (no individual-level data for re-running GWAS on disjoint samples), (c) exposure discovery and outcome were both run inside the same biobank (UKB-on-UKB, FinnGen-on-FinnGen). MRlap returns NA / unstable estimates when h^2 < 0.05; in that regime, fall back to Burgess 2016 overlap-corrected IVW plus MR-RAPS for the weak-IV component.
+
+### Winner's curse at P~5e-8 (Mechanism and Fix, moved from SKILL.md)
+
+**Mechanism:** SNPs that just cross 5e-8 in discovery have over-estimated effect sizes (regression toward the mean in independent replication); MR uses inflated `beta_X`, biasing causal estimate.
+
+**Fix:** (1) Three-sample design (discovery / replication-for-instrument-effect / outcome) where feasible. (2) When sumstats-only: MRlap (Mounier 2023), MR-SimSS (sample-splitting from sumstats), or RIVW (Ma 2023 Ann Statist 51:211 -- rerandomized IVW) jointly correct winner's curse + weak IVs + overlap. (3) Jiang 2023 IJE 52:1209 empirical magnitude: variant-level inflation ~50-400% near the genome-wide-significance threshold, dropping to <25% when the minimum P <= 1e-13.
