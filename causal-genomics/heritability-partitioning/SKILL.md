@@ -75,14 +75,14 @@ Methodology evolves; benchmark consensus shifts. Verify against current Yengo 20
 |----------|-------------|-----|
 | Total h2 from sumstats, EUR GWAS, N > 50k | LDSC h2 | Standard, fast, well-calibrated against EUR reference |
 | Partitioned h2 by functional category | S-LDSC with baseline-LD_v2.2 | Default functional partitioning; LD/MAF-robust |
-| Tissue / cell-type prioritization | S-LDSC --h2-cts with ENCODE/Roadmap or scATAC ldcts | Designed for this; per-tissue Bonferroni-controlled |
-| Two-trait genetic correlation from sumstats, no overlap | HDL (primary) + cross-trait LDSC (secondary) | HDL ~60% lower variance; LDSC robust under any overlap |
-| Two-trait rg with sample overlap > 5% | Cross-trait LDSC | HDL biased by overlap; LDSC intercept absorbs overlap |
+| Tissue / cell-type prioritization | S-LDSC --h2-cts with ENCODE/Roadmap or scATAC ldcts | Designed for this; per-tissue Bonferroni-controlled; workflow, `.ldcts` format in `references/cell-type-prioritization.md` |
+| Two-trait genetic correlation from sumstats, no overlap | HDL (primary) + cross-trait LDSC (secondary) | HDL ~60% lower variance; LDSC robust under any overlap; HDL in `references/hdl-genetic-correlation.md`, LDSC rg in `references/cross-trait-ldsc.md` |
+| Two-trait rg with sample overlap > 5% | Cross-trait LDSC | HDL biased by overlap; LDSC intercept absorbs overlap; how to run and read `gcov_int` in `references/cross-trait-ldsc.md` |
 | Individual-level biobank h2, N > 100k | BOLT-REML | Better precision; multi-component partition |
 | Smaller individual-level cohort, N 5-50k | GCTA-GREML | Gold-standard REML; PCGC if case-control < 20% prevalence |
-| Local heritability and bivariate local rg | HESS | Per-locus resolution; identifies hotspots for follow-up |
+| Local heritability and bivariate local rg | HESS | Per-locus resolution; identifies hotspots for follow-up; pipeline in `references/hess-local-h2.md` |
 | Trans-ancestry rg / cross-population h2 | Popcorn | Designed for trans-ethnic; LD scores per population |
-| Functional enrichment claim depends on model | Report BOTH LDSC and LDAK SumHer | Per Gazal 2019; model-dependence is real |
+| Functional enrichment claim depends on model | Report BOTH LDSC and LDAK SumHer | Per Gazal 2019; model-dependence is real; LDAK pipeline in `references/ldak-sumher.md` |
 | Case-control GWAS with low prevalence | LDSC on liability scale (--samp-prev --pop-prev) | Observed-scale h2 understates liability-scale truth |
 | Single-cell ATAC cell-type prioritization | S-LDSC with per-cluster ATAC peaks as annotations | Cross-reference atac-seq/single-cell-atac for peak generation |
 
@@ -95,8 +95,12 @@ Load only the file for the method in use (each holds the pipeline, install line,
 | LDAK SumHer (`--calc-tagging`, `--sum-hers`) | `references/ldak-sumher.md` |
 | HESS local h2 | `references/hess-local-h2.md` |
 | HDL genetic correlation (R) | `references/hdl-genetic-correlation.md` |
+| Cell-type / tissue prioritization (`--h2-cts`, `.ldcts` manifest, Bonferroni) | `references/cell-type-prioritization.md` |
+| Cross-trait LDSC rg (`--rg`, `gcov_int` under sample overlap) | `references/cross-trait-ldsc.md` |
+| Failure modes: intercept misread, non-EUR LD scores, collinear annotations | `references/ldsc-failure-modes.md` |
+| Runtime and hardware per method | `references/computational-footprint.md` |
 
-LDSC, S-LDSC, cell-type LDSC and cross-trait LDSC stay in this file. BOLT-REML, GCTA-GREML, graphREML and Popcorn carry no pipeline here beyond the taxonomy row, decision tree and install notes.
+Total h2, partitioned S-LDSC and the case-control liability rule stay in this file. BOLT-REML, GCTA-GREML, graphREML and Popcorn carry no pipeline here beyond the taxonomy row, decision tree and install notes.
 
 ## LDSC Intercept Interpretation (Postdoc Nuance)
 
@@ -130,33 +134,6 @@ These give systematically different functional enrichment estimates. Speed 2019 
 
 **Operational rule:** Whenever functional enrichment is the primary claim (e.g. "h2 is enriched in tissue T by N-fold"), report enrichment from BOTH LDSC and LDAK. Flag the model assumption. If LDSC and LDAK disagree by > 2x (e.g. LDSC conserved-region enrichment 25x vs LDAK 10x; both are model-internally consistent and the data alone cannot pick one), treat the claim as model-dependent and cite Gazal 2019. Report LDSC primary + LDAK confirmatory, emphasize directional agreement over magnitude, and never pick the model that gives the desired answer. For non-enrichment claims (total h2, rg between two traits), the model dependence is smaller and LDSC alone is acceptable.
 
-## Cell-Type Prioritization (Finucane 2018)
-
-Finucane 2018 Nat Genet 50:621 introduced cell-type-specific S-LDSC: partition heritability against ENCODE / Roadmap chromatin marks (H3K4me3, H3K27ac, H3K4me1, DNase, ATAC) tissue-by-tissue, retain per-tissue p-value adjusting for the baseline model. Trait-relevant tissue = top-ranked tissue with p < 0.05/N_tissues (Bonferroni for ~200 tissues, threshold ~2.5e-4).
-
-**Goal:** Rank tissues / cell types by their per-annotation contribution to trait heritability.
-
-**Approach:** Build per-cell-type LD scores from chromatin-marker BED files; compile `.ldcts` manifest (one row per cell type: name, ldscore prefix, control ldscore); run `--h2-cts` and interpret per-cell-type coefficient p-value.
-
-```bash
-# Cell-type prioritization example workflow (Finucane 2018)
-# Inputs: trait.sumstats.gz (munged), <cts>.ldcts manifest, baseline annotations,
-#         eur_w_ld weights, 1000G EUR frequency files
-
-ldsc.py \
-    --h2-cts trait.sumstats.gz \
-    --ref-ld-chr 1000G_EUR_Phase3_baseline/baseline. \
-    --ref-ld-chr-cts Multi_tissue_chromatin.ldcts \
-    --w-ld-chr weights_hm3_no_hla/weights. \
-    --out trait_cts
-# trait_cts.cell_type_results.txt: Name, Coefficient, Coefficient_std_error, Coefficient_P_value
-# Apply Bonferroni at 0.05 / nrow; top tissues are trait-relevant
-```
-
-The `.ldcts` manifest is tab-separated, one row per cell type: `<name>\t<ldscore_prefix>,<control_ldscore_prefix>` (the control prefix is optional -- omit the comma if there is none). `--ref-ld-chr-cts` and the baseline `--ref-ld-chr` both need chromosome-split LD score files (e.g. `prefix1.l2.ldscore.gz` ... `prefix22.l2.ldscore.gz`), not a single-file prefix.
-
-Published `.ldcts` files cover GTEx tissues, Roadmap epigenome, immune cell types, and scATAC clusters. Custom .ldcts for novel cell types requires computing per-cell-type LD scores from a chromatin BED via `ldsc.py --l2 --bfile ... --annot <cell>.annot.gz`.
-
 ## Quantitative Thresholds
 
 | Threshold | Source | Rationale |
@@ -173,20 +150,6 @@ Published `.ldcts` files cover GTEx tissues, Roadmap epigenome, immune cell type
 | LDAK tagging file build match | Speed 2019 | hg19 vs hg38 tagging files non-interchangeable |
 | Annotation > 0.5% of genome | Finucane 2015 | Smaller categories underpowered for tau estimation |
 | Effective N > 5000 per population (Popcorn) | Brown 2016 AJHG 99:76 | Below this, trans-ancestry rg has very wide CI |
-
-## Computational Footprint
-
-| Method | Per-trait runtime | Hardware |
-|--------|------------------|----------|
-| LDSC h2 (univariate) | minutes | laptop |
-| Stratified LDSC + baseline-LD | 10-20 min | laptop |
-| LDSC cell-type prioritization (~200 tissues) | hours, single-threaded | server |
-| HESS genome-wide local h2 | hours per chromosome | cluster |
-| BOLT-REML at N = 500k | days | cluster |
-| HDL.rg (genetic correlation) | seconds to minutes | laptop |
-| LDAK SumHer | tens of minutes | laptop |
-
-graphREML on biobank-scale (N > 200k) typically beats S-LDSC per-trait runtime when an LDGM panel is available. Build runtime escalates with annotation count; cell-type prioritization with ~200 tissues is the most expensive per-trait step.
 
 ## LDSC Standard Workflow
 
@@ -224,56 +187,9 @@ ldsc.py \
 
 Ancestry-matched LD scores (EAS, AFR, AMR) are available at alkesgroup.broadinstitute.org/LDSCORE; do NOT apply EUR LD scores to non-EUR GWAS.
 
-## Cross-Trait LDSC for Genetic Correlation
-
-**Goal:** Estimate genetic correlation `rg` between two traits with calibrated handling of sample overlap.
-
-**Approach:** Munge both sumstats with identical SNP list -> run --rg with two munged files; the bivariate intercept absorbs sample overlap and the rg estimate remains unbiased.
-
-```bash
-ldsc.py \
-    --rg trait1.sumstats.gz,trait2.sumstats.gz \
-    --ref-ld-chr eur_w_ld_chr/ \
-    --w-ld-chr eur_w_ld_chr/ \
-    --out rg
-# Output: rg, se, p, gcov_int (cross-trait intercept), h2_obs, h2_int per trait
-```
-
-The cross-trait intercept (`gcov_int`) is the LDSC analog of sample-overlap z-score correlation; non-zero indicates sample overlap or cryptic shared structure. LDSC rg is unbiased even with sample overlap because the bivariate intercept absorbs it. HDL is more precise but requires non-overlapping samples.
-
-Non-zero `gcov_int` under known sample overlap is the **correct** behavior, NOT pathology. The rg estimate remains unbiased; the intercept is the overlap absorber, doing its job. Pre-empt the reviewer comment "gcov_int = 0.05 with a shared cohort is expected, not confounding evidence" by reporting `gcov_int` alongside rg and explaining the absorber role.
-
 ## Per-Method Failure Modes
 
-### LDSC intercept misinterpretation
-
-**Trigger:** Reporting intercept ~1.05 as "evidence of confounding".
-
-**Mechanism:** Intercept absorbs mean chi-square inflation from any non-polygenic source PLUS some polygenic contribution at very high N. In isolation, intercept above 1 does not imply confounding.
-
-**Symptom:** Methods section claims population stratification based solely on intercept value; reviewers flag the omission of ratio statistic.
-
-**Fix:** Always report intercept, mean chi-square, ratio = (intercept - 1) / (mean_chi2 - 1), and h2 jointly. Interpret ratio < 0.2 as "mostly polygenic, h2 trustworthy"; ratio > 0.3 as "investigate population structure / overlap before claiming h2".
-
-### LDSC with non-EUR ancestry and EUR LD scores
-
-**Trigger:** Applying default EUR LD scores from `alkesgroup.broadinstitute.org/LDSCORE/eur_w_ld_chr/` to an EAS, AFR, or AMR GWAS.
-
-**Mechanism:** LD-score regression assumes the LD-score covariate matches the GWAS population's LD structure. Cross-ancestry application produces biased h2 (typically underestimates) and inflated intercept.
-
-**Symptom:** h2 estimate < 0.05 despite trait being known-heritable from twin / family studies; intercept > 1.2 with non-polygenic mean chi-square; ratio > 0.5.
-
-**Fix:** Use ancestry-matched LD scores (EAS, AFR, AMR available at the same Alkes group URL). If multi-ancestry meta-analysis, use Popcorn or trans-ancestry MAMA framework rather than LDSC on the combined sumstats.
-
-### Stratified LDSC with collinear annotations
-
-**Trigger:** Adding a custom annotation that overlaps heavily with an existing baseline category (e.g. "active promoter" against "promoter").
-
-**Mechanism:** Per-annotation tau coefficients are estimated jointly via multivariable regression; collinearity inflates per-tau SE and can flip the sign of marginal effect.
-
-**Symptom:** Custom annotation tau has very large SE, p-value > 0.5; baseline categories that were significant become non-significant.
-
-**Fix:** Test annotations marginal to the baseline by including baseline-LD_v2.2 plus the new annotation only; never test multiple highly correlated annotations jointly; report VIF of annotation matrix; use the joint enrichment of {baseline + new} category not per-tau.
+LDSC intercept misinterpretation, non-EUR ancestry with EUR LD scores and collinear annotations: read `references/ldsc-failure-modes.md`.
 
 ### Case-control LDSC observed vs liability scale
 
