@@ -93,16 +93,24 @@ nrow(chromPeaks(xdata))
 
 **Goal:** Remove cross-run RT drift so the same compound lands at the same RT in every sample.
 
-**Approach:** Choose obiwarp (no prior peaks) or peakGroups (anchor-based); align to a pooled QC, never to file #1 (an outlier's idiosyncrasy propagates into every warp). Inspect `plotAdjustedRtime` and a few EICs: alignment can look perfect in QCs while corrupting rare features. Regroup afterward because RTs changed. `PeakGroupsParam`'s `minFraction` sets the fraction of anchor samples a peak group must appear in to count as a universal anchor; with a small anchor subset a high `minFraction` leaves too few peak groups and `adjustRtime` fails - sometimes with the informative "Not enough peak groups even for linear smoothing available!", sometimes with a cryptic low-level error ("attempt to set 'colnames' on an object with less than two dimensions") at an even smaller effective anchor count. Start from `minFraction = 0.5` and raise it only after confirming enough peak groups survive at the target value; treat either error as "raise the anchor count or lower minFraction," not a code bug.
+**Approach:** Choose obiwarp (no prior peaks) or peakGroups (anchor-based). When at least two pooled QCs are available, estimate the alignment from their indices with `subset =` and `subsetAdjust = 'average'`; this avoids letting file #1 (possibly an outlier) determine every warp. Without QCs, obiwarp aligns the full cohort instead. Inspect `plotAdjustedRtime` and a few EICs: alignment can look perfect in QCs while corrupting rare features. Regroup afterward because RTs changed. `PeakGroupsParam`'s `minFraction` sets the fraction of anchor samples a peak group must appear in to count as a universal anchor; with a small anchor subset a high `minFraction` leaves too few peak groups and `adjustRtime` fails - sometimes with the informative "Not enough peak groups even for linear smoothing available!", sometimes with a cryptic low-level error ("attempt to set 'colnames' on an object with less than two dimensions") at an even smaller effective anchor count. Start from `minFraction = 0.5` and raise it only after confirming enough peak groups survive at the target value; treat either error as "raise the anchor count or lower minFraction," not a code bug.
 
 ```r
 # obiwarp: full-profile warping. binSize here is the m/z profile bin (default 1),
-# distinct from PeakDensityParam$binSize and MatchedFilterParam$binSize.
-xdata <- adjustRtime(xdata, param = ObiwarpParam(binSize = 0.6))
+# distinct from PeakDensityParam$binSize and MatchedFilterParam$binSize. With >=2
+# pooled QCs, calculate warps from those injections and interpolate between them.
+qc_idx <- which(sampleData(xdata)$sample_type == 'QC')
+obip <- ObiwarpParam(binSize = 0.6)
+if (length(qc_idx) >= 2) {
+    obip <- ObiwarpParam(binSize = 0.6, subset = qc_idx, subsetAdjust = 'average')
+}
+xdata <- adjustRtime(xdata, param = obip)
 
 # peakGroups alternative needs an initial correspondence and good universal anchors.
 # minFraction = 0.85 needs many anchors; with a small QC subset (e.g. <10 samples) start
 # at 0.5 and raise only after confirming enough peak groups survive - see note above.
+# pdp_anchor <- PeakDensityParam(sampleGroups = sampleData(xdata)$sample_group,
+#     bw = 5, minFraction = 0.5, minSamples = 1, binSize = 0.025)
 # xdata <- groupChromPeaks(xdata, param = pdp_anchor)
 # xdata <- adjustRtime(xdata, param = PeakGroupsParam(minFraction = 0.5, span = 0.4,
 #     subset = which(sampleData(xdata)$sample_type == 'QC'), subsetAdjust = 'average'))
