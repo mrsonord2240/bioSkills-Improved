@@ -36,44 +36,35 @@ print(tab, row.names = FALSE, digits = 4)   # per-replicate means over n_rep dra
 # ---------------------------------------------------------------------------
 # 2. q-value: estimate pi0 (true-null proportion) for more power; local FDR per feature
 # ---------------------------------------------------------------------------
-if (requireNamespace('qvalue', quietly = TRUE)) {
-  library(qvalue)
-  qobj <- qvalue(pvalues)
+# Do not load qvalue in this process: requireNamespace('qvalue') can crash this Windows R
+# session during teardown. The isolated helper records qvalue's output before its worker exits.
+source('scripts/qvalue_safe.R')
+qres <- qvalue_safe(pvalues)
+if (identical(qres$method, 'qvalue')) {
   cat(sprintf('\nq-value: pi0 = %.3f, discoveries at q<0.05 = %d\n',
-              qobj$pi0, sum(qobj$qvalues < 0.05)))
-  # qobj$lfdr is the local FDR: posterior P(null | statistic) for EACH feature.
+              qres$pi0, qres$discoveries))
+} else {
+  cat(sprintf('\nq-value did not produce output; %s = %d discoveries\n',
+              qres$method, qres$discoveries))
 }
 
 # ---------------------------------------------------------------------------
 # 3. IHW: weight hypotheses by an independent covariate (must be null-independent)
 # ---------------------------------------------------------------------------
 if (requireNamespace('IHW', quietly = TRUE)) {
-  # nbins pinned low: default "auto" (floor(m/1500)) has been observed to crash the R session
-  # outright (SIGSEGV) on IHW's lpsymphony LP backend for m >= ~8000; pinning nbins reduces but does
-  # NOT eliminate the crash risk (see SKILL.md's IHW failure mode). Because it is a process crash, not
-  # an R-level error, tryCatch cannot help -- run it in a child process instead, so a segfault only
-  # kills the child and this script can retry.
+  # The IHW solver can SIGSEGV in a child R process. Reuse the tested wrapper rather than
+  # maintaining a second process-management implementation in this example.
+  source('scripts/ihw_safe.R')
   mean_expr <- rgamma(n_genes, shape = 2, rate = 0.5)        # covariate independent of null p
-  ihw_in  <- tempfile(fileext = '.rds')
-  ihw_out <- tempfile(fileext = '.rds')
-  saveRDS(list(pvalues = pvalues, mean_expr = mean_expr), ihw_in)
-  ihw_expr <- sprintf(
-    "d <- readRDS('%s'); library(IHW); r <- ihw(d$pvalues, d$mean_expr, alpha = 0.05, nbins = 5); saveRDS(rejections(r), '%s')",
-    gsub('\\\\', '/', ihw_in), gsub('\\\\', '/', ihw_out))
-  ihw_ok <- FALSE
-  for (attempt in 1:3) {
-    status <- system2(file.path(R.home('bin'), 'Rscript'), c('-e', shQuote(ihw_expr)),
-                       stdout = FALSE, stderr = FALSE)
-    if (identical(status, 0L) && file.exists(ihw_out)) { ihw_ok <- TRUE; break }
-  }
+  ihw_res <- ihw_safe(pvalues, mean_expr, alpha = 0.05)
   bh_discoveries <- sum(p.adjust(pvalues, 'BH') < 0.05)
-  if (ihw_ok) {
-    cat(sprintf('IHW discoveries at FDR 0.05 = %d (vs BH = %d)\n', readRDS(ihw_out), bh_discoveries))
+  if (identical(ihw_res$method, 'IHW')) {
+    cat(sprintf('IHW discoveries at FDR 0.05 = %d (vs BH = %d; attempt %d)\n',
+                sum(ihw_res$padj < 0.05), bh_discoveries, ihw_res$attempts))
   } else {
-    cat(sprintf('IHW did not complete after 3 attempts (solver crash); falling back to BH = %d discoveries\n',
-                bh_discoveries))
+    cat(sprintf('IHW did not complete after %d attempts (solver crash); falling back to BH = %d discoveries\n',
+                ihw_res$attempts, bh_discoveries))
   }
-  unlink(c(ihw_in, ihw_out))
 }
 
 # ---------------------------------------------------------------------------
