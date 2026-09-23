@@ -76,7 +76,7 @@ Everything above assumes **public** SRA data. SRA also hosts **dbGaP-controlled*
 | PRJNA / PRJEB / PRJDB | BioProject | Top-level project ID |
 | SAMN / SAMEA / SAMD | BioSample | Biological sample (cross-archive) |
 
-Conversion is via SRA metadata: `pysradb metadata <ID>` or `efetch -db sra -id <UID> -rettype runinfo`.
+Conversion is via SRA metadata: `pysradb metadata <ID>` or `efetch -db sra -id <UID> -format runinfo`.
 
 The actual download unit is SRR/ERR/DRR (runs). The BioProject (PRJNA...) is the convenient top-level handle for "pull all data for paper X".
 
@@ -201,7 +201,7 @@ For cloud-native analysis pipelines (Nextflow on AWS Batch, Cromwell, etc.), STR
 
 ### prefetch + fasterq-dump (SRA toolkit, classic)
 
-`bash examples/download_single.sh <SRR> [out_dir] [threads] [max_size]` -- prefetch with explicit `--max-size`, `vdb-validate`, `fasterq-dump --split-files`, then pigz/gzip. It passes `--skip-technical`; drop that flag for 10x or other single-cell data.
+`bash examples/download_single.sh <SRR> [out_dir] [threads] [max_size]` -- prefetch with explicit `--max-size`, `vdb-validate`, `fasterq-dump --split-files`, then pigz/gzip. It passes `--skip-technical`; drop that flag for 10x or other single-cell data. If the current SRA Toolkit cannot complete a public run (including an unresolved normalized-reference dependency), the script keeps partial toolkit output staged and safely retries the MD5-verified ENA mirror route. The ENA helper respects the controlled-access guard: an accession without public ENA FASTQ fields produces no files and exits nonzero.
 
 ### Batch via pysradb metadata
 
@@ -213,7 +213,7 @@ For cloud-native analysis pipelines (Nextflow on AWS Batch, Cromwell, etc.), STR
 
 ### Cloud (STRIDES) and 10x single-cell
 
-`bash examples/prefetch_large.sh <SRR> [out_dir] [threads] [yes|no]` -- checks the AWS Open Data bucket (run from EC2 in us-east-1 for zero egress), falls back to `prefetch --max-size 200G`, validates, runs `fasterq-dump --split-files`, compresses, and cleans up. Pass `yes` as the 4th argument for 10x records: it swaps `--skip-technical` for `--include-technical` (10x v3 expects R1 28-bp barcode+UMI, R2 cDNA, I1 sample index).
+`bash examples/prefetch_large.sh <SRR> [out_dir] [threads] [yes|no]` -- checks the AWS Open Data bucket (run from EC2 in us-east-1 for zero egress), falls back to `prefetch --max-size 200G`, validates, runs `fasterq-dump --split-files`, compresses, and cleans up. If neither Toolkit/STRIDES path completes for a public run, it safely retries the MD5-verified ENA mirror route with staged output. Pass `yes` as the 4th argument for 10x records: it swaps `--skip-technical` for `--include-technical` (10x v3 expects R1 28-bp barcode+UMI, R2 cDNA, I1 sample index).
 
 ## Common errors
 
