@@ -12,7 +12,7 @@ import argparse
 
 import pandas as pd
 
-DECOY_PREFIXES = ('decoy_', 'rev_', 'xxx_')   # compared lower-cased: DECOY_, REV_ / REV__ (MaxQuant), rev_ (Sage, FragPipe), XXX_
+DECOY_PREFIXES = ('decoy_', 'rev_', 'xxx_')   # compared lower-cased: DECOY_, rev_ (Sage), XXX_
 
 ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
 ap.add_argument('table')

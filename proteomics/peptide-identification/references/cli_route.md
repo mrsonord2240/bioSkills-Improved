@@ -1,6 +1,6 @@
 # Command-line DDA route and rescoring
 
-Read when running Sage, Comet or MS-GF+ from the command line, rescoring the `.pin` with Percolator or mokapot, or pooling runs. Decoy tags and the database build stay in `SKILL.md`; `examples/dda_search.sh` runs this route end to end.
+Read when running Sage, Comet or MS-GF+ from the command line, rescoring the `.pin` with Percolator, or pooling runs. Decoy tags and the database build stay in `SKILL.md`; `examples/dda_search.sh` runs this route end to end.
 
 ### Run a DDA Search from the Command Line
 
@@ -55,12 +55,4 @@ awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "q-value") q = i; next
             q && $q <= 0.01' psms.target.tsv > psms_1pct.tsv
 ```
 
-mokapot takes the identical pin and is the Python alternative (0.10.0; see the pandas/numpy row in Common Errors). It reads the `Label` column and writes target PSMs only, with the q-value in `mokapot q-value` -- again read it by name:
-
-```bash
-mokapot --dest_dir mokapot_out --file_root sage results.sage.pin     # -> sage.mokapot.psms.txt, sage.mokapot.peptides.txt
-awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "mokapot q-value") q = i; next }
-            q && $q <= 0.01' mokapot_out/sage.mokapot.psms.txt > psms_1pct.tsv
-```
-
-Rescoring pays where the engine's own score is weakest. On one Orbitrap Astral 5-min DDA run (250 pg HYE load, 6,135 MS2 spectra, 31,437-protein database, PXD070049), Comet's raw `-log10(e-value)` gave **916** PSMs at 1% FDR and Percolator lifted the same search to **1,144** (+25%); Sage's `sage_discriminant_score` is already a learned score, so Percolator moved it from **1,406** to **1,398** (-0.6%) -- no gain to be had. Sage 0.14.6 wins this input outright; Comet 2026.02 with Percolator lands 19% behind it, and MS-GF+ v2024.03.26 read straight off `-log10(SpecEValue)` with no rescoring gives **656**, because a calibrated E-value buys cross-instrument comparability, not raw yield. **Do not generalise these counts**: one run, one low-load short-gradient method, each engine at its own idiomatic high-res settings. Rescoring also needs training data -- pooling the three DDA runs (6,864 PSMs) gave Percolator 5,006 PSMs against Sage's own 4,961, while on a single run of 1,939 PSMs it had too few positives to improve anything. mokapot on the same Sage pins gave 1,406 on the single run and 4,970 on the pooled three (Percolator 5,006). To pool, give the engine every run (Sage takes several mzML in one call; for Comet concatenate the runs' pins with the header kept once) and rescore once.
+Rescoring pays where the engine's own score is weakest. On one Orbitrap Astral 5-min DDA run (250 pg HYE load, 6,135 MS2 spectra, 31,437-protein database, PXD070049), Comet's raw `-log10(e-value)` gave **916** PSMs at 1% FDR and Percolator lifted the same search to **1,144** (+25%); Sage's `sage_discriminant_score` is already a learned score, so Percolator moved it from **1,406** to **1,398** (-0.6%) -- no gain to be had. Sage 0.14.6 wins this input outright; Comet 2026.02 with Percolator lands 19% behind it, and MS-GF+ v2024.03.26 read straight off `-log10(SpecEValue)` with no rescoring gives **656**, because a calibrated E-value buys cross-instrument comparability, not raw yield. **Do not generalise these counts**: one run, one low-load short-gradient method, each engine at its own idiomatic high-res settings. Rescoring also needs training data -- pooling the three DDA runs (6,864 PSMs) gave Percolator 5,006 PSMs against Sage's own 4,961, while on a single run of 1,939 PSMs it had too few positives to improve anything. To pool, give the engine every run (Sage takes several mzML in one call; for Comet concatenate the runs' pins with the header kept once) and rescore once.

@@ -6,7 +6,7 @@ Read when you hold a PSM table from any engine (concatenated search) or separate
 
 **Goal:** Compute q-values from any engine's PSM table when the search was a single concatenated target-decoy search.
 
-**Approach:** Keep the best hit per spectrum, rank by score, walk down accumulating target and decoy counts, FDR = (decoys + 1)/targets, then take the running minimum from the bottom to get monotone q-values. `score` must be higher-is-better, and the decoy prefix must match the engine's (Sage and FragPipe write lowercase `rev_`); a table with no recognised decoys must stop, not pass every PSM. This form is correct ONLY for concatenated competition; separate searches need pi0 * decoys/targets (Kall et al. 2008; pi0 = 1 is the conservative default) or the mix-max estimator (Keich, Kertesz-Farkas & Noble 2015; Percolator's default for separate-search input).
+**Approach:** Keep the best hit per spectrum, rank by score, walk down accumulating target and decoy counts, FDR = (decoys + 1)/targets, then take the running minimum from the bottom to get monotone q-values. `score` must be higher-is-better, and the decoy prefix must match the engine's (Sage writes lowercase `rev_`); a table with no recognised decoys must stop, not pass every PSM. This form is correct ONLY for concatenated competition; separate searches need pi0 * decoys/targets (Kall et al. 2008; pi0 = 1 is the conservative default) or the mix-max estimator (Keich, Kertesz-Farkas & Noble 2015; Percolator's default for separate-search input).
 
 ```bash
 python scripts/table_fdr.py search_results.tsv --scan scan --score score --protein protein --out psms_1pct.tsv

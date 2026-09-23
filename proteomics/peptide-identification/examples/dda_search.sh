@@ -29,8 +29,8 @@ mkdir -p "$OUT"
 
 # 1. Target+decoy database. Decoys are made at the PROTEIN level and reversed
 #    with the peptide N/C termini held fixed, so decoy peptides obey the same
-#    tryptic rules as the targets. Sage and MSFragger generate their own decoys
-#    instead; Comet, MS-GF+ and X!Tandem need this file.
+#    tryptic rules as the targets. Sage generates its own decoys instead;
+#    Comet and MS-GF+ need this file.
 TDDB="$OUT/target_decoy.fasta"
 if [ ! -s "$TDDB" ]; then
   "$DECOYDB" -in "$FASTA" -out "$TDDB" \
@@ -43,6 +43,17 @@ case "$ENGINE" in
 sage)
   # 2a. Sage generates its own decoys, so it takes the TARGET-ONLY FASTA and
   #     tags decoys 'rev_' (lower case -- see the decoy-prefix trap in SKILL.md).
+  # Sage is a native Windows binary in this checked route.  Git Bash does not
+  # translate paths embedded in JSON, so convert those paths explicitly; its
+  # normal argument conversion still handles the executable invocation.
+  SAGE_FASTA="$FASTA"
+  SAGE_OUT="$OUT/sage"
+  SAGE_MZMLS=("${MZMLS[@]}")
+  if command -v cygpath >/dev/null 2>&1; then
+    SAGE_FASTA="$(cygpath -m "$FASTA")"
+    SAGE_OUT="$(cygpath -m "$OUT/sage")"
+    for i in "${!SAGE_MZMLS[@]}"; do SAGE_MZMLS[$i]="$(cygpath -m "${SAGE_MZMLS[$i]}")"; done
+  fi
   cat > "$OUT/sage.json" <<JSON
 {
   "database": {
@@ -52,7 +63,7 @@ sage)
     "max_variable_mods": 2,
     "decoy_tag": "rev_",
     "generate_decoys": true,
-    "fasta": "$FASTA"
+    "fasta": "$SAGE_FASTA"
   },
   "precursor_tol": { "ppm": [-10, 10] },
   "fragment_tol": { "ppm": [-20, 20] },
@@ -60,10 +71,10 @@ sage)
   "deisotope": true,
   "predict_rt": true,
   "report_psms": 1,
-  "output_directory": "$OUT/sage"
+  "output_directory": "$SAGE_OUT"
 }
 JSON
-  "$SAGE" "$OUT/sage.json" "${MZMLS[@]}" --write-pin      # all runs -> one pin
+  "$SAGE" "$OUT/sage.json" "${SAGE_MZMLS[@]}" --write-pin  # all runs -> one pin
   PIN="$OUT/sage/results.sage.pin"
   ;;
 comet)
@@ -71,8 +82,19 @@ comet)
   #     because the decoys are already in the database; decoy_prefix must match
   #     DecoyDatabase's -decoy_string. Fragment binning 0.02 / offset 0.0 is the
   #     high-res HCD setting; 1.0005 / 0.4 is the ion-trap setting.
+  # Like Sage, Comet reads the database and output stem from text rather than
+  # shell arguments.  Convert embedded paths under Git Bash so the native
+  # executable does not receive a literal /f/... path.
+  COMET_TDDB="$TDDB"
+  COMET_OUT="$OUT"
+  COMET_MZMLS=("${MZMLS[@]}")
+  if command -v cygpath >/dev/null 2>&1; then
+    COMET_TDDB="$(cygpath -m "$TDDB")"
+    COMET_OUT="$(cygpath -m "$OUT")"
+    for i in "${!COMET_MZMLS[@]}"; do COMET_MZMLS[$i]="$(cygpath -m "${COMET_MZMLS[$i]}")"; done
+  fi
   "$COMET" -p >/dev/null                       # writes comet.params.new
-  sed -e "s|^database_name = .*|database_name = $TDDB|" \
+  sed -e "s|^database_name = .*|database_name = $COMET_TDDB|" \
       -e 's|^decoy_search = .*|decoy_search = 0|' \
       -e 's|^decoy_prefix = .*|decoy_prefix = DECOY_|' \
       -e 's|^peptide_mass_tolerance_upper = .*|peptide_mass_tolerance_upper = 10.0|' \
@@ -94,9 +116,9 @@ comet)
   # the header kept once, so Percolator trains on all runs together.
   RUN_PINS=()
   n=0
-  for f in "${MZMLS[@]}"; do
+  for f in "${COMET_MZMLS[@]}"; do
     n=$((n + 1))
-    "$COMET" -P"$OUT/comet.params" -N"$OUT/comet_run$n" "$f"
+    "$COMET" -P"$OUT/comet.params" -N"$COMET_OUT/comet_run$n" "$f"
     RUN_PINS+=("$OUT/comet_run$n.pin")
   done
   PIN="$OUT/comet.pin"

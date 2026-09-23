@@ -10,7 +10,6 @@ Tell your AI agent what you want to do:
 - "Search this mzML with Sage and rescore the pin with Percolator to a 1% PSM list"
 - "Configure trypsin with 2 missed cleavages, 10 ppm precursor and 0.02 Da fragment tolerance"
 - "Annotate decoys and filter PSMs to 1% FDR with a proper q-value"
-- "Rescore my Sage results with mokapot to gain IDs at the same FDR"
 - "Explain why my PEP <= 0.01 cutoff kept so many fewer peptides than q <= 0.01"
 
 ## Example Prompts
@@ -18,7 +17,7 @@ Tell your AI agent what you want to do:
 ### Database Search Setup
 > "Configure a database search with trypsin, 2 missed cleavages, carbamidomethyl C fixed and oxidation M variable"
 
-> "Set up an MSFragger open search from -150 to +500 Da to discover unknown modifications"
+> "Route an open-search request for unknown modifications to ptm-analysis"
 
 ### Running Searches
 > "Run a peptide search against a concatenated target-decoy human FASTA with pyOpenMS"
@@ -33,8 +32,6 @@ Tell your AI agent what you want to do:
 > "Rescore the search with Percolator and report the ID gain at q <= 0.01"
 
 ### Results Processing
-> "Read the mzIdentML output in R and filter to 1% FDR"
-
 > "Explain the difference between PEP and q-value for these PSMs"
 
 ## Related Skills
