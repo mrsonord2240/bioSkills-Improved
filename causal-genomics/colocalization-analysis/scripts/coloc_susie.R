@@ -39,10 +39,13 @@ stop_if_excluded_region(chr = gwas_df$CHR[1], pos_bp = gwas_df$POS[lead])
 stopifnot(identical(rownames(ld_matrix), gwas_df$SNP), identical(colnames(ld_matrix), gwas_df$SNP),
           identical(gwas_df$SNP, eqtl_df$SNP))
 
-# Diagnostic: z-score vs LD consistency MUST be checked
+# Diagnostic: z-score vs LD consistency MUST be checked independently for each trait.
 z_gwas <- gwas_df$BETA / gwas_df$SE
 lam_gwas <- susieR::estimate_s_rss(z=z_gwas, R=ld_matrix, n=gwas_n)
 if (lam_gwas > num(opt$`lambda-max`)) stop('LD reference mismatched to z-scores; lambda=', lam_gwas)
+z_eqtl <- eqtl_df$BETA / eqtl_df$SE
+lam_eqtl <- susieR::estimate_s_rss(z=z_eqtl, R=ld_matrix, n=num(opt$`eqtl-n`))
+if (lam_eqtl > num(opt$`lambda-max`)) stop('LD reference mismatched to eQTL z-scores; lambda=', lam_eqtl)
 
 dataset <- function(df, pfx) {
   d <- list(beta = df$BETA, varbeta = df$SE^2, snp = df$SNP, position = df$POS,

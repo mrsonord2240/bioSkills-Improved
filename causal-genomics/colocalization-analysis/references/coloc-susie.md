@@ -37,7 +37,7 @@ dimnames(R) <- list(snp_ids, snp_ids)
 Rscript scripts/coloc_susie.R gwas.tsv eqtl.tsv ld.tsv --gwas-type cc --gwas-s 0.3 --gwas-n 50000     --eqtl-type quant --eqtl-sdy 1 --eqtl-n 500 --L 10 --out coloc_susie_out
 ```
 
-`scripts/coloc_susie.R` runs the MHC / chr 8 gate (`scripts/flag_excluded_region.R`), checks SNP order across the two tables and the LD matrix, stops if `estimate_s_rss` lambda > 0.05 (`--lambda-max`), runs `runsusie` on each trait with the same LD, then `coloc.susie`; each row of the result is one (hit1, hit2) credible-set pair. `ld.tsv` is the signed r matrix with SNP ids as first column and header.
+`scripts/coloc_susie.R` runs the MHC / chr 8 gate (`scripts/flag_excluded_region.R`), checks SNP order across the two tables and the LD matrix, independently checks GWAS and eQTL `estimate_s_rss` lambda values against `--lambda-max` (default 0.05), runs `runsusie` on each trait with the same LD, then `coloc.susie`; each row of the result is one (hit1, hit2) credible-set pair. `ld.tsv` is the signed r matrix with SNP ids as first column and header.
 
 LD matrix MUST be in the same SNP order as the beta vector; mis-ordering silently produces nonsense.
 
