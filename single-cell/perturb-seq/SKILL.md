@@ -26,8 +26,19 @@ pip install pydeseq2 decoupler             # pseudobulk DE
 ```
 
 ```r
-install.packages('remotes')
-remotes::install_github('Katsevich-Lab/sceptre')   # conditional-resampling test; GitHub only (see caveat below)
+# Keep SCEPTRE out of the shared analysis library. In a fresh R session set
+# SCEPTRE_R_LIB to a new, writable directory, then run this pinned install.
+sceptre_lib <- Sys.getenv('SCEPTRE_R_LIB')
+stopifnot(nzchar(sceptre_lib))
+dir.create(sceptre_lib, recursive = TRUE, showWarnings = FALSE)
+.libPaths(c(sceptre_lib, .libPaths()))
+if (!requireNamespace('remotes', quietly = TRUE)) {
+  install.packages('remotes', lib = sceptre_lib, repos = 'https://cloud.r-project.org')
+}
+remotes::install_github('Katsevich-Lab/sceptre@21f9ea098b69c444a884a49bc254de711968e3b5',
+                        lib = sceptre_lib, dependencies = NA, upgrade = 'never')
+stopifnot(requireNamespace('sceptre', quietly = TRUE),
+          as.character(packageVersion('sceptre')) == '0.99.0')
 install.packages('Seurat')                 # Mixscape (Seurat v5)
 ```
 
@@ -39,10 +50,13 @@ install.packages('Seurat')                 # Mixscape (Seurat v5)
   (positional `assignment_threshold` is required, and it writes a binary cell x guide layer,
   not a single obs column like the mixture model's `assigned_guides_key` does).
 - `sceptre` is **GitHub-only** (`Katsevich-Lab/sceptre`; its `DESCRIPTION` says `R (>= 4.1)`, checked
-  2026-09-21). It is not on CRAN (404) or Bioconductor, so `install.packages('sceptre')` /
-  `BiocManager::install('sceptre')` cannot find it and exits 0 having installed nothing. Check
+  2026-09-23). It is not on CRAN (404) or Bioconductor, so `install.packages('sceptre')` /
+  `BiocManager::install('sceptre')` cannot find it and exits 0 having installed nothing. The install
+  above pins commit `21f9ea098b69c444a884a49bc254de711968e3b5` (package 0.99.0) and installs only into
+  `SCEPTRE_R_LIB`; it never upgrades or writes to the shared analysis library. Check
   `packageVersion('sceptre')` after installing, never the exit code. The GitHub install compiles C++
-  (needs Rtools on Windows).
+  (needs Rtools on Windows). Run `examples/sceptre_calibration_discovery.R` after installation; it uses
+  SCEPTRE's bundled low-MOI data and proves calibration before discovery.
 
 # Perturb-seq Analysis
 
@@ -183,11 +197,14 @@ Install from GitHub (see Prerequisites); it is not on CRAN.
 library(sceptre)
 
 obj <- import_data(response_matrix = rna_counts, grna_matrix = grna_counts,
-                   grna_target_data_frame = grna_targets, moi = 'low')
+                   grna_target_data_frame = grna_targets, moi = 'low',
+                   extra_covariates = extra_covariates)
 obj <- set_analysis_parameters(obj, discovery_pairs = pairs)
 obj <- assign_grnas(obj, method = 'mixture')        # mixture | thresholding | maximum
 obj <- run_qc(obj)
 obj <- run_calibration_check(obj)                   # negative-control pairs must be well-calibrated FIRST
+calibration <- get_result(obj, analysis = 'run_calibration_check')
+stopifnot(nrow(calibration) > 0)                     # do not proceed if calibration produced no control results
 obj <- run_discovery_analysis(obj)
 results <- get_result(obj, analysis = 'run_discovery_analysis')   # analysis= takes the function name: run_calibration_check | run_power_check | run_discovery_analysis
 ```
