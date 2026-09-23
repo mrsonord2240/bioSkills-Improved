@@ -110,8 +110,10 @@ aSwitchList <- importRdata(isoformCountMatrix = salmonQuant$counts, isoformRepEx
                            addAnnotatedORFs = TRUE, showProgress = FALSE)
 
 # ---- 2. filter and test (DEXSeq up to 5 replicates per condition, satuRn above) ------------------
-aSwitchList <- preFilter(aSwitchList, geneExpressionCutoff = 1, isoformExpressionCutoff = 0, IFcutoff = 0.01,
-                         removeSingleIsoformGenes = TRUE, keepIsoformInAllConditions = TRUE)
+# preFilter API changed in IsoformSwitchAnalyzeR v2.7+: removed geneExpressionCutoff/isoformExpressionCutoff
+# Use isoCount (min isoforms per gene) and IFcutoff instead
+aSwitchList <- preFilter(aSwitchList, isoCount = 3, min.Count.prop = 0.5, IFcutoff = 0.01,
+                         removeSingleIsoformGenes = TRUE, keepIsoformInAllConditions = FALSE)
 aSwitchList <- if (max(nrep) > 5) {
     isoformSwitchTestSatuRn(aSwitchList, reduceToSwitchingGenes = FALSE, alpha = 0.05, dIFcutoff = 0.1, diagplots = FALSE)
 } else {

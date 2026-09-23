@@ -84,7 +84,7 @@ library(SingleCellExperiment)
 
 milo <- Milo(sce)
 milo <- buildGraph(milo, k = 30, d = 30, reduced.dim = 'PCA')
-milo <- makeNhoods(milo, prop = 0.1, k = 30, d = 30, refined = TRUE, reduced_dims = 'PCA')
+milo <- makeNhoods(milo, prop = 0.1, k = 30, d = 30, reduced_dims = 'PCA')
 milo <- countCells(milo, meta.data = as.data.frame(colData(milo)), samples = 'sample')
 
 design <- data.frame(colData(milo))[, c('sample', 'condition')]
@@ -107,8 +107,8 @@ table(da$SpatialFDR < 0.1, da$cell_type)
 
 ```python
 import pandas as pd
-from sccoda.util import cell_composition_data as dat
-from sccoda.util import comp_ana as mod
+from scCODA.util import cell_composition_data as dat
+from scCODA.util import comp_ana as mod
 
 counts = pd.crosstab(adata.obs['sample'], adata.obs['cell_type']).reset_index()
 meta = adata.obs[['sample', 'condition']].drop_duplicates()
