@@ -143,8 +143,11 @@ da <- FindMarkers(obj, ident.1 = 'cluster1', ident.2 = 'cluster2',
 **Approach:** Attach motif matches, then compute deviations against a GC- and accessibility-matched background; rank with z-scores, never raw deviations.
 
 ```bash
-Rscript scripts/run_chromvar.R obj.rds out_prefix cluster1 cluster2   # on Windows call it through the env's r.sh
+# In a WSL shell, from this skill directory, after activating an isolated R environment:
+Rscript scripts/run_chromvar.R /mnt/c/path/to/obj.rds /mnt/c/path/to/out_prefix cluster1 cluster2
 ```
+
+On Windows, run this command in a supported isolated WSL/Linux R environment rather than a native wrapper when the native R session does not exit cleanly after loading Signac. The isolated environment must contain the packages listed in Install. Use WSL paths (for example, `/mnt/c/...`) for both the input RDS and output prefix, and first verify `library(Signac); q('no', status = 0)` returns zero; do not use a wrapper that writes outputs but terminates with an access violation.
 
 `scripts/run_chromvar.R` adds JASPAR2020 CORE vertebrate motifs (`AddMotifs`), then runs chromVAR's own `addGCBias` / `matchMotifs` / `getBackgroundPeaks` / `computeDeviations` (`Signac::RunChromVAR()` was removed in Signac 1.17.0 because chromVAR became unavailable in Bioconductor 3.23, per Signac's NEWS.md). It calls `set.seed(1)` before `getBackgroundPeaks()`, which samples backgrounds at random and is not internally seeded; omitting it makes motif rankings change between identical reruns. It registers `SerialParam()` because the default multicore backend is unsupported on Windows. Output: a `chromvar` assay of background-normalized z-scores in `<out_prefix>_obj.rds`, and `FindMarkers(mean.fxn = rowMeans, fc.name = 'avg_diff')` results in `<out_prefix>_diff_motifs.csv`.
 

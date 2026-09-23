@@ -4,7 +4,6 @@
 #          <out_prefix>_diff_motifs.csv (FindMarkers result, motif names in a 'motif_name' column).
 # Usage:   Rscript run_chromvar.R obj.rds out_prefix cluster1 cluster2 [group_by=seurat_clusters]
 # Note:    Signac::RunChromVAR() was removed in Signac 1.17.0; this calls chromVAR's own API. Checked on Signac 1.17.1, chromVAR 1.28.0.
-.libPaths(c('F:/OpenScience/audit-envs/single-cell-transcriptomics-analyst/R-lib', .libPaths()))
 args <- commandArgs(trailingOnly = TRUE)
 stopifnot(length(args) >= 4)
 rds_in <- args[1]; out_prefix <- args[2]; ident1 <- args[3]; ident2 <- args[4]
