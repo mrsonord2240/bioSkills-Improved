@@ -26,6 +26,11 @@ Before using code patterns, verify installed versions match. If versions differ:
 If code throws ImportError, AttributeError, or TypeError, introspect the installed
 package and adapt the example to match the actual API rather than retrying.
 
+Muon WNN is stored on a `MuData` object, not an `AnnData` object: after
+`mu.pp.neighbors(..., key_added='wnn')`, run
+`mu.tl.umap(mdata, neighbors_key='wnn')`. Do not pass Muon's multimodal WNN
+metadata to `scanpy.tl.umap`, whose AnnData neighbor contract is different.
+
 ## Prerequisites
 
 ```r
@@ -105,6 +110,7 @@ Read the file for the method you are running; `SKILL.md` above decides which met
 | File | Read when |
 |---|---|
 | `references/cite-seq-dsb-wnn.md` | CITE-seq: denoising ADT with DSB from the raw matrix, then WNN joint clustering (Seurat). Runnable end to end: `examples/cite_seq_analysis.R` |
+| `examples/cite_seq_analysis.py` | CLR-only Python/Muon CITE-seq WNN fallback. It creates modality-local Scanpy graphs, then uses Muon's WNN and MuData-aware UMAP path. |
 | `references/scvi-totalvi-multivi.md` | Training totalVI (CITE-seq denoising + DE) or MultiVI (mosaic, RNA+ATAC partially observed) with scvi-tools. Runs `scripts/totalvi_cite_seq.py`, `scripts/multivi_mosaic.py` |
 | `references/multiome-mofa.md` | 10x Multiome RNA + ATAC WNN (Signac LSI), or MOFA+ shared/specific factors |
 | `references/unpaired-glue-bridge.md` | Unpaired scRNA + scATAC: GLUE, or Seurat v5 bridge integration through a multiome bridge. Runs `scripts/seurat_bridge_integration.R` |

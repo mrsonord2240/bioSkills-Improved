@@ -72,10 +72,13 @@ mu.pp.neighbors(
 sc.tl.leiden(mdata, resolution=0.5, key_added='wnn_clusters', neighbors_key='wnn')
 
 # UMAP on WNN
-sc.tl.umap(mdata, neighbors_key='wnn')
+# Muon's WNN metadata contains multimodal per-modality dictionaries; use its
+# MuData-aware UMAP implementation rather than Scanpy's AnnData-only one.
+mu.tl.umap(mdata, neighbors_key='wnn', random_state=0)
 
 # Save UMAP plot
 sc.settings.figdir = './'
+sc.settings.autoshow = False
 sc.pl.umap(mdata, color='wnn_clusters', save='_cite_seq_wnn.pdf')
 
 # Save processed data
