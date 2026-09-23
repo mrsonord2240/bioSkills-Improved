@@ -91,6 +91,7 @@ Diagnose confounding before modeling: cross-tabulate batch x condition; if a bat
 ```r
 library(miloR)
 library(SingleCellExperiment)
+library(dplyr)
 
 set.seed(42)
 milo <- Milo(sce)
@@ -120,6 +121,7 @@ table(da$SpatialFDR < 0.1, da$cell_type)
 
 ```python
 import pandas as pd
+import tensorflow as tf
 from sccoda.util import cell_composition_data as dat
 from sccoda.util import comp_ana as mod
 
