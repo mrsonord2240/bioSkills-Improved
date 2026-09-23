@@ -17,15 +17,14 @@ Before using code patterns, verify installed versions match. If versions differ:
 If code throws an error, introspect the installed package and adapt to the actual API. Notes:
 - `ssizeRNA_single()` takes **one mean/dispersion scalar for all genes**; `ssizeRNA_vary()` takes **per-gene vectors**. Passing scalars to `ssizeRNA_vary()` raises `Error in integrate(...) : non-finite function value` on 1.3.3 — use `_single` for a single mean/dispersion and reserve `_vary` for real pilot vectors.
 - `res$ssize` from both functions is a **1x3 matrix** `(pi0, ssize, power)`, not a scalar — index it: `res$ssize[, "ssize"]`.
-- Both estimators return `ssize = NA` silently, with no error, when no n within `maxN` reaches the target — see "When No n Is Reachable" below. Always check `is.na()` before reporting a number.
+- Both estimators normally return `ssize = NA` silently when no n within `maxN` reaches the target. In ssizeRNA 1.3.3, an extremely low `maxN` can instead raise `argument is of length zero`; treat that exact package edge case as unreachable and emit the same clear `no n <= maxN` message — see "When No n Is Reachable" below.
 - `powsimR` is GitHub-only, drifts across versions, and its dependency closure (`bayNorm`) can fail to build against a newer Bioconductor than it was pinned to. If it is not installed or fails to build, use the pseudobulk-on-donors pattern below (`ssizeRNA_vary`/PROPER on donor-level pseudobulk counts) — it needs no extra dependency and is not a lesser substitute, since population DE power is set by donors either way (Squair 2021).
 - `PROPER::estParam()` errors with `the condition has length > 1` on R >= 4.0 because a plain `matrix` now has class `c("matrix","array")` and the package's `class(X) %in% c(...)` check was written for R < 4.0. Work around it with `oldClass(X) <- "matrix"` before calling `estParam` (verified on PROPER 1.38.0 / R 4.4.3).
 
 **Setup:**
 ```r
-install.packages('BiocManager')
-BiocManager::install(c('ssizeRNA', 'PROPER', 'DESeq2', 'edgeR'))
-install.packages('pwr')
+install.packages(c('BiocManager', 'ssizeRNA', 'pwr'))
+BiocManager::install(c('PROPER', 'DESeq2', 'edgeR'))
 ```
 
 **Worked script:** `examples/sample_size_estimation.R` runs sections 1-4 below end to end on the ssizeRNA/DESeq2/pwr defaults and prints real numbers (not `NA`/`NaN`) — run it first to see the shape of the output before adapting parameters.
@@ -149,15 +148,22 @@ Verified on synthetic 8-donor pilot (donor dispersion 0.35, 150 cells/donor): ps
 
 ## When No n Is Reachable
 
-`ssizeRNA_single`/`_vary` return `ssize = NA` **silently**, with no warning or error, when no n within `maxN` reaches the target -- this is not a computation failure, it means the search ceiling was too low or the target itself is unreachable. `check.power` returns `fdr_bh_ave = NaN` when the average number of BH discoveries is zero across simulations -- **a NaN true FDR means zero discoveries, not "FDR unknown."**
+`ssizeRNA_single`/`_vary` normally return `ssize = NA` **silently** when no n within `maxN` reaches the target -- this is not a computation failure, it means the search ceiling was too low or the target itself is unreachable. ssizeRNA 1.3.3 has one exception: an extremely low ceiling can raise `argument is of length zero` before constructing that `NA` result. Normalize only that exact package error to the same unreachable outcome, while allowing all other errors through. `check.power` returns `fdr_bh_ave = NaN` when the average number of BH discoveries is zero across simulations -- **a NaN true FDR means zero discoveries, not "FDR unknown."**
 
 1. If `ssize` is `NA`: raise `maxN` (e.g. 30 -> 200 -> 1000) and re-run before concluding anything.
 2. If it is still `NA` at a practically fundable `maxN` (a few hundred), report the achieved power at that `maxN` instead of a sample size — do not print `NA` as the answer.
 3. As a fallback, sweep the fold change upward at the affordable `n` until power reaches the target, and report that **minimum detectable fold change** instead of a sample size (a 1.2-fold target at 90% power can be unreachable at any fundable n — see Anticipated Reviewer Pushback).
 
 ```r
-n <- res$ssize[, "ssize"]
-if (is.na(n)) stop("no n <= maxN reaches the target; raise maxN or revise fc/dispersion")
+safe_ssize <- function(call) tryCatch(call(), error = function(e) {
+  if (identical(conditionMessage(e), "argument is of length zero")) return(NULL)
+  stop(e)
+})
+res <- safe_ssize(function() ssizeRNA_single(..., maxN = maxN))
+n <- if (is.null(res)) NA_real_ else res$ssize[, "ssize"]
+if (length(n) != 1L || is.na(n)) {
+  stop(sprintf("no n <= %d reaches the target; raise maxN or revise fc/dispersion", maxN))
+}
 ```
 
 State the seed and the `sims`/`nsims` count alongside any reported n or power. None of these estimators are deterministic without `set.seed()`: `check.power`'s average power moved between 0.1015 and 0.1098 across unseeded calls at `sims = 20` in prior testing.
