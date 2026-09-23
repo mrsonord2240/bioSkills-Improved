@@ -27,8 +27,16 @@ Verify cell-type structure is preserved (not just modality overlap); adversarial
 **Approach:** Preprocess the three datasets in their native pipelines (query ATAC only TF-IDF), build the bridge reference from the scRNA reference plus the multiome bridge, find anchors by projecting the query into the bridge's ATAC LSI space, then transfer labels and project onto the reference UMAP.
 
 ```bash
+# When Seurat/Signac are in R's normal library paths:
 Rscript scripts/seurat_bridge_integration.R rna.rds multi.rds atac.rds bridge_query.rds   # optional: ndims first_lsi_dim SCT|LogNormalize
+
+# Otherwise, expose the private library before starting R (Git Bash/Linux/macOS):
+BIO_SKILLS_R_LIB=/path/to/R-lib Rscript scripts/seurat_bridge_integration.R rna.rds multi.rds atac.rds bridge_query.rds
 ```
+
+In PowerShell, use `$env:BIO_SKILLS_R_LIB = 'C:\path\to\R-lib'` before the `Rscript` command. The script
+adds this directory to `.libPaths()` before checking and loading Seurat/Signac, and stops with a direct
+setup error if either package is still unavailable.
 
 Inputs, all Seurat objects saved with `saveRDS`: `rna.rds` is the labelled scRNA reference (`meta.data$celltype`; NormalizeData/ScaleData/RunPCA, and `RunUMAP(return.model = TRUE)`); `multi.rds` is the paired multiome bridge with `RNA` (normalized) and `ATAC` (RunTFIDF, RunSVD -> `lsi`) assays; `atac.rds` is the unpaired scATAC query on the SAME peak set as the bridge's ATAC assay, RunTFIDF only. The output query carries `predicted.celltype`, `predicted.celltype.score` and `ref.umap`.
 

@@ -7,7 +7,20 @@
 #   atac.rds  unpaired scATAC query on the SAME peak set as the bridge's ATAC assay, RunTFIDF only
 # Output: <out.rds> = the query with predicted.celltype, predicted.celltype.score and ref.umap
 # Usage:  Rscript scripts/seurat_bridge_integration.R rna.rds multi.rds atac.rds out.rds [ndims] [first_lsi_dim] [SCT|LogNormalize]
+# If Seurat/Signac live in a private library, set BIO_SKILLS_R_LIB to that directory before invoking Rscript.
 # Checked on Seurat 5.5.0, Signac 1.17.1.
+private_lib <- Sys.getenv('BIO_SKILLS_R_LIB', unset = '')
+if (nzchar(private_lib)) {
+  .libPaths(c(strsplit(private_lib, .Platform$path.sep, fixed = TRUE)[[1]], .libPaths()))
+}
+required_packages <- c('Seurat', 'Signac')
+missing_packages <- required_packages[!vapply(required_packages, requireNamespace,
+                                               logical(1), quietly = TRUE)]
+if (length(missing_packages)) {
+  stop('Missing required R package(s): ', paste(missing_packages, collapse = ', '),
+       '. Install them in an R library, or set BIO_SKILLS_R_LIB to that library before running this script.',
+       call. = FALSE)
+}
 suppressMessages({library(Seurat); library(Signac)})
 args <- commandArgs(trailingOnly = TRUE)
 stopifnot(length(args) >= 4)
