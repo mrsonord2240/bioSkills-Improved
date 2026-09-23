@@ -37,7 +37,7 @@ MACS2 or MACS3 must be on PATH for peak calling. Peaks, fragments, the EnsDb ann
 # scATAC-seq Analysis
 
 **"Analyze my single-cell ATAC-seq data"** -> Process fragments, QC on chromatin signal, reduce dimensions with TF-IDF/LSI, cluster, call consensus peaks per cell type, and score TF motif activity.
-- R: `Signac::CreateChromatinAssay()` -> `RunTFIDF()` -> `FindTopFeatures()` -> `RunSVD()` -> `RunChromVAR()`
+- R: `Signac::CreateChromatinAssay()` -> `RunTFIDF()` -> `FindTopFeatures()` -> `RunSVD()` -> `scripts/run_chromvar.R`
 - R (large data, on-disk): `ArchR::createArrowFiles()` -> `addIterativeLSI()` -> `addReproduciblePeakSet()`
 - Python (scverse, >1M cells): `snapatac2.pp.add_tile_matrix()` -> `tl.spectral()` -> `tl.macs3()`
 
