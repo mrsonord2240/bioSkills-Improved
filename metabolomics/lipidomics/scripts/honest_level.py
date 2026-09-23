@@ -14,13 +14,26 @@ def honest_names(name, parser=None):
     lipid = parser.parse(name)             # e.g. 'PC 16:0/18:1', a slash-claimed name from a tool export
 
     claimed_level = lipid.lipid.info.level    # LipidLevel enum the string asserts
+
     # GUARD: never request a target level MORE specific than what was parsed (see Common Errors: RuntimeException).
     # get_lipid_string() has no chain/sn data to invent for a name parsed at a coarser level
     # (e.g. a sum-composition or ether/plasmalogen name parsed at SPECIES has no chains to report
     # at MOLECULAR_SPECIES) and raises an unhandled RuntimeException instead of degrading gracefully.
     # Cap the target at whichever is coarser: the honest ceiling or what was actually parsed.
     target_level = min(LipidLevel.MOLECULAR_SPECIES, claimed_level, key=lambda l: l.value)
-    honest_name = lipid.get_lipid_string(target_level)   # 'PC 16:0_18:1' here; unchanged (e.g. 'PC 34:1') for a name that never carried chain detail
+
+    # For ether/plasmalogen lipids (O-/P-) at SPECIES level, preserve the original name.
+    # Goslin's get_lipid_string() at MOLECULAR_SPECIES loses the O-/P- distinction and may
+    # convert P- to O- with wrong chain count (e.g. PC P-34:1 -> PC O-34:2).
+    if target_level == LipidLevel.SPECIES and claimed_level == LipidLevel.SPECIES:
+        # Check if original name has ether/plasmalogen prefix
+        if ' O-' in name or ' P-' in name:
+            honest_name = name  # Preserve original ether/plasmalogen notation
+        else:
+            honest_name = name  # SPECIES level has no chains to report anyway
+    else:
+        honest_name = lipid.get_lipid_string(target_level)   # 'PC 16:0_18:1' here
+
     sum_name = lipid.get_lipid_string(LipidLevel.SPECIES) if claimed_level.value >= LipidLevel.SPECIES.value else honest_name
     return claimed_level, honest_name, sum_name
 
