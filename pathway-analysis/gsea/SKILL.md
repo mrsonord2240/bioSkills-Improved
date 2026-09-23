@@ -9,7 +9,7 @@ author: GPTomics
 
 ## Version Compatibility
 
-Checked 2026-09-21 on: R 4.4.3 / Bioconductor 3.20, clusterProfiler 4.14.6, fgsea 1.32.4, org.Hs.eg.db 3.20.0, msigdbr 26.1.0, limma 3.62.2, GSVA 2.0.7. Newer releases were not run here; the behaviours below (nPerm fallback, clamp weight, CAMERA preset, GSVA parameter objects) are stated for these versions.
+Verified 2026-09-23 in an isolated Linux environment: R 4.5.3 / Bioconductor 3.22, clusterProfiler 4.18.4, fgsea 1.36.2, org.Hs.eg.db 3.20.0, msigdbr 26.1.1, limma 3.66.0, GSVA 2.4.9, ReactomePA 1.54.0, and reactome.db 1.95.0. The shipped GO and MSigDB examples and representative GSVA, ID, KEGG, and Reactome calls must exit 0; materialized output with a nonzero process exit is not a successful run.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - R: `packageVersion('<pkg>')` then `?function_name` to verify parameters
@@ -17,7 +17,7 @@ Before using code patterns, verify installed versions match. If versions differ:
 If code throws ImportError, AttributeError, or TypeError, introspect the installed
 package and adapt the example to match the actual API rather than retrying.
 
-Install: `BiocManager::install(c('clusterProfiler','org.Hs.eg.db','fgsea','limma','ReactomePA','GSVA'))` and `install.packages('msigdbr')`.
+For a reproducible fresh runtime, create an isolated environment (do not repair a shared R library in place): `micromamba create -n gsea-r45 -c conda-forge -c bioconda r-base=4.5 bioconductor-clusterprofiler bioconductor-org.hs.eg.db bioconductor-fgsea bioconductor-limma bioconductor-reactomepa bioconductor-gsva r-msigdbr`. Alternatively install with `BiocManager::install(c('clusterProfiler','org.Hs.eg.db','fgsea','limma','ReactomePA','GSVA'))` and `install.packages('msigdbr')` in an isolated R library. Native Windows R 4.4.3 / Bioconductor 3.20 in the prior runtime is not supported for this Skill: package loads could complete the calculation but exit with code 2816.
 
 gseKEGG queries the live KEGG REST API, so the same code returns different results as KEGG updates; pin the run date. gseGO/gsePathway and MSigDB GSEA use local annotation (`org.*.eg.db`, `reactome.db`, msigdbr) and are reproducible given the package version. The single source of truth for versions is this block, not headings.
 
