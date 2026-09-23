@@ -23,7 +23,13 @@ mu.pp.intersect_obs(mdata)
 # nFeature_RNA > 200: minimum gene complexity
 # nFeature_RNA < 5000: remove potential doublets
 # percent.mt < 20: remove dying cells
-rna_mask = (rna.obs['n_genes_by_counts'] > 200) & (rna.obs['n_genes_by_counts'] < 5000) & (rna.obs['pct_counts_mt'] < 20)
+rna_mask = (
+    rna.obs['n_genes_by_counts'] > 200
+    ) & (
+        rna.obs['n_genes_by_counts'] < 5000
+        ) & (
+            rna.obs['pct_counts_mt'] < 20
+            )
 mdata = mdata[rna_mask].copy()
 
 # RNA preprocessing
@@ -34,10 +40,11 @@ sc.pp.scale(rna, max_value=10)
 sc.tl.pca(rna, n_comps=30)
 
 # ADT preprocessing: CLR rescales but does NOT remove background. This is a CLR-only
-# fallback path -- muon/Python has no first-party DSB equivalent (dsb is R-only). When
-# empty droplets are available, prefer SKILL.md's "CITE-seq: totalVI" section instead,
-# which models the ADT background explicitly (or run DSB in R and re-import the result).
-# axis is genuinely ambiguous across versions (axis=0 ~ per-feature ~ Seurat margin=2); verify with the muon docs
+# fallback path: muon/Python has no first-party DSB equivalent (dsb is R-only).
+# "CITE-seq: totalVI" section instead, which models the ADT background explicitly
+# (or run DSB in R and re-import the result).
+# axis is genuinely ambiguous across versions
+# (axis=0 ~ per-feature ~ Seurat margin=2); verify with the muon docs
 mu.prot.pp.clr(adt, axis=0)
 sc.pp.scale(adt, max_value=10)
 # Use all ADT features for PCA (typically 10-200 markers)
