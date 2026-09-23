@@ -9,7 +9,7 @@ Checked: numpy 2.5.3, pandas 3.0.5
 """
 import numpy as np, pandas as pd
 
-def silac_labeling_efficiency(pilot, heavy='Intensity H', light='Intensity L'):
+def silac_labeling_efficiency(pilot, heavy='Intensity H', light='Intensity L', sequence='Sequence'):
     '''Incorporation on a HEAVY-ONLY pilot (cells grown in heavy medium, NOTHING mixed in): every
     light ion there is unlabeled protein. pilot = the pilot's peptide table (MaxQuant evidence.txt).'''
     h = pd.to_numeric(pilot[heavy], errors='coerce').fillna(0.0)
@@ -17,11 +17,22 @@ def silac_labeling_efficiency(pilot, heavy='Intensity H', light='Intensity L'):
     ok = (h + l) > 0
     if not ok.any():
         raise ValueError('no peptide has signal in either channel -- wrong columns or wrong file')
-    per_pep = h[ok] / (h[ok] + l[ok])
-    eff = float(h[ok].sum() / (h[ok] + l[ok]).sum())    # intensity-weighted = the number to report
+    # Arg->Pro conversion drains the heavy signal once per proline.  Including those peptides
+    # makes a heavy-only pilot look incompletely labelled, so estimate incorporation on Pro-free
+    # peptides when the usual MaxQuant Sequence column is available.  Keep the fallback for a
+    # table without sequences, but make that limitation visible in the result.
+    has_sequence = sequence in pilot.columns
+    pro_free = ~pilot[sequence].fillna('').astype(str).str.contains('P', case=False, regex=False) if has_sequence else ok
+    use = ok & pro_free
+    if not use.any():
+        raise ValueError('no Pro-free peptide has signal -- cannot separate labeling efficiency from Arg-to-Pro conversion')
+    per_pep = h[use] / (h[use] + l[use])
+    eff = float(h[use].sum() / (h[use] + l[use]).sum())    # intensity-weighted = the number to report
     # A 1:1 forward mix of these cells does NOT read log2 H/L = 0: the unincorporated (1 - eff) of
     # the heavy sample is counted in the LIGHT channel, so H/L = eff / (2 - eff) -- -0.20 at 93%.
-    return {'n_peptides': int(ok.sum()), 'incorporation': round(eff, 4),
+    return {'n_peptides': int(use.sum()), 'n_signal_peptides': int(ok.sum()),
+            'pro_containing_excluded': int((ok & ~pro_free).sum()) if has_sequence else 0,
+            'sequence_column_used': has_sequence, 'incorporation': round(eff, 4),
             'median_peptide_incorporation': round(float(per_pep.median()), 4),
             'peptides_below_95pct': int((per_pep < 0.95).sum()),
             'expected_log2_HL_bias_at_1to1': round(float(np.log2(eff / (2 - eff))), 4),

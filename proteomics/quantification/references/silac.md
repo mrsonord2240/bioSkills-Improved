@@ -8,7 +8,7 @@
 ```bash
 python scripts/silac_checks.py pilot_evidence.txt   # heavy-only pilot peptide table (tab-separated) -> JSON
 ```
-Or `from silac_checks import silac_labeling_efficiency, arg_to_pro_shift`. `silac_labeling_efficiency` reports the intensity-weighted incorporation, the peptides below 95%, and the log2 H/L bias a 1:1 mix would show (`eff / (2 - eff)`, -0.20 at 93%: the unincorporated fraction of the heavy sample is counted in the LIGHT channel). `arg_to_pro_shift` regresses log2 H/L on proline count: the dose slope is what makes it Arg->Pro (a flat offset is incomplete labeling); the direct route is to re-search the pilot with Pro6 variable and take I(Pro6)/(I(Pro6)+I(Pro0)).
+Or `from silac_checks import silac_labeling_efficiency, arg_to_pro_shift`. When the usual `Sequence` column is present, `silac_labeling_efficiency` excludes Pro-containing peptides before reporting intensity-weighted incorporation: Arg->Pro conversion otherwise drains their heavy signal and makes incorporation read falsely low. Its JSON reports how many signal peptides it used and excluded; without `Sequence`, `sequence_column_used` is false, so use the all-peptide estimate only after separately ruling out conversion. It also reports peptides below 95% and the log2 H/L bias a 1:1 mix would show (`eff / (2 - eff)`, -0.20 at 93%: the unincorporated fraction of the heavy sample is counted in the LIGHT channel). `arg_to_pro_shift` regresses log2 H/L on proline count: the dose slope is what makes it Arg->Pro (a flat offset is incomplete labeling); the direct route is to re-search the pilot with Pro6 variable and take I(Pro6)/(I(Pro6)+I(Pro0)).
 
 Seeded pilot recovering the planted 0.93 incorporation and 0.08 conversion: `examples/lfq_normalization.py`.
 

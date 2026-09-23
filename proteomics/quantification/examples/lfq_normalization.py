@@ -98,8 +98,7 @@ hl = TRUE_INCORPORATION / (1 - TRUE_INCORPORATION) * (1 - TRUE_CONVERSION) ** pr
 heavy_frac = hl / (1 + hl)
 pilot = pd.DataFrame({'Sequence': seqs, 'Intensity H': total * heavy_frac, 'Intensity L': total * (1 - heavy_frac)})
 pilot['Ratio H/L'] = pilot['Intensity H'] / pilot['Intensity L']
-pro_free = pilot[pro == 0]
-eff = silac_labeling_efficiency(pro_free)    # incorporation is read on proline-free peptides
+eff = silac_labeling_efficiency(pilot)       # automatically reads incorporation on proline-free peptides
 conv = arg_to_pro_shift(pilot)
 print(f'SILAC pilot: incorporation {eff["incorporation"]} (planted {TRUE_INCORPORATION}), '
       f'Arg->Pro per proline {conv["conversion_per_proline"]} (planted {TRUE_CONVERSION})')
