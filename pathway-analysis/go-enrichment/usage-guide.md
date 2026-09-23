@@ -8,8 +8,9 @@ Gene Ontology over-representation analysis (ORA) tests whether a gene LIST is en
 if (!require('BiocManager', quietly = TRUE))
     install.packages('BiocManager')
 
-BiocManager::install(c('clusterProfiler', 'org.Hs.eg.db'))
-BiocManager::install('goseq')   # only for RNA-seq gene-length bias correction
+# Set the verified Bioconductor release before installing the hg38 GOseq route:
+BiocManager::install(version = '3.20', ask = FALSE)
+BiocManager::install(c('clusterProfiler', 'org.Hs.eg.db', 'goseq', 'GenomicFeatures', 'TxDb.Hsapiens.UCSC.hg38.knownGene'), ask = FALSE)
 ```
 
 Conceptual prerequisites:
@@ -86,7 +87,7 @@ Fold enrichment = GeneRatio / BgRatio, returned directly as `FoldEnrichment` (ch
 - pvalueCutoff filters the adjusted p; if no terms appear, set pvalueCutoff=1 and qvalueCutoff=1 to inspect everything before loosening real thresholds.
 - After bitr(), deduplicate one-to-many maps and report the conversion rate; flag results when more than ~15% of genes are lost.
 - Run separate enrichment on up- and down-regulated genes; a mixed-direction list can cancel and hide a real term.
-- For RNA-seq, consider GOseq (Wallenius PWF); TMM/RPKM normalization does not remove the length/selection bias.
+- For RNA-seq, consider GOseq (Wallenius PWF); TMM/RPKM normalization does not remove the length/selection bias. For hg38 Ensembl IDs, use the Skill's declared TxDb + local `bias.data`/`gene2cat` route; do not rely on an implicit `hg38`/`ensGene` download.
 - The clusterProfiler `enrichment_force_universe` option keeps unannotated genes in the universe instead of intersecting with annotated genes; the intersection is usually the desired behavior for GO (an unannotated gene can never be a hit), so use the option only to match another tool's denominator.
 - Treat enrichment as hypothesis generation, not validation; terms derived from a DE list cannot validate that same DE list.
 - See the enrichment-visualization skill for dotplot, cnetplot, emapplot, and treeplot.
