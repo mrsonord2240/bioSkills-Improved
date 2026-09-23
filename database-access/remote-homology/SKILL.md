@@ -169,7 +169,7 @@ For protein remote homology in 2026, DIAMOND `--ultra-sensitive` or MMseqs2 `-s 
 
 ```bash
 # 3 iterations, save checkpoint HMM at each iteration
-jackhmmer -N 3 --chkhmm iter.hmm --tblout hits.tbl query.fa uniref90.fa
+jackhmmer -N 3 --chkhmm iter --tblout hits.tbl query.fa uniref90.fa
 
 # Use the last checkpoint HMM for downstream searches. --chkhmm writes iter-<round>.hmm, and
 # a search that converges early stops before round 3, so pick the highest-numbered file.

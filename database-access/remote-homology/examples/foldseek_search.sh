@@ -25,7 +25,8 @@ if [[ "${QUERY}" == *.pdb ]] || [[ "${QUERY}" == *.cif ]]; then
 else
     # Sequence-only path via ProstT5: predict 3Di alphabet directly from sequence, skip AF2.
     echo "=== Sequence-only search via ProstT5 ==="
-    if [ ! -d "${DB_DIR}/prostt5" ]; then
+    # foldseek databases writes a file-prefix database, not a directory.
+    if [ ! -f "${DB_DIR}/prostt5.dbtype" ]; then
         echo "Downloading ProstT5 weights..."
         foldseek databases ProstT5 "${DB_DIR}/prostt5" "${TMP_DIR}"
     fi
