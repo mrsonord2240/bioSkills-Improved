@@ -1,6 +1,6 @@
 ---
 name: bio-differential-expression-deseq2-basics
-description: Performs differential expression on bulk RNA-seq count data with DESeq2's negative-binomial GLM, Wald and LRT testing, apeglm/ashr/normal LFC shrinkage, independent filtering, Cook's outlier handling, VST/rlog transforms, and design formulas including paired, batch, and interaction terms. Use when running bulk DE, choosing DESeq2 over edgeR or limma-voom, building a paired or interaction design, applying LFC shrinkage for ranking or GSEA, choosing Wald vs LRT, troubleshooting padj=NA, picking VST vs rlog, importing salmon/kallisto via tximport, or analyzing prokaryotic RNA-seq.
+description: Performs differential expression on bulk RNA-seq or single-cell pseudobulk counts (aggregated per sample x cell type) with DESeq2's negative-binomial GLM, Wald and LRT testing, apeglm/ashr/normal LFC shrinkage, independent filtering, Cook's outlier handling, VST/rlog transforms, and design formulas including paired, batch, and interaction terms. Use when running bulk or pseudobulk DE, choosing DESeq2 over edgeR or limma-voom, building a paired or interaction design, applying LFC shrinkage for ranking or GSEA, choosing Wald vs LRT, troubleshooting padj=NA, picking VST vs rlog, importing salmon/kallisto via tximport, or analyzing prokaryotic RNA-seq.
 tool_type: r
 primary_tool: DESeq2
 license: MIT
@@ -106,6 +106,10 @@ sig <- subset(res, padj < 0.05)
 The reference level fix is non-cosmetic: DESeq2 picks alphabetically if not told otherwise, so `c('Treated','Untreated')` makes 'Treated' the reference and the LFC reads inverted. Set it BEFORE `DESeq()`.
 
 `rownames(coldata)` must equal `colnames(counts)` in the same order, or `DESeqDataSetFromMatrix()` errors.
+
+## What to Report
+
+State the named coefficient or contrast, reference level, design formula, FDR alpha, pre-filter threshold, and the number of samples per condition. Report significant-gene and `padj=NA` counts separately; label the NA cause (all-zero, Cook's, or independent filtering). For effect sizes, identify whether the table uses the named Wald estimate or the shrunken LFC and which shrinkage prior supplied it.
 
 ## Design Formulas and the resultsNames Trap
 
