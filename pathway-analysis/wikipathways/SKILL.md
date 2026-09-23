@@ -77,7 +77,7 @@ WikiPathways is a wiki: anyone can create or edit a pathway, content is CC0, and
 | Pre-selected list (module, screen hits, GWAS loci) | `enrichWP` ORA | no ranking available |
 | Disease / drug pathways missing from KEGG/Reactome | WP as a complement, run alongside KEGG/Reactome | community content is genuinely additive where it exists |
 | Maximum gene/process coverage, noise tolerable | PFOCR (separate resource), not `enrichWP` | figure-OCR sets are higher-recall, lower-precision |
-| Non-model but WP-supported species (zebrafish, fly, worm, Arabidopsis) | `enrichWP(entrez, '<scientific name>')`, verify via `get_wp_organisms()` | WP covers ~30+ species |
+| Non-model but WP-supported species (zebrafish, fly, worm, Arabidopsis) | `enrichWP(entrez, '<scientific name>')`, verify via `rWikiPathways::listOrganisms()` | WP covers ~30+ species |
 | Compare up- vs down-regulated | `compareCluster(geneClusters=list(up=..,down=..), fun='enrichWP', organism=)` | one model, faceted dotplot |
 | Genes are SYMBOL/ENSEMBL | convert to Entrez first (`bitr`) | the WP GMT is Entrez-keyed; other types overlap nothing |
 
@@ -143,7 +143,8 @@ For GSEA, build the same `t2g` (`wpid`, `gene`) / `t2n` (`wpid`, `name`) tables 
 ```r
 library(rWikiPathways)
 
-listOrganisms()                          # supported species (full scientific names; ~30+)
+organisms <- rWikiPathways::listOrganisms()  # supported species (full scientific names; ~30+)
+organisms
 listPathways('Homo sapiens')             # all WPIDs + names for a species
 getPathwayInfo('WP554')                  # metadata incl. last-edit; check before trusting a single hit
 getXrefList('WP554', 'L')                # genes by BridgeDb system code: 'L'=Entrez, 'H'=HGNC, 'En'=Ensembl
@@ -156,7 +157,7 @@ findPathwaysByText('cancer')             # text search (searchPathways() is NOT 
 wp_mouse <- enrichWP(gene=mouse_entrez, organism='Mus musculus')
 wp_zfish <- enrichWP(gene=zfish_entrez, organism='Danio rerio')
 # verify the exact organism string before running:
-get_wp_organisms()                       # plural accessor; the string must match exactly
+rWikiPathways::listOrganisms()
 ```
 
 ## Understanding Results
@@ -223,7 +224,7 @@ For GSEA results read `NES` (sign = direction along the ranking) and `core_enric
 | `downloadPathwayArchive` warns `cannot open URL ... 404` then errors | that month's release is outside the ~12-month window or was not published | step back one release (`Sys.Date() - 90, -120, ...`, 10th of the month); for an older fixed date use the Zenodo archive |
 | GPML where a GMT was expected | `format` defaulted to `gpml` | pass `format='gmt'` |
 | `gseWP` error about vector names | geneList not named or not sorted decreasing | build a named Entrez vector, `sort(decreasing=TRUE)` |
-| `enrichWP`/`gseWP` returns NULL with no terms | wrong/non-canonical organism string (e.g. a common name like `'zebrafish'`) | verify with `listOrganisms()`/`get_wp_organisms()` first; the string must match exactly |
+| `enrichWP`/`gseWP` returns NULL with no terms | wrong/non-canonical organism string (e.g. a common name like `'zebrafish'`) | verify with `rWikiPathways::listOrganisms()` first; the string must match exactly |
 
 ## References
 

@@ -6,8 +6,8 @@ library(rWikiPathways)
 library(clusterProfiler)
 library(tidyr)
 
-listOrganisms()                       # supported species; ~30+ full scientific names
-get_wp_organisms()                    # plural accessor; the organism string must match exactly
+organisms <- rWikiPathways::listOrganisms()  # supported species; choose its exact scientific-name string
+head(organisms)
 
 human_pathways <- listPathways('Homo sapiens')
 head(human_pathways, 20)
