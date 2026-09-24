@@ -80,9 +80,9 @@ protein_position <- function(change) {
 }
 ```
 
-## trackViewer with inclusive UniProt coordinates
+## trackViewer with inclusive protein coordinates
 
-UniProt feature coordinates are inclusive. `IRanges(start, end)` therefore preserves both endpoints; do not calculate a width by hand. The TP53 P04637 features below are Transactivation 1--44, DNA binding 102--292, oligomerization 325--356, and basic region 368--387. Confirm the accession and feature release used for a publication.
+Protein feature coordinates are inclusive. `IRanges(start, end)` therefore preserves both endpoints; do not calculate a width by hand. The supplied TP53 P04637 map combines current UniProt feature ranges for Transactivation 1--44, oligomerization 325--356, and the basic region 368--387 with the conventional core DNA-binding range 102--292. Current UniProt P04637 JSON does not label 102--292 as a single DNA-binding feature, so describe it as a supplied conventional range and cite the chosen literature source if that boundary is used in a publication. Confirm the accession and feature release as well.
 
 ```r
 library(data.table)
@@ -106,7 +106,9 @@ class_col <- c(class_col, Other = "#666666")
 summary <- calls[, .(count = .N, class = plot_class[1L], residue = unique(sub("^p\\.", "", get(change_col)))[1L]), by = aa_pos]
 snps <- GRanges("TP53", IRanges(summary$aa_pos, width = 1L), color = unname(class_col[as.character(summary$class)]), score = summary$count)
 names(snps) <- ifelse(summary$count >= 2L, summary$residue, "")
-features <- GRanges("TP53", IRanges(c(1, 102, 325, 368), c(44, 292, 356, 387), names = c("Transactivation", "DNA binding", "Oligomerization", "Basic")), fill = c("#56B4E9", "#0072B2", "#009E73", "#CC79A7"), height = 0.04)
+# The 102--292 DNA-binding core is a conventional supplied range; the other
+# three ranges above are current UniProt P04637 features.
+features <- GRanges("TP53", IRanges(c(1, 102, 325, 368), c(44, 292, 356, 387), names = c("Transactivation", "DNA binding core (conventional)", "Oligomerization", "Basic")), fill = c("#56B4E9", "#0072B2", "#009E73", "#CC79A7"), height = 0.04)
 pdf("TP53_trackviewer.pdf", width = 10, height = 4)
 lolliplot(snps, features, ylab = "Mutation-row count", xaxis = TRUE, yaxis = TRUE, legend = list(labels = names(class_col), col = unname(class_col)))
 dev.off()

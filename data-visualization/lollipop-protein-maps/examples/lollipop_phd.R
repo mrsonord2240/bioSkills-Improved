@@ -65,7 +65,9 @@ calls[, plot_class := fifelse(as.character(Variant_Classification) %in% names(cl
 summary <- calls[, .(count = .N, class = plot_class[1L], residue = unique(sub("^p\\.", "", get(change_col)))[1L]), by = aa_pos]
 snps <- GRanges("TP53", IRanges(summary$aa_pos, width = 1L), color = unname(class_col[as.character(summary$class)]), score = summary$count)
 names(snps) <- ifelse(summary$count >= 2L, summary$residue, "")
-features <- GRanges("TP53", IRanges(c(1, 102, 325, 368), c(44, 292, 356, 387), names = c("Transactivation", "DNA binding", "Oligomerization", "Basic")), fill = c("#56B4E9", "#0072B2", "#009E73", "#CC79A7"), height = 0.04)
+# The 102--292 DNA-binding core is a conventional supplied range; the other
+# three ranges are current UniProt P04637 features.
+features <- GRanges("TP53", IRanges(c(1, 102, 325, 368), c(44, 292, 356, 387), names = c("Transactivation", "DNA binding core (conventional)", "Oligomerization", "Basic")), fill = c("#56B4E9", "#0072B2", "#009E73", "#CC79A7"), height = 0.04)
 pdf("TP53_trackviewer.pdf", width = 10, height = 4)
 lolliplot(snps, features, ylab = "Mutation-row count", xaxis = TRUE, yaxis = TRUE, legend = list(labels = names(class_col), col = unname(class_col)))
 dev.off()
