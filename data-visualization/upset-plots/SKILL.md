@@ -112,7 +112,7 @@ UpSetR::upset(upset_data, nsets = length(sets), nintersects = 20,
 
 ## Python: upsetplot 0.9.0
 
-`show_counts=True` raises during export on the tested numpy 2.5 stack. Use `show_counts=False` and label the existing intersection bars yourself. `max_subset_rank`, not `intersection_plot_elements`, caps displayed intersections. `present` alone styles every superset containing those sets; combine it with `absent` to select one exact membership.
+`show_counts=True` raises during export on the tested numpy 2.5 stack. Use `show_counts=False` and label the existing intersection bars yourself. `max_subset_rank`, not `intersection_plot_elements`, limits intersections by rank, but ties at the cutoff can retain more bars than the numeric rank. Pre-filter the intersection series when an exact bar count is required. `present` alone styles every superset containing those sets; combine it with `absent` to select one exact membership.
 
 ```python
 import matplotlib as mpl
