@@ -1,6 +1,6 @@
 ---
 name: bio-data-visualization-distribution-plots
-description: Plot per-group distributions of continuous data using boxplots, violins, beeswarms, quasirandom jitter, and raincloud plots with sample-size honesty (Weissgerber 2015), KDE-bandwidth awareness, and N-aware encoding choices. Use when comparing distributions across a small number of groups — expression per cluster, biomarker per arm, scores per condition — and the bar-of-mean default is misleading.
+description: Plot per-group distributions of continuous data using boxplots, violins, beeswarms, quasirandom jitter, and ggdist raincloud plots with sample-size honesty (Weissgerber 2015), KDE-bandwidth awareness, and N-aware encoding choices. Use when comparing distributions across a small number of groups — expression per cluster, biomarker per arm, scores per condition — and the bar-of-mean default is misleading.
 tool_type: mixed
 primary_tool: ggplot2
 license: MIT
@@ -9,244 +9,172 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: ggplot2 3.5+, ggbeeswarm 0.7+, ggdist 3.3+, gghalves 0.1.4+, seaborn 0.13+, matplotlib 3.8+, ptitprince 0.3+ (Python raincloud).
+The R examples were checked on ggplot2 4.0.3, ggbeeswarm 0.7.3, ggdist 3.3.3, lvplot 0.2.2, and introdataviz 0.0.0.9003. The Python snippets were checked on seaborn 0.13.2, matplotlib 3.11.2, and ptitprince 0.3.1.
 
-Before using code patterns, verify installed versions match. If versions differ:
-- Python: `pip show <package>` then `help(module.function)` to check signatures
-- R: `packageVersion('<pkg>')` then `?function_name` to verify parameters
+- Use `ggdist::stat_halfeye` for R rainclouds. Do not make `gghalves` a required dependency: gghalves 0.1.4 is archived and fails with ggplot2 4.x.
+- `ptitprince` offers Scott-style bandwidth selection, not Sheather-Jones. This call was checked on matplotlib 3.11.2; recheck it before moving to matplotlib 3.13 because ptitprince has used deprecated matplotlib orientation paths.
+- For seaborn categorical palettes, assign `hue=group` and set `legend=False`; palette without hue is deprecated in seaborn 0.13.
 
-If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
+Before adapting a pattern, check `packageVersion('<pkg>')` / `?function_name` in R or `help(module.function)` in Python.
 
 # Distribution Plots
 
-**"Plot the distribution per group"** -> Render boxplot, violin, beeswarm, or raincloud calibrated to N per group, the underlying distribution shape, and the audience's ability to read each encoding. The default `geom_bar(stat='summary')` is the canonical misleading choice — Weissgerber 2015 *PLOS Biol* documented that 703 top physiology papers use bar-of-mean despite multiple distinct distributions producing identical bars.
+**"Plot the distribution per group"** -> choose an encoding from the per-group nonmissing N, retain raw observations at small N, choose a stated KDE bandwidth when density is warranted, and annotate every plotted group with its N. The default `geom_bar(stat = 'summary')` is misleading: Weissgerber et al. (2015) showed that very different distributions can have identical mean bars.
 
-- R: `ggplot2::geom_boxplot`, `ggplot2::geom_violin`, `ggbeeswarm::geom_quasirandom`, `ggdist::stat_halfeye`, `gghalves::geom_half_violin`
-- Python: `seaborn.boxplot/violinplot/swarmplot/stripplot`, `ptitprince.RainCloud`
+- R: `ggplot2::geom_boxplot`, `ggplot2::geom_violin`, `ggbeeswarm::geom_quasirandom`, `ggdist::stat_halfeye`, `lvplot::geom_lv`
+- Python: `seaborn.boxplot/violinplot/swarmplot/stripplot/boxenplot`, `ptitprince.RainCloud`
 
-## The Single Most Important Modern Insight -- Bars of Means Lie
+## Decision Tree by Per-group N
 
-Weissgerber, Milic, Winham & Garovic 2015 *PLOS Biol* 13:e1002128 surveyed 703 papers in top physiology journals and found that bar-and-line graphs of means dominate, despite **many distinct distributions producing identical bar plots**. Bimodal data, skewed data, and data with outliers all collapse to the same bar height and error bar. The bar plot is a hypothesis test result rendered as visualization; the visualization should show the data.
-
-The modern alternative is to **show every point** for n < 30, layer summary on top, and reserve summary-only plots for large N where points would overplot.
-
-## Decision Tree by N per Group
+Count nonmissing observations in the data frame actually supplied to each plot.
 
 | N per group | Recommended | Avoid |
-|-------------|-------------|-------|
+|---|---|---|
 | 3-10 | Dot plot or jittered raw points + median bar | Bar of mean |
-| 10-30 | Beeswarm OR quasirandom + box overlay | Bare boxplot (hides bimodality) |
-| 30-200 | Raincloud (Allen 2019) OR box + jitter | Bare violin (default KDE bandwidth oversmooths) |
-| 200-1000 | Letter-value plot (Hofmann 2017) OR violin with explicit bandwidth | Box alone (collapses tails) |
-| >1000 | Density (KDE) or histogram + summary stats | Individual points (overplot) |
+| 10-29 | Beeswarm or quasirandom + box overlay | KDE/violin shape claims |
+| 30-200 | ggdist raincloud or box + jitter | Bare violin with an implicit bandwidth |
+| 201-1000 | Letter-value plot or violin with an explicit safe bandwidth | Box alone |
+| >1000 | Density (KDE) or histogram + summary statistics | Individual points without rasterisation |
 
-**Always annotate N** somewhere on the plot (caption, x-axis tick label, or stratum count).
+Always annotate N in the caption, x-axis label, or a stratum label. For N < 30, show every point; do not use a violin to imply a reliable density estimate.
 
-## Box, Violin, Beeswarm, Raincloud -- The Four Standard Encodings
+## Standard Encodings
 
-### Boxplot (Tukey 1977) -- summary only
-
-```r
-ggplot(df, aes(group, value, fill = group)) +
-    geom_boxplot(outlier.shape = NA, alpha = 0.7, width = 0.5) +
-    geom_jitter(width = 0.2, alpha = 0.5, size = 1) +
-    scale_fill_manual(values = c('#0072B2', '#D55E00')) +
-    labs(x = NULL, y = 'Expression') +
-    theme_classic()
-```
-
-Box shows: median, IQR, 1.5×IQR whiskers, outliers. Hides: bimodality, sample size, density.
-
-**Notched boxplot** (`notch = TRUE`): notches show 95% CI for median (±1.58·IQR/√n); non-overlapping notches roughly indicate distinct medians. Use with N ≥ 15.
-
-### Violin -- density + summary
+### Boxplot + deterministic jitter
 
 ```r
 ggplot(df, aes(group, value, fill = group)) +
-    geom_violin(alpha = 0.7, trim = FALSE,
-                bw = 'SJ') +                            # Sheather-Jones bandwidth
-    geom_boxplot(width = 0.1, fill = 'white', outlier.shape = NA) +
-    scale_fill_manual(values = c('#0072B2', '#D55E00'))
+  geom_boxplot(outlier.shape = NA, alpha = 0.7, width = 0.5) +
+  geom_point(position = position_jitter(width = 0.2, height = 0, seed = 20260923),
+             alpha = 0.5, size = 1) +
+  scale_fill_manual(values = c('#0072B2', '#D55E00')) +
+  labs(x = NULL, y = 'Expression') + theme_classic()
 ```
 
-**KDE bandwidth pitfall:** ggplot's default is Silverman's rule of thumb, which oversmooths bimodal data into a single mode. Use `bw = 'SJ'` (Sheather-Jones plug-in) for honest representation of multimodality.
+Boxplots show median, IQR, 1.5×IQR whiskers, and outliers, but not density or sample size. Suppress boxplot outliers when raw points are overlaid so a point is not drawn twice. Notches use median +/- 1.58 * IQR / sqrt(N); use them only at N >= 15.
 
-**`trim = TRUE`** (default) cuts the violin at the data range — visually misleading because the violin's tails imply density extending beyond the data. `trim = FALSE` lets the KDE extend.
+For a text annotation instead of axis labels, return both required aesthetics and count nonmissing values:
 
-### Beeswarm / quasirandom -- every point shown deterministically
+```r
+stat_summary(geom = 'text', vjust = -0.4,
+  fun.data = function(x) data.frame(
+    y = max(x, na.rm = TRUE), label = paste0('n=', sum(!is.na(x)))
+  ))
+```
+
+### Violin with a panel-safe bandwidth
+
+`bw = 'SJ'` is useful when it succeeds, but `stats::bw.SJ()` errors for some tied or constant strata. ggplot2 turns that error into a warning and can blank the entire panel. Choose a single panel-wide selector before plotting: if SJ cannot produce a finite positive bandwidth for every nonmissing group, use `nrd0` for the panel and state the fallback in the caption. A completely constant group has no density to estimate; retain its raw points and do not interpret a violin shape for it.
+
+```r
+safe_violin_bw <- function(data, group = 'group', value = 'value') {
+  values <- split(data[[value]], data[[group]], drop = TRUE)
+  sj_ok <- vapply(values, function(x) {
+    x <- x[is.finite(x)]
+    if (length(x) < 2L || length(unique(x)) < 2L) return(FALSE)
+    bw <- tryCatch(stats::bw.SJ(x), error = function(e) NA_real_)
+    is.finite(bw) && bw > 0
+  }, logical(1))
+  if (all(sj_ok)) 'SJ' else 'nrd0'
+}
+
+bw_used <- safe_violin_bw(df)
+ggplot(df, aes(group, value, fill = group)) +
+  geom_violin(alpha = 0.7, trim = TRUE, bw = bw_used) +
+  geom_boxplot(width = 0.1, fill = 'white', outlier.shape = NA) +
+  labs(caption = paste('Bandwidth:', bw_used))
+```
+
+`nrd0` is Silverman's rule; `nrd` has a larger rule-of-thumb bandwidth (1.06 / 0.9 times `nrd0`) and therefore smooths more, not less. Sheather-Jones remains preferred when the guard permits it. For non-negative or otherwise bounded data, keep `trim = TRUE` or set an explicit axis bound: `trim = FALSE` can draw KDE mass outside the possible range.
+
+### Beeswarm / quasirandom
 
 ```r
 library(ggbeeswarm)
 ggplot(df, aes(group, value, color = group)) +
-    geom_quasirandom(method = 'quasirandom', width = 0.3, alpha = 0.7) +
-    scale_color_manual(values = c('#0072B2', '#D55E00')) +
-    stat_summary(fun = median, geom = 'crossbar', width = 0.5, color = 'black')
+  geom_quasirandom(method = 'quasirandom', width = 0.3, alpha = 0.7) +
+  stat_summary(fun = median, geom = 'crossbar', width = 0.5, color = 'black') +
+  scale_color_manual(values = c('#0072B2', '#D55E00'))
 ```
 
-Quasirandom (van der Corput sequence; Bostock implementation) gives reproducible jitter that fills space without random scatter. Beeswarm is similar but with collision avoidance. Both are deterministic — reruns produce identical layouts.
+Quasirandom layouts are deterministic and show every point, making them a strong default from N = 10 through N = 29.
 
-### Raincloud (Allen 2019) -- distribution + summary + raw
+### R raincloud (ggdist, N = 30-200)
 
-**Goal:** Show distribution (half-violin), summary (boxplot), and raw observations (jittered points) in a single per-group panel without occlusion.
-
-**Approach:** Place a half-violin on one side, a thin boxplot in the middle, and jittered points on the other side via `gghalves::geom_half_violin` + `geom_boxplot` + `geom_half_point` with `position_nudge` offsets; flip to horizontal so the visual reads as a literal raincloud.
+Use the standalone, current-stack example rather than an archived gghalves recipe:
 
 ```r
-library(gghalves)
-ggplot(df, aes(group, value, fill = group, color = group)) +
-    geom_half_violin(side = 'r', alpha = 0.7, position = position_nudge(x = 0.15)) +
-    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.7,
-                 position = position_nudge(x = -0.05)) +
-    geom_half_point(side = 'l', alpha = 0.5, size = 1.5, range_scale = 0.4,
-                    position = position_nudge(x = -0.2)) +
-    scale_fill_manual(values = c('#0072B2', '#D55E00')) +
-    scale_color_manual(values = c('#0072B2', '#D55E00')) +
-    coord_flip()                                          # horizontal "raincloud"
+source('examples/raincloud_phd.R')
 ```
+
+It uses `ggdist::stat_halfeye`, a compact boxplot, and seeded raw points, and creates its own deterministic data when run as delivered. For a project frame, replace its `df_med` with columns `group` and `value`, then recompute the local N-label table from that frame.
 
 ```python
 import ptitprince as pt
-import seaborn as sns
-pt.RainCloud(x='group', y='value', data=df,
-             palette=['#0072B2', '#D55E00'],
-             bw='scott', cut=0,                          # bandwidth + trim
-             width_viol=0.6, orient='h')
+
+# ptitprince has no Sheather-Jones selector; Scott can smooth close modes.
+pt.RainCloud(x='group', y='value', data=df, hue='group', palette={
+    'Control': '#0072B2', 'Treated': '#D55E00'},
+    bw='scott', cut=0, width_viol=0.6, orient='h')
 ```
 
-Raincloud = half-violin (distribution) + boxplot (summary) + jittered raw points. Allen 2019 *Wellcome Open Res* 4:63 — modern publication default for N 30-200.
+Use `cut=0` for bounded data so the displayed KDE does not extend beyond observed values. Treat the Python raincloud as a Scott-bandwidth alternative, not as evidence that the R SJ result will be reproduced.
 
-### Letter-value plot (Hofmann-Wickham 2017)
+### Letter-value plot (N >= 201)
 
 ```r
 library(lvplot)
 ggplot(df, aes(group, value, fill = group)) +
-    geom_lv(k = 5, alpha = 0.7) +
-    scale_fill_manual(values = c('#0072B2', '#D55E00'))
+  geom_lv(k = 5, alpha = 0.7) +
+  scale_fill_manual(values = c('#0072B2', '#D55E00'))
 ```
 
-Extends Tukey's boxplot via additional letter-value quantiles (Hofmann, Wickham, Kafadar 2017 *J Comput Graph Stat* 26:469). For large N, the standard boxplot collapses tail structure; letter-value preserves it.
+Letter-value plots retain tail structure that a standard boxplot collapses. In seaborn, avoid the deprecated palette-only form:
 
 ```python
-sns.boxenplot(x='group', y='value', data=df,
-              palette=['#0072B2', '#D55E00'])             # seaborn calls it boxenplot
+sns.boxenplot(data=df, x='group', y='value', hue='group',
+              palette={'Control': '#0072B2', 'Treated': '#D55E00'}, legend=False)
 ```
 
-### Stacked / split violin (paired comparisons)
+### Split violin (exactly two complete, sufficiently large conditions)
+
+Split violins are only valid for an ordered, two-level condition factor. Before plotting, remove clusters that lack either condition or have fewer than 30 nonmissing observations in either condition; do not allow a missing cell to flip the sides in later clusters. The runnable guard and example are in `examples/raincloud_phd.R`.
 
 ```r
-library(introdataviz)               # split-violin geom
-ggplot(df, aes(group, value, fill = condition)) +
-    geom_split_violin(alpha = 0.7) +
-    geom_boxplot(width = 0.15, position = position_dodge(0.5), outlier.shape = NA)
+split_df <- prepare_split_violin_data(df_paired, min_n = 30)
+ggplot(split_df, aes(cluster, expression, fill = condition,
+                     group = interaction(cluster, condition, lex.order = TRUE))) +
+  introdataviz::geom_split_violin(alpha = 0.7, trim = TRUE, bw = safe_violin_bw(
+    transform(split_df, group = interaction(cluster, condition)), 'group', 'expression')) +
+  geom_boxplot(width = 0.15, position = position_dodge(0.5), outlier.shape = NA) +
+  scale_fill_manual(values = c(Control = '#56B4E9', Treatment = '#D55E00'))
 ```
 
-For 2-condition comparison within each group, split-violin shows both densities back-to-back. More compact than dodged violins.
+## Failure Modes and Fixes
 
-## Per-Method Failure Modes
-
-### Bar of mean with SEM
-
-**Trigger:** `geom_bar(stat = 'summary')` + `geom_errorbar(stat = 'summary', fun.data = mean_se)`.
-
-**Mechanism:** Mean ± SEM collapses all distributional information; reader cannot assess bimodality, skew, or N.
-
-**Symptom:** Reviewer asks to "show the data"; the figure must be redone.
-
-**Fix:** Replace with raincloud, beeswarm, or boxplot+jitter. Show points for N < 30.
-
-### Violin with default Silverman bandwidth oversmooths bimodality
-
-**Trigger:** `geom_violin()` without specifying `bw`.
-
-**Mechanism:** Silverman's rule of thumb assumes unimodal Gaussian; oversmooths bimodal data into a single peak.
-
-**Symptom:** Single-cell expression bimodality (off / on) renders as a unimodal violin; biologically false.
-
-**Fix:** `bw = 'SJ'` (Sheather-Jones plug-in) for honest bimodality. Note: `nrd0` IS Silverman; `nrd` (Scott) oversmooths less than Silverman but Sheather-Jones is preferred.
-
-### Notched boxplot with too-small N
-
-**Trigger:** `notch = TRUE` with N < 15 per group.
-
-**Mechanism:** Notch can extend beyond Q1/Q3, producing visually-misleading "inside-out" notches.
-
-**Symptom:** ggplot warning ("notch went outside hinges"); notches look weird.
-
-**Fix:** Use notches only with N ≥ 15. For smaller N, show raw points instead.
-
-### Boxplot hides outliers when jittered points are overlaid
-
-**Trigger:** `geom_boxplot() + geom_jitter()` with default `outlier.shape = 19`.
-
-**Mechanism:** Outliers render twice — once from boxplot (large dots), once from jitter (smaller dots) — visually duplicated.
-
-**Symptom:** Some points appear bigger than others without reason.
-
-**Fix:** `geom_boxplot(outlier.shape = NA)` when overlaying raw points.
-
-### Trim = TRUE on violin misleads about tails
-
-**Trigger:** `geom_violin()` default `trim = TRUE`.
-
-**Mechanism:** Default trims violin at the data range; the visual still shows narrowing "tails" implying density extends slightly beyond the data.
-
-**Symptom:** Reader infers density beyond observed range.
-
-**Fix:** `trim = FALSE` to let KDE extend, OR explicitly cap with `coord_cartesian`. Document the choice.
-
-### No N annotation
-
-**Trigger:** Boxplot with no N per group reported.
-
-**Mechanism:** Reader cannot assess statistical power; tiny N looks identical to large N at this encoding.
-
-**Symptom:** Reviewer requests "show N per group."
-
-**Fix:** Add N to x-axis tick label (`Control (n=12)`) or use `stat_summary(geom='text', fun.data = function(x) data.frame(label = paste('n=', length(x))))`.
-
-### Wide raincloud at small N
-
-**Trigger:** Raincloud applied with N = 5 per group.
-
-**Mechanism:** KDE with N=5 is meaningless; violin shape is artifact of bandwidth.
-
-**Symptom:** Smooth violin from 5 points; misleads about underlying distribution.
-
-**Fix:** For N < 30, drop the violin half; use box + raw points only.
-
-## Reconciliation: When Encodings Disagree
-
-| Pattern | Cause | Action |
-|---------|-------|--------|
-| Bar of mean shows clear separation; raincloud shows overlapping distributions | Bars hide overlap | Use raincloud; bars exaggerate effect |
-| Violin shows unimodal; histogram shows bimodal | Default Silverman bandwidth oversmooths | Re-render with `bw = 'SJ'` |
-| Boxplot medians look distinct; t-test n.s. | Boxplot of small N is unreliable | Show raw points; rerun with appropriate non-parametric test |
-| Notched boxplot notches non-overlap; rank test n.s. | Notch is an approximation, not a hypothesis test | Notches are heuristic only; use formal test |
-
-**Operational rule:** for N < 30, show every point. For N 30-200, raincloud. For N > 200, letter-value or violin with explicit bandwidth. Always annotate N.
+| Symptom | Cause | Fix |
+|---|---|---|
+| Means conceal shape or N | bar of mean +/- SEM | use raw points, quasirandom, raincloud, or box + points according to the table |
+| `Computation failed in stat_ydensity()` or an empty panel | `bw.SJ` failed in a tied/constant group | use `safe_violin_bw()` panel-wide; retain raw points for constant strata |
+| Violin is too smooth to show a plausible second mode | implicit `nrd0` bandwidth | use the guarded SJ choice and compare to a histogram |
+| Density appears below zero for non-negative data | `trim = FALSE` extrapolates KDE | use `trim = TRUE` or enforce an explicit lower bound |
+| Box + points shows oversized duplicates | boxplot also draws outliers | `geom_boxplot(outlier.shape = NA)` |
+| Notch goes outside hinges | N < 15 | remove notches and show raw points |
+| N label errors with missing `y` | text stat returned a label only | use an axis label, or return both `y` and `label` from `fun.data` |
+| Split-violin sides swap or a tiny cell vanishes | incomplete grid / fewer than 30 observations | call `prepare_split_violin_data()` and omit that cluster from the split-violin panel |
+| R raincloud errors with `argument "layout" is missing` | archived gghalves on ggplot2 4.x | use ggdist `stat_halfeye`; do not pin a current workflow to gghalves |
 
 ## Quantitative Thresholds
 
 | Threshold | Value | Source |
-|-----------|-------|--------|
-| N for valid notched boxplot | ≥15 | Common practice |
-| N to show raw points | <30 | Weissgerber 2015 |
-| N where violin > box | >30 (with explicit bandwidth) | Visualization guidance |
-| Whisker length (Tukey) | 1.5 × IQR | Tukey 1977 |
-| Notch length (McGill 1978) | ±1.58 × IQR / sqrt(N) | McGill 1978 |
-| KDE bandwidth (Sheather-Jones) | plug-in selector | Sheather-Jones 1991 |
-
-## Common Errors
-
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| Bimodal data shown as unimodal violin | Default Silverman bandwidth | `bw = 'SJ'` |
-| Duplicate large points on box + jitter | `outlier.shape` not suppressed | `geom_boxplot(outlier.shape = NA)` |
-| Notches "inside-out" | N too small | Show raw points; remove notch |
-| Raincloud looks smooth at N=5 | KDE meaningless at small N | Drop violin half; box + points only |
-| No N visible | Default boxplot | Add `n=...` to x label or stat_summary text |
-| Violin tails extend beyond data | `trim = TRUE` default + KDE bandwidth | `trim = FALSE` and cap with `coord_cartesian` |
-| Bar of mean criticized in review | Weissgerber 2015 default failure | Replace with raincloud or box+jitter |
+|---|---|---|
+| Valid notched boxplot | N >= 15 | McGill et al. 1978 guidance |
+| Show every raw point | N < 30 | Weissgerber et al. 2015 |
+| Raincloud / reliable KDE candidate | N = 30-200 | visualization guidance; inspect histogram and bandwidth |
+| Letter-value plot | N >= 201 | Hofmann et al. 2017 |
+| Split-violin cell eligibility | both ordered conditions present and N >= 30 each | prevents unstable KDE and side ambiguity |
+| Whisker length | 1.5 * IQR | Tukey 1977 |
+| Notch length | +/- 1.58 * IQR / sqrt(N) | McGill et al. 1978 |
 
 ## References
 
@@ -254,7 +182,6 @@ For 2-condition comparison within each group, split-violin shows both densities 
 - Hofmann H, Wickham H, Kafadar K. 2017. Letter-value plots: boxplots for large data. *J Comput Graph Stat* 26(3):469-477. doi:10.1080/10618600.2017.1305277
 - McGill R, Tukey JW, Larsen WA. 1978. Variations of box plots. *Am Stat* 32(1):12-16.
 - Sheather SJ, Jones MC. 1991. A reliable data-based bandwidth selection method for kernel density estimation. *J R Stat Soc B* 53(3):683-690.
-- Streit M, Gehlenborg N. 2014. Points of view: Bar charts and box plots. *Nat Methods* 11(2):117.
 - Tukey JW. 1977. *Exploratory Data Analysis.* Addison-Wesley.
 - Weissgerber TL, Milic NM, Winham SJ, Garovic VD. 2015. Beyond bar and line graphs: time for a new data presentation paradigm. *PLOS Biol* 13(4):e1002128. doi:10.1371/journal.pbio.1002128
 
