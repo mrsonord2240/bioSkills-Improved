@@ -1,6 +1,11 @@
 ---
 name: bio-single-cell-splicing
-description: Analyzes alternative splicing at single-cell resolution. Start by determining whether library chemistry supports the requested inference: 10X 3' is unsuitable for transcriptome-wide splicing; full-length plate and single-cell long-read assays support per-cell isoform structure. Routes work to MARVEL, BRIE2, scQuint, SpliZ, Psix, Sierra (APA), or replicate-aware pseudobulk.
+description: >-
+  Analyzes alternative splicing at single-cell resolution. Start by determining
+  whether library chemistry supports the requested inference: 10X 3' is
+  unsuitable for transcriptome-wide splicing; full-length plate and single-cell
+  long-read assays support per-cell isoform structure. Routes work to MARVEL,
+  BRIE2, scQuint, SpliZ, Psix, Sierra (APA), or replicate-aware pseudobulk.
 tool_type: mixed
 primary_tool: MARVEL
 license: MIT
