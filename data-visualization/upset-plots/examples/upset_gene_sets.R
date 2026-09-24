@@ -1,97 +1,57 @@
-# Reference: UpSetR 1.4+, ComplexUpset 1.3+, ggplot2 3.5+ | Verify API if version differs
+# Purpose: deterministic UpSetR examples with identifier preflight and Cairo PDF export.
+# Usage: Rscript upset_gene_sets.R (run in a directory where PDFs may be written).
 library(UpSetR)
 
-# --- ALTERNATIVE: Use real gene sets ---
-# For realistic examples, try GO term gene sets or DE results:
-#
-# library(clusterProfiler)
-# library(org.Hs.eg.db)
-# ego <- enrichGO(gene_list, OrgDb = org.Hs.eg.db, ont = 'BP')
-# gene_sets <- geneInCategory(ego)[1:6]
-#
-# Or use MSigDB gene sets:
-# library(msigdbr)
-# hallmark <- msigdbr(species = 'Homo sapiens', category = 'H')
+prepare_sets <- function(sets) {
+  stopifnot(is.list(sets), !is.null(names(sets)), all(nzchar(names(sets))))
+  cleaned <- lapply(names(sets), function(nm) {
+    x <- trimws(as.character(sets[[nm]]))
+    bad <- is.na(x) | !nzchar(x)
+    if (any(bad)) warning(sprintf("%s: removed %d NA/blank identifier(s)", nm, sum(bad)))
+    x <- x[!bad]
+    old_n <- length(x); x <- unique(x)
+    if (length(x) != old_n) warning(sprintf("%s: removed %d duplicate identifier(s)", nm, old_n - length(x)))
+    x
+  })
+  names(cleaned) <- names(sets)
+  empty <- names(cleaned)[lengths(cleaned) == 0L]
+  if (length(empty)) stop("empty set(s) after preflight: ", paste(empty, collapse = ", "))
+  message("set sizes: ", paste(sprintf("%s=%d", names(cleaned), lengths(cleaned)), collapse = "; "),
+          " | union=", length(unique(unlist(cleaned, use.names = FALSE))))
+  cleaned
+}
 
-# Simulated gene sets representing different analyses
-# Typical scenario: comparing DE genes across conditions/timepoints
 set.seed(42)
-
-all_genes <- paste0('Gene', 1:500)
-
-# Simulate overlapping gene sets (e.g., DE genes from different comparisons)
-# Real gene sets often have ~10-30% overlap between related conditions
+all_genes <- paste0("Gene", 1:500)
 gene_sets <- list(
-    Treatment_vs_Control = sample(all_genes, 150),
-    Timepoint_6h = sample(all_genes, 120),
-    Timepoint_24h = sample(all_genes, 180),
-    Drug_A = sample(all_genes, 100),
-    Drug_B = sample(all_genes, 90),
-    Combined_Treatment = sample(all_genes, 200)
+  Treatment_vs_Control = sample(all_genes, 150), Timepoint_6h = sample(all_genes, 120),
+  Timepoint_24h = sample(all_genes, 180), Drug_A = sample(all_genes, 100),
+  Drug_B = sample(all_genes, 90), Combined_Treatment = sample(all_genes, 200)
 )
-
-# Add some forced overlaps for biological realism
-# Core response genes present in multiple conditions
 core_genes <- sample(all_genes, 30)
-for (i in 1:4) {
-    gene_sets[[i]] <- unique(c(gene_sets[[i]], core_genes))
-}
+for (i in 1:4) gene_sets[[i]] <- c(gene_sets[[i]], core_genes)
+gene_sets <- prepare_sets(gene_sets)
+upset_data <- UpSetR::fromList(gene_sets)
+colors <- c("#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4")
 
-# Basic UpSet plot sorted by frequency
-# Shows largest intersections first - most useful default
-pdf('upset_basic.pdf', width = 12, height = 7)
-upset(fromList(gene_sets),
-      nsets = 6,
-      order.by = 'freq',
-      mainbar.y.label = 'Genes in Intersection',
-      sets.x.label = 'Total Genes per Set')
+cairo_pdf("upset_basic.pdf", width = 12, height = 7)
+UpSetR::upset(upset_data, nsets = length(gene_sets), order.by = "freq",
+              mainbar.y.label = "Genes in exclusive intersection", sets.x.label = "Total genes per set")
 dev.off()
 
-# Customized with colors and adjusted ratios
-# mb.ratio controls matrix-to-bar height ratio (default 0.7, 0.3)
-pdf('upset_customized.pdf', width = 12, height = 8)
-upset(fromList(gene_sets),
-      nsets = 6,
-      nintersects = 30,
-      order.by = 'freq',
-      decreasing = TRUE,
-      mb.ratio = c(0.55, 0.45),
-      point.size = 3.5,
-      line.size = 1.2,
-      sets.bar.color = c('#E64B35', '#4DBBD5', '#00A087', '#3C5488', '#F39B7F', '#8491B4'),
-      main.bar.color = '#7E6148',
-      matrix.color = '#7E6148',
-      text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.2),
-      set_size.show = TRUE)
+cairo_pdf("upset_customized.pdf", width = 12, height = 8)
+UpSetR::upset(upset_data, nsets = length(gene_sets), nintersects = 30, order.by = "freq", decreasing = TRUE,
+              mb.ratio = c(0.55, 0.45), point.size = 3.5, line.size = 1.2, sets.bar.color = colors,
+              main.bar.color = "#7E6148", matrix.color = "#7E6148",
+              text.scale = c(1.5, 1.2, 1.2, 1, 1.5, 1.2), set_size.show = TRUE)
 dev.off()
 
-# With query highlights
-# Highlight specific intersections of interest
-pdf('upset_queries.pdf', width = 12, height = 8)
-upset(fromList(gene_sets),
-      nsets = 6,
-      order.by = 'freq',
-      queries = list(
-          # Highlight genes unique to combined treatment
-          list(query = intersects,
-               params = list('Combined_Treatment'),
-               color = '#E64B35',
-               active = TRUE,
-               query.name = 'Combined only'),
-          # Highlight core genes in multiple timepoints
-          list(query = intersects,
-               params = list('Timepoint_6h', 'Timepoint_24h'),
-               color = '#4DBBD5',
-               active = TRUE,
-               query.name = 'Both timepoints')
-      ),
-      query.legend = 'bottom')
+cairo_pdf("upset_queries.pdf", width = 12, height = 8)
+UpSetR::upset(upset_data, nsets = length(gene_sets), order.by = "freq",
+  queries = list(
+    list(query = intersects, params = list("Combined_Treatment"), color = "#E64B35", active = TRUE,
+         query.name = "Combined treatment"),
+    list(query = intersects, params = list("Timepoint_6h", "Timepoint_24h"), color = "#4DBBD5", active = TRUE,
+         query.name = "Both timepoints")), query.legend = "bottom")
 dev.off()
-
-message('UpSet plots saved: upset_basic.pdf, upset_customized.pdf, upset_queries.pdf')
-
-# Print intersection statistics
-cat('\nSet sizes:\n')
-for (name in names(gene_sets)) {
-    cat(sprintf('  %s: %d genes\n', name, length(gene_sets[[name]])))
-}
+message("Saved upset_basic.pdf, upset_customized.pdf, upset_queries.pdf")
