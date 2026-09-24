@@ -31,7 +31,7 @@ Tell the AI agent what is needed:
 ### Quality Control
 > "Compute QC metrics with mito, ribo, and hemoglobin fractions and show the distributions"
 
-> "Filter cells using 5 MAD on counts/genes and 3 MAD plus a hard 8% mito cap"
+> "Filter cells using 5 MAD on counts/genes and a tissue-aware mitochondrial cap"
 
 > "My tissue is cardiac muscle - set a mito threshold that does not delete cardiomyocytes"
 
@@ -56,20 +56,6 @@ Tell the AI agent what is needed:
 5. Select HVGs with the correct input type for the chosen flavor
 6. Skip or apply scaling/regression based on whether a covariate is confounded with biology
 7. Run PCA on the HVG matrix, ready for clustering
-
-## Tips
-
-- **Normalization encodes an assumption** - size-factor methods assume constant total mRNA per cell, violated by plasma cells, neurons, secretory cells, and cycling cells; report relative, not absolute, expression.
-- **Shifted-log is the defensible default** - Ahlmann-Eltze 2023 found it matches or beats sctransform and Pearson residuals for general downstream tasks.
-- **Mito % is a biology metric** - cardiomyocytes/hepatocytes/muscle are constitutively high-mito; nuclei are near zero; a flat cutoff silently deletes healthy parenchyma.
-- **QC per sample for multi-batch designs** - compute MAD thresholds within each sample/batch; global MAD over-cuts shallow batches and under-cuts deep ones.
-- **Empty-drop, ambient, QC, and doublet steps are per-sample** - run them before merge/integration; merge-then-QC leaks batch effects into every threshold.
-- **Ambient before QC** - SoupX/CellBender need the raw matrix and the soup estimate, which is gone after filtering to cells.
-- **Pick one ambient tool** - stacking SoupX, CellBender, and DecontX compounds over-removal; validate a known marker survives.
-- **HVG input type is the classic bug** - dispersion flavors want log-normalized data; seurat_v3 and Pearson want raw counts.
-- **Stash raw counts** - HVG (seurat_v3) and doublet detection both need them; keep them in `layers['counts']`.
-- **Do not reflexively regress out** - regressing total_counts or cell-cycle erases biology confounded with cell state.
-- **Watch for dissociation artifacts** - a new IEG/HSP "stressed" cluster passes QC and is often a protocol artifact, not biology.
 
 ## Related Skills
 
