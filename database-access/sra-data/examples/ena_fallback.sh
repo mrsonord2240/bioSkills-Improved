@@ -11,13 +11,16 @@ run_ena_fallback() {
     local files
     local destination
 
-    stage_dir=$(mktemp -d "${out_dir%/}/.${accession}.ena-fallback.XXXXXX")
+    # shellcheck source=sra_safety.sh
+    source "${script_dir}/sra_safety.sh"
+    require_sra_run_accession "${accession}" || return
+    stage_dir=$(make_owned_stage "${out_dir}" "${accession}" "ena-fallback") || return
     accessions_file="${stage_dir}/accessions.txt"
     printf '%s\n' "${accession}" > "${accessions_file}"
 
     echo "=== SRA Toolkit route could not complete; trying verified ENA mirror fallback ==="
     if ! bash "${script_dir}/download_batch.sh" "${accessions_file}" "${stage_dir}"; then
-        rm -rf "${stage_dir}"
+        cleanup_owned_stage "${stage_dir}" "${out_dir}"
         return 1
     fi
     if [ -s "${stage_dir}/failed.txt" ] || ! compgen -G "${stage_dir}/*.fastq.gz" >/dev/null; then
@@ -25,22 +28,27 @@ run_ena_fallback() {
         if [ -s "${stage_dir}/failed.txt" ]; then
             echo "Failed accession(s): $(tr '\n' ' ' < "${stage_dir}/failed.txt")" >&2
         fi
-        rm -rf "${stage_dir}"
+        cleanup_owned_stage "${stage_dir}" "${out_dir}"
         return 1
     fi
 
     shopt -s nullglob
     files=("${stage_dir}"/*.fastq.gz)
+    shopt -u nullglob
     for source_file in "${files[@]}"; do
         destination="${out_dir}/$(basename "${source_file}")"
-        if [ -e "${destination}" ]; then
+        if [ -e "${destination}" ] || [ -L "${destination}" ]; then
             echo "Refusing to overwrite existing output: ${destination}" >&2
-            rm -rf "${stage_dir}"
+            cleanup_owned_stage "${stage_dir}" "${out_dir}"
             return 1
         fi
     done
     for source_file in "${files[@]}"; do
-        mv "${source_file}" "${out_dir}/"
+        destination="${out_dir}/$(basename "${source_file}")"
+        if ! publish_no_clobber "${source_file}" "${destination}"; then
+            cleanup_owned_stage "${stage_dir}" "${out_dir}"
+            return 1
+        fi
     done
-    rm -rf "${stage_dir}"
+    cleanup_owned_stage "${stage_dir}" "${out_dir}"
 }

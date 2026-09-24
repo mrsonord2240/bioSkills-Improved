@@ -14,6 +14,9 @@ if [ ! -f "${ACC_FILE}" ]; then
 fi
 
 mkdir -p "${OUT}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=sra_safety.sh
+source "${SCRIPT_DIR}/sra_safety.sh"
 FAILED="${OUT}/failed.txt"
 : > "${FAILED}"
 
@@ -26,6 +29,10 @@ while read -r ACC; do
     count=$((count+1))
     echo
     echo "[${count}/${total}] ${ACC}"
+    if ! require_sra_run_accession "${ACC}"; then
+        echo "${ACC}" >> "${FAILED}"
+        continue
+    fi
 
     # Query ENA portal API for FASTQ URLs + md5. Locate columns by their documented
     # field name, not a fixed index: ENA's filereport ALWAYS prepends run_accession as

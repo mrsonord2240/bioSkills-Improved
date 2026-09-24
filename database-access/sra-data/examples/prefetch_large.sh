@@ -11,8 +11,19 @@ TENX="${4:-no}"  # 'yes' to keep technical reads (barcode/UMI/index) for 10x rec
 
 mkdir -p "${OUT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=sra_safety.sh
+source "${SCRIPT_DIR}/sra_safety.sh"
 # shellcheck source=ena_fallback.sh
 source "${SCRIPT_DIR}/ena_fallback.sh"
+require_sra_run_accession "${SRR}"
+WORK_DIR=$(make_owned_stage "${OUT}" "${SRR}" "toolkit-work")
+TOOLKIT_OUT=$(make_owned_stage "${OUT}" "${SRR}" "toolkit-fastq")
+
+cleanup_stages() {
+    cleanup_owned_stage "${TOOLKIT_OUT}" "${OUT}" || true
+    cleanup_owned_stage "${WORK_DIR}" "${OUT}" || true
+}
+trap cleanup_stages EXIT
 
 fallback_to_ena_or_die() {
     echo "SRA Toolkit/STRIDES route could not complete ${SRR}; no partial toolkit FASTQ was published."
@@ -29,14 +40,16 @@ echo "=== Check STRIDES availability ==="
 if command -v aws >/dev/null 2>&1 && aws s3 ls "s3://sra-pub-run-odp/sra/${SRR}/" --no-sign-request 2>/dev/null | grep -q "${SRR}"; then
     echo "  Available on AWS Open Data; pulling (free within us-east-1)"
     # STRIDES objects are unsuffixed (just SRR12345678); rename on copy.
-    aws s3 cp "s3://sra-pub-run-odp/sra/${SRR}/${SRR}" "./${SRR}.sra" --no-sign-request
-    SRA_PATH="./${SRR}.sra"
-else
-    echo "  AWS object unavailable (or aws CLI missing); trying NCBI prefetch"
-    if ! prefetch "${SRR}" --max-size 200G -p; then
+    SRA_PATH="${WORK_DIR}/${SRR}.sra"
+    if ! aws s3 cp "s3://sra-pub-run-odp/sra/${SRR}/${SRR}" "${SRA_PATH}" --no-sign-request; then
         fallback_to_ena_or_die
     fi
-    SRA_PATH="${SRR}"
+else
+    echo "  AWS object unavailable (or aws CLI missing); trying NCBI prefetch"
+    if ! (cd -- "${WORK_DIR}" && prefetch "${SRR}" --max-size 200G -p); then
+        fallback_to_ena_or_die
+    fi
+    SRA_PATH="${WORK_DIR}/${SRR}"
 fi
 
 echo
@@ -53,14 +66,12 @@ if [ "${TENX}" = "yes" ]; then
     echo "  10x mode: keeping technical reads (R1=barcode+UMI, R2=cDNA, I1=index for 10x v3)"
 fi
 
-TOOLKIT_OUT=$(mktemp -d "${OUT%/}/.${SRR}.toolkit.XXXXXX")
 if ! fasterq-dump "${SRA_PATH}" \
     -O "${TOOLKIT_OUT}" \
     -e "${THREADS}" \
     -p \
     --split-files \
     ${TECH_FLAG}; then
-    rm -rf "${TOOLKIT_OUT}"
     fallback_to_ena_or_die
 fi
 
@@ -73,18 +84,18 @@ else
 fi
 
 for file in "${TOOLKIT_OUT}/${SRR}"_*.fastq.gz; do
-    if [ -e "${OUT}/$(basename "${file}")" ]; then
+    if [ -e "${OUT}/$(basename "${file}")" ] || [ -L "${OUT}/$(basename "${file}")" ]; then
         echo "Refusing to overwrite existing output: ${OUT}/$(basename "${file}")" >&2
         exit 1
     fi
 done
-mv "${TOOLKIT_OUT}/${SRR}"_*.fastq.gz "${OUT}/"
-rmdir "${TOOLKIT_OUT}"
+for file in "${TOOLKIT_OUT}/${SRR}"_*.fastq.gz; do
+    publish_no_clobber "${file}" "${OUT}/$(basename "${file}")"
+done
 
 echo
 echo "=== Cleanup ==="
-rm -f "./${SRR}.sra"
-rm -rf "${SRR}"  # SRA cache directory if prefetch used
+echo "Owned Toolkit cache and staging directories are removed on exit."
 
 echo
 echo "Files:"

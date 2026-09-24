@@ -11,8 +11,19 @@ MAX_SIZE="${4:-100G}"  # Default 20G silently skips larger -- always set explici
 
 mkdir -p "${OUT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=sra_safety.sh
+source "${SCRIPT_DIR}/sra_safety.sh"
 # shellcheck source=ena_fallback.sh
 source "${SCRIPT_DIR}/ena_fallback.sh"
+require_sra_run_accession "${SRR}"
+WORK_DIR=$(make_owned_stage "${OUT}" "${SRR}" "toolkit-work")
+TOOLKIT_OUT=$(make_owned_stage "${OUT}" "${SRR}" "toolkit-fastq")
+
+cleanup_stages() {
+    cleanup_owned_stage "${TOOLKIT_OUT}" "${OUT}" || true
+    cleanup_owned_stage "${WORK_DIR}" "${OUT}" || true
+}
+trap cleanup_stages EXIT
 
 fallback_to_ena_or_die() {
     echo "SRA Toolkit could not complete ${SRR}; no partial toolkit FASTQ was published."
@@ -25,13 +36,13 @@ fallback_to_ena_or_die() {
 }
 
 echo "=== prefetch ${SRR} (max-size ${MAX_SIZE}) ==="
-if ! prefetch "${SRR}" --max-size "${MAX_SIZE}" -p; then
+if ! (cd -- "${WORK_DIR}" && prefetch "${SRR}" --max-size "${MAX_SIZE}" -p); then
     fallback_to_ena_or_die
 fi
 
 echo
 echo "=== vdb-validate ==="
-if ! vdb-validate "${SRR}"; then
+if ! vdb-validate "${WORK_DIR}/${SRR}"; then
     fallback_to_ena_or_die
 fi
 
@@ -39,14 +50,12 @@ echo
 echo "=== fasterq-dump (writes uncompressed; needs ~3x final size in scratch) ==="
 # --split-files: emit _1.fastq and _2.fastq for paired
 # DROP --skip-technical if this is 10x or other single-cell data (need barcodes/UMIs)
-TOOLKIT_OUT=$(mktemp -d "${OUT%/}/.${SRR}.toolkit.XXXXXX")
-if ! fasterq-dump "${SRR}" \
+if ! fasterq-dump "${WORK_DIR}/${SRR}" \
     -O "${TOOLKIT_OUT}" \
     -e "${THREADS}" \
     -p \
     --split-files \
     --skip-technical; then
-    rm -rf "${TOOLKIT_OUT}"
     fallback_to_ena_or_die
 fi
 
@@ -59,18 +68,18 @@ else
 fi
 
 for file in "${TOOLKIT_OUT}/${SRR}"_*.fastq.gz; do
-    if [ -e "${OUT}/$(basename "${file}")" ]; then
+    if [ -e "${OUT}/$(basename "${file}")" ] || [ -L "${OUT}/$(basename "${file}")" ]; then
         echo "Refusing to overwrite existing output: ${OUT}/$(basename "${file}")" >&2
         exit 1
     fi
 done
-mv "${TOOLKIT_OUT}/${SRR}"_*.fastq.gz "${OUT}/"
-rmdir "${TOOLKIT_OUT}"
+for file in "${TOOLKIT_OUT}/${SRR}"_*.fastq.gz; do
+    publish_no_clobber "${file}" "${OUT}/$(basename "${file}")"
+done
 
 echo
 echo "Files:"
 ls -lh "${OUT}/${SRR}"_*.fastq.gz
 
 echo
-echo "Optional cleanup:"
-echo "  rm -rf \"${SRR}\"   # remove cached .sra after successful FASTQ extraction"
+echo "Toolkit cache and staging directories were created under the output directory and cleaned safely."

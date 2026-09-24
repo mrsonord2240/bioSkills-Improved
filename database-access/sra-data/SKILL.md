@@ -201,7 +201,7 @@ For cloud-native analysis pipelines (Nextflow on AWS Batch, Cromwell, etc.), STR
 
 ### prefetch + fasterq-dump (SRA toolkit, classic)
 
-`bash examples/download_single.sh <SRR> [out_dir] [threads] [max_size]` -- prefetch with explicit `--max-size`, `vdb-validate`, `fasterq-dump --split-files`, then pigz/gzip. It passes `--skip-technical`; drop that flag for 10x or other single-cell data. If the current SRA Toolkit cannot complete a public run (including an unresolved normalized-reference dependency), the script keeps partial toolkit output staged and safely retries the MD5-verified ENA mirror route. The ENA helper respects the controlled-access guard: an accession without public ENA FASTQ fields produces no files and exits nonzero.
+`bash examples/download_single.sh <SRR> [out_dir] [threads] [max_size]` -- accepts only uppercase run accessions (`SRR`, `ERR`, or `DRR` followed by digits), then runs prefetch with explicit `--max-size`, `vdb-validate`, `fasterq-dump --split-files`, and pigz/gzip. It passes `--skip-technical`; drop that flag for 10x or other single-cell data. Toolkit cache and temporary FASTQ staging are owned directories under `out_dir` and are cleaned on every exit. If the current SRA Toolkit cannot complete a public run (including an unresolved normalized-reference dependency), the script retries the MD5-verified ENA mirror route; publication uses no-clobber hard links, so an existing file or dangling symlink is refused. The ENA helper respects the controlled-access guard: an accession without public ENA FASTQ fields produces no files and exits nonzero.
 
 ### Batch via pysradb metadata
 
@@ -213,7 +213,7 @@ For cloud-native analysis pipelines (Nextflow on AWS Batch, Cromwell, etc.), STR
 
 ### Cloud (STRIDES) and 10x single-cell
 
-`bash examples/prefetch_large.sh <SRR> [out_dir] [threads] [yes|no]` -- checks the AWS Open Data bucket (run from EC2 in us-east-1 for zero egress), falls back to `prefetch --max-size 200G`, validates, runs `fasterq-dump --split-files`, compresses, and cleans up. If neither Toolkit/STRIDES path completes for a public run, it safely retries the MD5-verified ENA mirror route with staged output. Pass `yes` as the 4th argument for 10x records: it swaps `--skip-technical` for `--include-technical` (10x v3 expects R1 28-bp barcode+UMI, R2 cDNA, I1 sample index).
+`bash examples/prefetch_large.sh <SRR> [out_dir] [threads] [yes|no]` -- accepts only uppercase run accessions, checks the AWS Open Data bucket (run from EC2 in us-east-1 for zero egress), falls back to `prefetch --max-size 200G`, validates, runs `fasterq-dump --split-files`, compresses, and cleans its owned cache/staging directories. If neither Toolkit/STRIDES path completes for a public run, it safely retries the MD5-verified ENA mirror route with no-clobber publication. Pass `yes` as the 4th argument for 10x records: it swaps `--skip-technical` for `--include-technical` (10x v3 expects R1 28-bp barcode+UMI, R2 cDNA, I1 sample index).
 
 ## Common errors
 
@@ -230,6 +230,7 @@ For cloud-native analysis pipelines (Nextflow on AWS Batch, Cromwell, etc.), STR
 | `pigz: command not found` after a successful download | No Windows build of pigz | Fall back to `gzip` (see fasterq-dump vs fastq-dump section) |
 | `curl: (6) Could not resolve host: <accession>` on the ENA path | Wrong filereport column selected (see ENA mirror code pattern) -- not a real DNS/network issue | Use header-based column lookup, not a fixed `cut -f` index |
 | Authorization error / permission denied, or ENA omits `fastq_ftp`, on a human accession | Controlled-access (dbGaP) accession | Stop; see "Controlled-access (dbGaP) data" -- do not retry as a network issue |
+| "Invalid run accession" | Input was not an uppercase `SRR`/`ERR`/`DRR` followed by digits | Correct the run ID; path separators, `.`, `..`, and option-like strings are rejected before download or cleanup |
 
 ## References
 
