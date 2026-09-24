@@ -1,98 +1,69 @@
-'''Create UpSet plots with upsetplot for set intersection visualization'''
-# Reference: matplotlib 3.8+, pandas 2.2+, scanpy 1.10+ | Verify API if version differs
+"""Deterministic upsetplot example. Requires upsetplot 0.9.0 and pandas >=2.2,<3.
 
+Run: python upset_python.py
+Writes three PNG/PDF figure pairs; PDF text uses Type 42 embedding.
+"""
+import matplotlib as mpl
+mpl.rcParams["pdf.fonttype"] = 42
 import matplotlib.pyplot as plt
-from upsetplot import from_contents, UpSet, plot
-import pandas as pd
 import numpy as np
+import pandas as pd
+from pathlib import Path
+from upsetplot import UpSet, from_contents
 
-# --- ALTERNATIVE: Use real gene sets ---
-# For realistic examples, load DE results or GO terms:
-#
-# de_results = pd.read_csv('de_results.csv')
-# gene_sets = {
-#     'Upregulated': de_results[de_results['log2FC'] > 1]['gene'].tolist(),
-#     'Downregulated': de_results[de_results['log2FC'] < -1]['gene'].tolist(),
-#     'Significant': de_results[de_results['padj'] < 0.05]['gene'].tolist()
-# }
+if not ("2.2" <= pd.__version__ < "3"):
+    raise RuntimeError(f"upsetplot 0.9.0 example requires pandas >=2.2,<3; found {pd.__version__}")
 
 np.random.seed(42)
-
-all_genes = [f'Gene{i}' for i in range(1, 501)]
-
-# Simulated gene sets from different analyses
-# Realistic scenario: DE genes across conditions
+all_genes = [f"Gene{i}" for i in range(1, 501)]
 gene_sets = {
-    'Treatment_A': np.random.choice(all_genes, 150, replace=False).tolist(),
-    'Treatment_B': np.random.choice(all_genes, 130, replace=False).tolist(),
-    'Timepoint_Early': np.random.choice(all_genes, 100, replace=False).tolist(),
-    'Timepoint_Late': np.random.choice(all_genes, 180, replace=False).tolist(),
-    'Pathway_Response': np.random.choice(all_genes, 90, replace=False).tolist()
+    "Treatment_A": np.random.choice(all_genes, 150, replace=False).tolist(),
+    "Treatment_B": np.random.choice(all_genes, 130, replace=False).tolist(),
+    "Timepoint_Early": np.random.choice(all_genes, 100, replace=False).tolist(),
+    "Timepoint_Late": np.random.choice(all_genes, 180, replace=False).tolist(),
+    "Pathway_Response": np.random.choice(all_genes, 90, replace=False).tolist(),
 }
-
-# Add core overlap genes for biological realism
-# ~20-30 genes often appear across multiple related conditions
 core_genes = np.random.choice(all_genes, 25, replace=False).tolist()
-for key in ['Treatment_A', 'Treatment_B', 'Pathway_Response']:
-    gene_sets[key] = list(set(gene_sets[key] + core_genes))
+for key in ["Treatment_A", "Treatment_B", "Pathway_Response"]:
+    gene_sets[key] = sorted(set(gene_sets[key]).union(core_genes))
 
-# Convert to upsetplot format
-data = from_contents(gene_sets)
+data = from_contents(gene_sets)  # DataFrame indexed by the Boolean membership columns
+data["log2FC"] = np.random.normal(0, 1.5, len(data))
+data["pvalue"] = 10 ** np.random.uniform(-5, -0.5, len(data))
+data["significant"] = data["pvalue"] < 0.05
+df_indexed = data.copy()  # from_contents already returns the membership MultiIndex
 
-# Basic UpSet plot
-# show_counts displays intersection sizes on bars
-fig, ax = plt.subplots(figsize=(12, 8))
-plot(data, show_counts=True, fig=fig)
-plt.savefig('upset_basic.png', dpi=150, bbox_inches='tight')
-plt.close()
+def add_count_labels(axes):
+    for bar in axes["intersections"].patches:
+        height = bar.get_height()
+        if height:
+            axes["intersections"].annotate(f"{height:g}", (bar.get_x() + bar.get_width() / 2, height),
+                                             ha="center", va="bottom", fontsize=7)
 
-# Customized UpSet plot
-upset = UpSet(data,
-              subset_size='count',
-              show_counts=True,
-              show_percentages=False,  # Can be True to show % of total
-              sort_by='cardinality',   # 'cardinality' = frequency, 'degree' = num sets
-              sort_categories_by='cardinality',
-              facecolor='#4DBBD5',
-              element_size=46,
-              intersection_plot_elements=15)  # Max intersections to show
+def save_upset(upset, filename, size):
+    fig = plt.figure(figsize=size)  # Do not create a separate axes under the UpSet layout.
+    axes = upset.plot(fig=fig)
+    add_count_labels(axes)
+    fig.savefig(filename, dpi=300, bbox_inches="tight")
+    fig.savefig(Path(filename).with_suffix(".pdf"), bbox_inches="tight")
+    plt.close(fig)
 
-fig = plt.figure(figsize=(14, 8))
-upset.plot(fig=fig)
-plt.suptitle('Gene Set Intersections', fontsize=14, y=1.02)
-plt.savefig('upset_customized.png', dpi=300, bbox_inches='tight')
-plt.close()
+basic = UpSet(data, subset_size="count", show_counts=False, sort_by="cardinality",
+              sort_categories_by="cardinality", max_subset_rank=20)
+save_upset(basic, "upset_basic.png", (12, 8))
 
-# UpSet with metadata
-# Add attributes to visualize per-intersection statistics
-np.random.seed(42)
-n_elements = len(data)
-# Simulated log fold changes and p-values
-log2fc = np.random.normal(0, 1.5, n_elements)
-pvalues = 10 ** np.random.uniform(-5, -0.5, n_elements)
+customized = UpSet(data, subset_size="count", show_counts=False, sort_by="cardinality",
+                   sort_categories_by="cardinality", facecolor="#4DBBD5", element_size=46,
+                   max_subset_rank=15)
+# Exact Treatment_A-and-Treatment_B-only, rather than every superset containing both.
+customized.style_subsets(present=["Treatment_A", "Treatment_B"],
+                         absent=["Timepoint_Early", "Timepoint_Late", "Pathway_Response"],
+                         facecolor="#E64B35")
+save_upset(customized, "upset_customized.png", (14, 8))
 
-df_with_attrs = data.to_frame()
-df_with_attrs['log2FC'] = log2fc
-df_with_attrs['pvalue'] = pvalues
-df_with_attrs['significant'] = df_with_attrs['pvalue'] < 0.05
+with_boxplot = UpSet(df_indexed, subset_size="count", show_counts=False, max_subset_rank=20)
+with_boxplot.add_catplot(value="log2FC", kind="box", color="#E64B35")
+save_upset(with_boxplot, "upset_with_boxplot.png", (14, 10))
 
-# Recreate multi-index for upsetplot
-df_indexed = df_with_attrs.set_index(list(gene_sets.keys()))
-
-# UpSet with category plot (boxplot of log2FC per intersection)
-upset = UpSet(df_indexed, subset_size='count', show_counts=True)
-# add_catplot shows attribute distribution per intersection
-# kind options: 'box', 'violin', 'strip', 'swarm'
-upset.add_catplot(value='log2FC', kind='box', color='#E64B35')
-
-fig = plt.figure(figsize=(14, 10))
-upset.plot(fig=fig)
-plt.savefig('upset_with_boxplot.png', dpi=300, bbox_inches='tight')
-plt.close()
-
-print('UpSet plots saved: upset_basic.png, upset_customized.png, upset_with_boxplot.png')
-
-# Print statistics
-print('\nSet sizes:')
-for name, genes in gene_sets.items():
-    print(f'  {name}: {len(genes)} genes')
+print("Saved upset_basic.png, upset_customized.png, upset_with_boxplot.png")
+print("Set sizes:", {name: len(genes) for name, genes in gene_sets.items()})
