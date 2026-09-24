@@ -55,7 +55,7 @@ hclust(dist(x), method = 'ward.D2')  # Ward's actual minimum-variance criterion
 | ChIP/ATAC peak intensity across samples | raw log-counts | euclidean | ward.D2 | Peaks are interpretable on absolute scale after log |
 | Sample QC (correlation of samples) | column-wise raw | correlation | ward.D2 | The correlation IS the data; don't scale before computing it |
 | Methylation array with outliers | raw + clip 1-99% | euclidean | ward.D2 | Outliers dominate Euclidean; robust clip preserves signal |
-| Single-cell pseudobulk by cell type | row z-score | euclidean | ward.D2 | Same as bulk; downsample to <500 cells per type for rendering |
+| Single-cell pseudobulk by cell type | row z-score | euclidean | ward.D2 | Aggregate cells to biologically meaningful groups before heatmapping; do not use a per-cell heatmap as a substitute for pseudobulk |
 | Mutation matrix (binary present/absent) | raw | binary (jaccard) | average or complete | Standard distance for binary data; ward inappropriate |
 | Drug response across cell lines | row z-score | spearman correlation | ward.D2 | Drug-rank patterns matter more than absolute IC50 |
 
@@ -65,7 +65,7 @@ A heatmap is a color encoding of a matrix. The default linear mapping from data 
 
 1. **Diverging data needs symmetric bounds.** For z-scores or log-fold changes, the color bar must be symmetric around zero. `colorRamp2(c(-2, 0, 2), c('#0072B2', 'white', '#D55E00'))` ALWAYS, not `colorRamp2(c(min, mean, max), ...)`.
 
-2. **Robust quantile bounds.** Single outliers compress the entire color scale. Clip at 1st/99th percentile before mapping: `bounds <- quantile(mat, c(0.01, 0.99))`. ComplexHeatmap's `colorRamp2(c(bounds[1], 0, bounds[2]), ...)` is standard. Without this, one outlier sample turns the entire heatmap pale.
+2. **Robust quantile bounds.** Single outliers compress the entire color scale. Compute the bounds from the matrix actually plotted: for a row-z-scored heatmap, `bounds <- quantile(abs(mat_scaled), 0.99, na.rm = TRUE)` then use `colorRamp2(c(-bounds, 0, bounds), ...)`. Without this, one outlier sample turns the entire heatmap pale.
 
 3. **Sequential data uses a perceptually-uniform colormap.** viridis, magma, cividis (Nuñez 2018), or batlow (Crameri 2020). NOT jet, NOT rainbow, NOT `colorRampPalette(c('blue','red'))(100)` which has a non-monotonic luminance.
 
@@ -94,16 +94,18 @@ For matrices >2000 rows OLO becomes slow (O(n^4) in worst case; modern implement
 
 ## Annotation Tracks -- ComplexHeatmap as the Reference
 
-**Goal:** Render an annotated heatmap with column metadata (condition, batch, age), row metadata (pathway, gene class), and split panels for grouped display.
+**Goal:** Render an annotated heatmap with column metadata (condition, batch, age), row metadata (pathway, gene class), and grouped panels where they are compatible with the chosen row clustering.
 
-**Approach:** Define `HeatmapAnnotation` (column) and `rowAnnotation` objects with explicit color lists; render with `Heatmap()` specifying `row_split`/`column_split` for grouped layout; use `draw()` to commit, not bare `Heatmap()`, when running non-interactively.
+**Approach:** Define `HeatmapAnnotation` (column) and `rowAnnotation` objects with explicit color lists. Use `column_split` for grouped columns. In ComplexHeatmap 2.22.0, a categorical `row_split` is compatible with internally generated row clustering, but **not with an explicit dendrogram such as an OLO dendrogram**; in that case retain pathway information in `rowAnnotation` and preserve the dendrogram. Use `draw()` to commit, not bare `Heatmap()`, when running non-interactively.
 
 ```r
 library(ComplexHeatmap)
 library(circlize)
 
-# Robust symmetric color mapping
-bounds <- quantile(abs(mat[!is.na(mat)]), 0.99)
+# Robust symmetric color mapping of the displayed, row-z-scored matrix
+mat_scaled <- t(scale(t(mat)))
+mat_scaled[is.na(mat_scaled)] <- 0
+bounds <- quantile(abs(mat_scaled[!is.na(mat_scaled)]), 0.99)
 col_fun <- colorRamp2(c(-bounds, 0, bounds), c('#0072B2', 'white', '#D55E00'))
 
 # Column metadata
@@ -127,12 +129,11 @@ ha_row <- rowAnnotation(
     col = list(Pathway = c(Metabolism = '#8491B4', Signaling = '#91D1C2'))
 )
 
-ht <- Heatmap(mat,
+ht <- Heatmap(mat_scaled,
               name = 'Z-score',
               col  = col_fun,
               top_annotation  = ha_col,
               left_annotation = ha_row,
-              row_split    = gene_info$pathway,
               column_split = metadata$condition,
               clustering_method_rows    = 'ward.D2',
               clustering_method_columns = 'ward.D2',
@@ -146,7 +147,7 @@ draw(ht, merge_legends = TRUE)            # draw() not bare Heatmap()
 
 ### The `draw()` requirement (silent failure)
 
-A bare `Heatmap(mat)` works at the R console because auto-print invokes `draw()`. **Inside `for`, `lapply`, `function`, Quarto/Rmd chunks, or `Rscript`, a bare `Heatmap()` produces no output and no error.** Always wrap in `draw()` non-interactively. Only `draw()` exposes `merge_legends`, `heatmap_legend_side`, `ht_gap`, and `padding`.
+A bare `Heatmap(mat)` entered at the interactive R console is auto-printed and therefore drawn. A top-level `Heatmap(mat)` in `Rscript`, and one constructed inside `for`, `lapply`, `function`, Quarto/Rmd chunks, is not auto-printed: it creates an object but does not render a page. Always call `draw()` for scripted output. Only `draw()` exposes `merge_legends`, `heatmap_legend_side`, `ht_gap`, and `padding`.
 
 ## seaborn.clustermap (Python)
 
@@ -155,20 +156,23 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 
-# Robust symmetric bounds (1-99% quantile)
-vmax = np.quantile(np.abs(df.values[~np.isnan(df.values)]), 0.99)
+# Explicitly z-score rows before choosing the color bounds. This ensures that
+# `vmin`/`vmax` describe the data seaborn actually plots, rather than raw values.
+row_sd = df.std(axis=1, ddof=1).replace(0, np.nan)
+df_z = df.sub(df.mean(axis=1), axis=0).div(row_sd, axis=0).dropna(axis=0)
+vmax = np.nanquantile(np.abs(df_z.to_numpy()), 0.99)
 
 # col_colors / row_colors for categorical annotations
 condition_colors = metadata['condition'].map({'Control': '#56B4E9', 'Treatment': '#D55E00'})
 batch_colors = metadata['batch'].map({'A': '#009E73', 'B': '#0072B2', 'C': '#CC79A7'})
 col_colors = pd.DataFrame({'Condition': condition_colors, 'Batch': batch_colors})
 
-g = sns.clustermap(df,
+g = sns.clustermap(df_z,
                    cmap='RdBu_r', center=0, vmin=-vmax, vmax=vmax,
                    row_cluster=True, col_cluster=True,
                    method='ward',                      # seaborn uses scipy ward, equivalent to R ward.D2
                    metric='euclidean',
-                   z_score=0,                          # 0 = rows, 1 = columns
+                   z_score=None,                         # already row-z-scored above
                    col_colors=col_colors,
                    dendrogram_ratio=0.15,
                    cbar_pos=(0.02, 0.8, 0.03, 0.15),
@@ -183,6 +187,12 @@ g = sns.clustermap(df,
 - The two are mutually exclusive — passing both errors
 
 A heatmap published with `standard_scale` looks like a z-scored heatmap but the color encoding is not interpretable as standard deviations.
+
+### Sample-correlation QC and non-circular feature selection
+
+For sample QC, correlate normalized expression profiles (usually a pre-specified or independently selected variable-gene set), then cluster with `1 - r`; the correlation matrix itself is plotted with a **sequential** scale over its observed range, not a diverging z-score scale. Do not select genes because they make the QC heatmap tell a preferred clustering story. Select features before inspecting the QC clustering, using a pre-registered list, a separate discovery split, or an objective variance rule applied without reference to sample labels or the resulting dendrogram.
+
+For linked heatmaps (for example expression and methylation on the same genes), derive `row_order` once from the primary expression matrix and pass that explicit order to the companion heatmap with `cluster_rows = FALSE`. This makes visual comparisons meaningful rather than independently reordering each panel. For single-cell data, aggregate counts to pseudobulk by the planned biological group before these steps; a per-cell heatmap is not pseudobulk QC.
 
 ## OncoPrint -- The Specialized Mutation-Matrix Heatmap
 
@@ -212,7 +222,7 @@ OncoPrint (Cerami 2012 *Cancer Discov* 2:401; canonical at cBioPortal) is a styl
 
 ### ComplexHeatmap silently produces no output in a script
 
-**Trigger:** Bare `Heatmap(mat)` inside a `for` loop, `lapply`, `function()`, Quarto/Rmd code chunk, or `Rscript` invocation.
+**Trigger:** Bare `Heatmap(mat)` at top level in an `Rscript` invocation, or inside a `for` loop, `lapply`, `function()`, or Quarto/Rmd code chunk.
 
 **Mechanism:** Auto-print only happens at the top-level R prompt; in non-interactive contexts the Heatmap object is created but never rendered.
 
@@ -230,15 +240,15 @@ OncoPrint (Cerami 2012 *Cancer Discov* 2:401; canonical at cBioPortal) is a styl
 
 **Fix:** `cluster_columns = FALSE` for ordered conditions. To group while preserving order, use `column_split` or `column_order` explicitly.
 
-### Z-score on a sparse matrix
+### Z-score on a low-information or zero-variance matrix
 
-**Trigger:** Row z-scoring a matrix with many zero values (e.g., single-cell expression, sparse peak counts).
+**Trigger:** Row z-scoring rows with zero variance or insufficient biological information (for example, unfiltered features with no meaningful variation across samples).
 
-**Mechanism:** `(x − mean) / sd` is ill-defined when a row is mostly zeros — sd is dominated by the few non-zero values; z-scores explode for the non-zero entries.
+**Mechanism:** `(x − mean) / sd` is undefined for a zero-variance row. Sparsity alone does not make a z-score mathematically invalid, but an arbitrary non-zero-count cutoff is not a substitute for a study-specific filtering rule.
 
-**Symptom:** A few cells render as extreme colors; most cells are washed-out near-zero.
+**Symptom:** Rows with no variation become `NaN`, or low-information features dominate interpretation without answering a biological question.
 
-**Fix:** For single-cell, work with cluster-summarized pseudobulk matrices, not raw single-cell expression. For sparse peak data, filter rows by minimum non-zero count before scaling.
+**Fix:** Remove or separately handle zero-variance rows. For single-cell, work with cluster-summarized pseudobulk matrices, not raw per-cell expression. For sparse peak data, filter with a documented biological or measurement-informed rule rather than a universal `>=3` non-zero threshold.
 
 ### Correlation distance applied to data with batch effect
 
@@ -274,9 +284,9 @@ OncoPrint (Cerami 2012 *Cancer Discov* 2:401; canonical at cBioPortal) is a styl
 
 | Pattern | Likely cause | Action |
 |---------|--------------|--------|
-| ComplexHeatmap and pheatmap give different dendrograms | pheatmap uses `dist()` with default `method = 'euclidean'`; ComplexHeatmap defaults to the same but different clustering distance defaults | Verify both with `clustering_distance_rows = 'euclidean'`, `clustering_method_rows = 'ward.D2'` explicitly |
+| ComplexHeatmap and pheatmap give different dendrograms | With the same matrix, NA handling, distance, linkage, and tie behavior, their defaults should not inherently differ; a difference signals an input or parameter mismatch | Verify the matrix/order and set `clustering_distance_rows = 'euclidean'`, `clustering_method_rows = 'ward.D2'` explicitly |
 | Same code, different dendrogram across R versions | R 3.1 renamed `'ward'` to `'ward.D'` and added `'ward.D2'` | Always specify `ward.D2` explicitly; never `'ward'` |
-| Z-scored heatmap with extreme colors only in a few cells | Sparse matrix with zero-inflation | Filter low-expression rows; OR shift to robust scaling (`(x - median) / mad`) |
+| Z-scored heatmap has `NaN` rows or low-information features | Zero variance or an unexamined filtering rule | Remove zero-variance rows; use a documented, study-specific feature filter before scaling |
 | Modules cluster by batch | Correlation distance picked up batch effect | Batch-correct upstream; verify via PCA |
 | seaborn clustermap produces different clusters than R | seaborn `method='ward'` calls scipy.cluster.hierarchy.linkage which IS ward.D2-equivalent; difference is usually `metric` default | Set `metric='euclidean'` explicitly in both |
 | OncoPrint mutual-exclusivity panel appears empty | `column_order` is being computed by clustering instead of preserved | Pass `column_order = ...` explicitly to oncoPrint |
@@ -290,9 +300,9 @@ OncoPrint (Cerami 2012 *Cancer Discov* 2:401; canonical at cBioPortal) is a styl
 | Robust color bound | 1st-99th percentile of |matrix| | Standard publication practice; suppresses single-outlier dominance |
 | Raster trigger | >2000 rows or >2000 columns | ComplexHeatmap default `use_raster = TRUE` above 2000 |
 | OLO practical limit | ~5000 rows | O(n^4) worst case; modern Bar-Joseph implementations faster |
-| z-score symmetry | bounds around 0 | Z-scores are symmetric by construction |
-| Minimum non-zero count to z-score | >=3 non-zero values per row | Below this sd is unreliable |
-| Single-cell pseudobulk threshold | Downsample to <500 cells/group | Otherwise PDF rendering hangs |
+| z-score color symmetry | bounds around 0 | Choose symmetric display bounds around zero for a row-z-scored heatmap |
+| Zero-variance rows | remove or handle separately | Z-score denominator is zero; non-zero count alone is not a universal validity threshold |
+| Single-cell aggregation | pseudobulk by planned biological group | Avoid per-cell heatmaps when the question concerns group-level expression |
 
 ## Common Errors
 
@@ -303,9 +313,9 @@ OncoPrint (Cerami 2012 *Cancer Discov* 2:401; canonical at cBioPortal) is a styl
 | Time-course columns scrambled | `cluster_columns = TRUE` on ordered data | `cluster_columns = FALSE`; use `column_split` |
 | pheatmap `gaps_col` ignored | Conflict with `cluster_cols = TRUE` | Disable clustering OR switch to ComplexHeatmap split |
 | Dendrogram differs from a paper | Default `clustering_method` mismatch | Always specify `ward.D2`; never `ward` |
-| seaborn standard_scale interpreted as z-score | Different rescaling functions | Use `z_score=0` for row z-scoring; `standard_scale` is min-max not z |
+| seaborn standard_scale interpreted as z-score | Different rescaling functions | Use an explicit row-z-scored matrix (or `z_score=0` only when bounds reflect that transformed data); `standard_scale` is min-max not z |
 | Heatmap renders pixelated | Default raster_quality = 1 | Set `raster_quality = 5` for publication |
-| Z-score blows up for some rows | Sparse rows; near-zero sd | Filter low-expression rows OR robust scale |
+| Z-score contains `NaN` rows | Zero-variance rows | Remove/handle zero-variance rows, then apply a documented feature filter |
 | Modules cluster by batch not biology | Batch effect not removed | limma::removeBatchEffect or ComBat upstream |
 
 ## Anticipated Reviewer Pushback
@@ -316,7 +326,7 @@ OncoPrint (Cerami 2012 *Cancer Discov* 2:401; canonical at cBioPortal) is a styl
 | "How were leaves ordered?" | Optimal Leaf Ordering via seriation::seriate (Bar-Joseph 2001); reduces visually-adjacent dissimilarity |
 | "Why this color scale?" | Diverging palette symmetric around zero, bounds = 1st-99th percentile of |z|. Robust to outliers per standard practice |
 | "Why z-score?" | Removes absolute level so co-regulated genes cluster regardless of magnitude. Raw values clustered separately (supplementary) |
-| "Why row split by pathway?" | Pre-specified gene-set annotation (KEGG/Reactome) to verify clustering recovers known biology, not to bias it |
+| "How is pathway membership shown?" | Pre-specified gene-set annotation (KEGG/Reactome) is shown as a row annotation to verify clustering recovers known biology, not to bias it. In ComplexHeatmap 2.22.0, do not combine a categorical `row_split` with an explicit OLO dendrogram. |
 | "Reproducibility across R versions?" | `ward.D2` is stable across R 3.1+; `clustering_method = 'ward'` is not — never used |
 
 ## References
