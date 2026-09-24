@@ -18,6 +18,27 @@ Before using code patterns, verify installed versions match. If versions differ:
 If code throws ImportError, AttributeError, or TypeError, introspect the installed
 package and adapt the example to match the actual API rather than retrying.
 
+## Installation
+
+Install only the route the analysis will use; ambient-removal tools are
+alternatives, not a stack.
+
+```bash
+pip install scanpy matplotlib scikit-misc
+# Optional GPU-backed ambient removal:
+pip install cellbender
+```
+
+```r
+install.packages(c('Seurat', 'SoupX'))
+BiocManager::install(c('scran', 'celda'))
+```
+
+`scikit-misc` supplies the loess implementation used by Scanpy's
+`flavor='seurat_v3'`; `celda::decontX` is the DecontX route. CellBender is a
+separate Python CLI and normally requires a suitable PyTorch/CUDA setup for
+practical datasets.
+
 # Single-Cell Preprocessing
 
 **"Preprocess my scRNA-seq data"** -> Remove bad barcodes, correct technical biases, and select informative genes before dimensionality reduction.
