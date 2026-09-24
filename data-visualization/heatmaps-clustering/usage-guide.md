@@ -57,20 +57,20 @@ Tell your AI agent what you want to do:
 6. Compute robust color bounds (1st-99th percentile of |matrix|); use symmetric bounds for diverging data.
 7. Optionally compute Optimal Leaf Ordering via seriation; pass dendrogram to ComplexHeatmap.
 8. Build column and row annotation tracks with explicit color lists.
-9. Render with `draw()` (NEVER bare `Heatmap()` in a script); set `use_raster=TRUE, raster_quality=5` for matrices >2000 rows.
+9. Render with `draw()` for portable explicit output (a bare, unassigned top-level `Heatmap()` can auto-print in the console and `Rscript`, but assignments and report hosts need not); set `use_raster=TRUE, raster_quality=5` for matrices >2000 rows.
 10. Export PDF with `cairo_pdf` for vector text + raster cells.
 
 ## Tips
 
 - **Always specify `ward.D2` explicitly.** `'ward'` and `'ward.D'` are legacy implementations that do not implement Ward's minimum-variance criterion (Murtagh-Legendre 2014). The names look interchangeable; the dendrograms are not.
 
-- **Use `draw()` in scripts.** A bare `Heatmap(mat)` produces no output and no error inside loops, functions, Quarto chunks, or `Rscript`. Always `draw(Heatmap(mat, ...), merge_legends = TRUE)`.
+- **Use `draw()` in scripts.** A bare, unassigned top-level `Heatmap(mat)` can auto-print at the console and in `Rscript`, but assignments, loops, functions, and Quarto/report hosts do not provide a dependable rendering contract. Always `draw(Heatmap(mat, ...), merge_legends = TRUE)` for portable scripted output.
 
 - **Robust symmetric color bounds.** `bounds <- quantile(abs(mat), 0.99); colorRamp2(c(-bounds, 0, bounds), c('#0072B2', 'white', '#D55E00'))`. Without quantile clipping, one outlier washes out the entire heatmap.
 
 - **Do NOT cluster ordered conditions.** Time points, dose levels, and treatment stages must keep their order. Set `cluster_columns = FALSE`; use `column_split` to group while preserving order.
 
-- **`z_score=0` vs `standard_scale=0` in seaborn are different.** `z_score=0` standardizes rows to mean 0 / sd 1. `standard_scale=0` rescales rows to [0, 1] - looks similar but compresses outliers non-linearly. The two are mutually exclusive.
+- **`z_score=0` vs `standard_scale=0` in seaborn are different.** `z_score=0` standardizes rows to mean 0 / sd 1; for auditable color bounds, explicitly build that row-z-scored matrix first and compute bounds from it. `standard_scale=0` rescales rows to [0, 1] - looks similar but compresses outliers non-linearly. The two are mutually exclusive.
 
 - **`gaps_col` is ignored when `cluster_cols=TRUE`** in pheatmap. Either disable clustering or switch to ComplexHeatmap `column_split`.
 
@@ -78,13 +78,13 @@ Tell your AI agent what you want to do:
 
 - **Correlation distance preserves co-regulation but is sensitive to batch.** Always batch-correct before clustering with correlation distance, or modules cluster by batch.
 
-- **Sparse matrices break z-scoring.** Rows with most-zero values have unreliable sd. Filter low-expression rows before z-scoring, or use robust scaling (median/mad).
+- **Zero-variance and low-information rows need a study-specific filter.** Z-scoring is undefined for zero-variance rows; sparsity alone does not justify a universal non-zero-count cutoff. Remove zero-variance rows, then apply a documented biological or measurement-informed filter.
 
 - **`raster_quality = 5` for publication.** The default raster quality looks pixelated when scaled for print.
 
 - **pheatmap is still maintained.** v1.0.13 as of 2025-06. Not abandoned. For simple cases it is sufficient; for split panels, multi-heatmap concatenation, or oncoPrint use ComplexHeatmap.
 
-- **Single-cell pseudobulk before heatmap.** Plotting per-cell expression for >10000 cells crashes PDF renderers. Aggregate to cluster × gene pseudobulk first.
+- **Single-cell pseudobulk before heatmap.** Aggregate cells to the planned cluster/sample group before heatmapping when the question is group-level expression; do not treat a per-cell heatmap as pseudobulk.
 
 ## Related Skills
 
