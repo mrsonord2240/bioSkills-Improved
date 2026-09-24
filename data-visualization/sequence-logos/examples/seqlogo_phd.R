@@ -1,72 +1,85 @@
-# Reference: ggseqlogo 0.2+ | Verify API if version differs
-
-# PhD-level sequence logo encoding the four correctness traps:
-# (1) bits not probability, (2) genome background composition, (3) explicit alphabet,
-# (4) N annotated for small-sample awareness.
+# Reference: ggseqlogo 0.2+ | Run from this examples directory.
+#
+# This example distinguishes conventional uniform-background bits from a
+# background-corrected relative-entropy logo. ggseqlogo has no background
+# frequency argument: for a non-uniform background, compute letter heights
+# explicitly and pass them with method = "custom".
 
 library(ggseqlogo)
 library(ggplot2)
+library(patchwork)
+source("relative_entropy_logo.R")
 
-# 1. INPUT -- vector of aligned same-length DNA sequences
-seqs <- readLines('aligned_motif.fa')
-seqs <- seqs[!startsWith(seqs, '>')]
-stopifnot(all(nchar(seqs) == nchar(seqs[1])))             # equal length required
+human_bg <- c(A = 0.29, C = 0.21, G = 0.21, T = 0.29)
+dna_alphabet <- names(human_bg)
+
+custom_relative_entropy_logo <- function(sequences) {
+    relative_entropy_heights(
+        sequence_probability_matrix(sequences, dna_alphabet),
+        human_bg
+    )
+}
+
+# 1. INPUT -- bundled, aligned DNA sequences
+seqs <- read_aligned_fasta("aligned_motif.fa")
 n <- length(seqs)
 
-# 2. BACKGROUND -- human genome composition; pass explicitly
-human_bg <- c(A = 0.295, C = 0.205, G = 0.205, T = 0.295)
-
-# 3. BITS LOGO with explicit background
-p_bits <- ggseqlogo(seqs,
-                    method = 'bits',                        # canonical encoding
-                    bg_freq = human_bg) +
-    labs(title = sprintf('Motif logo (bits; N = %d; human bg)', n)) +
+# 2. BACKGROUND-CORRECTED LOGO
+# The column total is D_KL(observed composition || human_bg), in bits.
+p_relative_entropy <- ggseqlogo(custom_relative_entropy_logo(seqs),
+                                method = "custom",
+                                col_scheme = "nucleotide") +
+    labs(title = sprintf("Motif logo (relative entropy; N = %d; human background)", n),
+         y = "bits relative to background") +
     theme(plot.title = element_text(size = 10))
 
-# 4. PROBABILITY logo for COMPARISON
-p_prob <- ggseqlogo(seqs, method = 'probability') +
-    labs(title = sprintf('Same motif (probability; N = %d)', n)) +
+# 3. UNIFORM-BACKGROUND BITS LOGO FOR COMPARISON
+p_bits <- ggseqlogo(seqs, method = "bits") +
+    labs(title = sprintf("Same motif (uniform-background bits; N = %d)", n),
+         y = "bits") +
     theme(plot.title = element_text(size = 10))
 
-# Side-by-side
-library(patchwork)
-ggsave('logo_comparison.pdf', p_bits / p_prob, width = 89, height = 80, units = 'mm',
+ggsave("logo_comparison.pdf", p_relative_entropy / p_bits,
+       width = 89, height = 80, units = "mm", device = cairo_pdf)
+
+# 4. MULTI-MOTIF STACK -- labels are derived from the bundled fixture data.
+motif_sequences <- list(
+    CTCF = read_aligned_fasta("ctcf_aligned.fa"),
+    REST = read_aligned_fasta("rest_aligned.fa"),
+    GATA1 = read_aligned_fasta("gata1_aligned.fa")
+)
+multi <- lapply(motif_sequences, custom_relative_entropy_logo)
+names(multi) <- sprintf("%s (N=%d)", names(motif_sequences),
+                        vapply(motif_sequences, length, integer(1)))
+p_stack <- ggseqlogo(multi, method = "custom", col_scheme = "nucleotide", ncol = 1) +
+    labs(y = "bits relative to human background")
+ggsave("multi_logo.pdf", p_stack, width = 89, height = 110, units = "mm",
        device = cairo_pdf)
 
-# 5. MULTI-MOTIF STACK (TF-A vs TF-B)
-multi <- list(`CTCF (N=200)` = ctcf_seqs,
-              `REST (N=180)` = rest_seqs,
-              `GATA1 (N=150)` = gata1_seqs)
-p_stack <- ggseqlogo(multi, method = 'bits', bg_freq = human_bg, ncol = 1)
-ggsave('multi_logo.pdf', p_stack, width = 89, height = 110, units = 'mm', device = cairo_pdf)
-
-# 6. PROTEIN LOGO with custom functional-class palette
-phospho_neighborhoods <- readLines('phospho_aligned.fa')
-phospho_neighborhoods <- phospho_neighborhoods[!startsWith(phospho_neighborhoods, '>')]
-
+# 5. PROTEIN LOGO with a custom functional-class palette.
+phospho_neighborhoods <- read_aligned_fasta("phospho_aligned.fa")
 protein_scheme <- make_col_scheme(
-    chars = c('S','T','Y',           # phospho-acceptors
-              'K','R','H',           # basic
-              'D','E',               # acidic
-              'A','V','L','I','M','F','W','C','G','P','N','Q'),  # hydrophobic/other
-    cols  = c(rep('#D55E00', 3),
-              rep('#0072B2', 3),
-              rep('#CC79A7', 2),
-              rep('#009E73', 12)))
+    chars = c("S", "T", "Y",                         # phospho-acceptors
+              "K", "R", "H",                         # basic
+              "D", "E",                              # acidic
+              "A", "V", "L", "I", "M", "F", "W", "C", "G", "P", "N", "Q"),
+    cols = c(rep("#D55E00", 3), rep("#0072B2", 3), rep("#CC79A7", 2),
+             rep("#009E73", 12)))
+p_protein <- ggseqlogo(phospho_neighborhoods, method = "bits", seq_type = "aa",
+                        col_scheme = protein_scheme) +
+    labs(title = sprintf("Phospho-substrate neighborhoods (N = %d)",
+                         length(phospho_neighborhoods)))
+ggsave("protein_logo.pdf", p_protein, width = 130, height = 50, units = "mm",
+       device = cairo_pdf)
 
-p_prot <- ggseqlogo(phospho_neighborhoods,
-                    method = 'bits',
-                    seq_type = 'aa',
-                    col_scheme = protein_scheme) +
-    labs(title = sprintf('Phospho-substrate neighborhoods (N = %d)', length(phospho_neighborhoods)))
-ggsave('protein_logo.pdf', p_prot, width = 130, height = 50, units = 'mm', device = cairo_pdf)
-
-# 7. PWM INPUT instead of sequences
-pwm_counts <- matrix(c(85, 5, 5, 5,    # position 1: A-conserved
-                       5, 85, 5, 5,    # position 2: C-conserved
-                       30, 20, 30, 20,  # position 3: A/G slight bias
-                       5, 5, 5, 85),   # position 4: T-conserved
+# 6. PWM INPUT: rows are letters, columns are positions. Convert counts to
+# probabilities before calling relative_entropy_heights for a corrected logo.
+pwm_counts <- matrix(c(85, 5, 5, 5, 5, 85, 5, 5, 30, 20, 30, 20, 5, 5, 5, 85),
                      ncol = 4, byrow = FALSE,
-                     dimnames = list(c('A', 'C', 'G', 'T'), NULL))
-# ggseqlogo expects rows = letters, columns = positions (transpose if needed)
-ggseqlogo(pwm_counts, method = 'bits', bg_freq = human_bg)
+                     dimnames = list(c("A", "C", "G", "T"), NULL))
+pwm_probabilities <- sweep(pwm_counts, 2, colSums(pwm_counts), "/")
+p_pwm <- ggseqlogo(relative_entropy_heights(pwm_probabilities, human_bg), method = "custom",
+                   col_scheme = "nucleotide") +
+    labs(y = "bits relative to human background")
+ggsave("pwm_logo.pdf", p_pwm, width = 89, height = 50, units = "mm",
+       device = cairo_pdf)

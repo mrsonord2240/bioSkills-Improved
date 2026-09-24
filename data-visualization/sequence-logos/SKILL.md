@@ -1,6 +1,6 @@
 ---
 name: bio-data-visualization-sequence-logos
-description: Build sequence logos from aligned DNA, RNA, or protein motifs using ggseqlogo (R), Logomaker (Python), or WebLogo with explicit bits vs probability encoding, background-frequency correction, custom alphabets, and multi-logo stacking. Use when visualizing motif PWMs (TF binding, splice sites, CRISPR spacers), aligned-position composition, or comparing two motif sets.
+description: Build sequence logos from aligned DNA, RNA, or protein motifs using ggseqlogo (R), Logomaker (Python), or WebLogo with explicit bits vs probability encoding, correctly computed non-uniform-background relative entropy, custom alphabets, and multi-logo stacking. Use when visualizing motif PWMs (TF binding, splice sites, CRISPR spacers), aligned-position composition, or comparing two motif sets.
 tool_type: mixed
 primary_tool: ggseqlogo
 license: MIT
@@ -39,23 +39,23 @@ A sequence logo can encode each position as **bits** (information content) or **
 
 | Use case | Encoding | Background | Tool |
 |----------|----------|------------|------|
-| TF binding motif (JASPAR/CIS-BP PWM) | bits | uniform OR genome composition | ggseqlogo, Logomaker |
+| TF binding motif (JASPAR/CIS-BP PWM) | bits (uniform) or relative entropy (genome) | uniform OR genome composition | ggseqlogo custom matrix, Logomaker, WebLogo |
 | Splice-site motif (5'SS, 3'SS) | bits | uniform | ggseqlogo |
 | CRISPR sgRNA position-composition | probability | – | logomaker (custom alphabet) |
-| Protein motif (kinase substrate) | bits | proteome composition | Logomaker (matrix_type='counts') |
+| Protein motif (kinase substrate) | bits (uniform) or relative entropy (proteome) | uniform OR proteome composition | Logomaker |
 | Alignment-conservation cartoon | bits OR probability | depends on intent | WebLogo |
-| Differential motif (TF-A vs TF-B) | EDLogo log-odds | TF-B | Logomaker (matrix_type='weight') |
+| Differential motif (TF-A vs TF-B) | signed log-odds | TF-B | Logomaker custom weight matrix |
 
 ## ggseqlogo (R) -- Canonical Bioinformatics Default
 
-**Goal:** Render a sequence motif as a per-position letter stack whose total height encodes information content (Schneider-Stephens 1990) and individual letter heights reflect frequency, optionally corrected for genome background.
+**Goal:** Render a sequence motif as a per-position letter stack whose total height encodes either uniform-background information content (Schneider-Stephens 1990) or explicitly computed relative entropy against a genome background.
 
-**Approach:** Pass a PWM matrix (rows = letters, columns = positions) or vector of aligned same-length sequences to `ggseqlogo()` with `method = 'bits'` and explicit `bg_freq` for the relevant genome composition; stack multiple motifs as a named list.
+**Approach:** Pass a PWM matrix (rows = letters, columns = positions) or vector of aligned same-length sequences to `ggseqlogo()` with `method = 'bits'` for a uniform-background logo. ggseqlogo 0.2 has no background-frequency parameter. For a non-uniform background, calculate a letter-by-position relative-entropy height matrix and render it with `method = 'custom'`.
 
 ```r
 library(ggseqlogo)
 
-# Input: PWM matrix (rows = positions, columns = nucleotides A/C/G/T)
+# Input: PWM matrix (rows = nucleotides A/C/G/T, columns = positions)
 # or aligned sequence vector
 
 # From a vector of aligned sequences (same length)
@@ -69,7 +69,9 @@ pwm <- matrix(c(0.7, 0.1, 0.1, 0.1,
               dimnames = list(c('A', 'C', 'G', 'T'), NULL))
 ggseqlogo(pwm, method = 'bits')           # 'bits' OR 'probability'
 
-# Multiple logos stacked (e.g., compare TF-A and TF-B)
+# Multiple logos stacked (e.g., compare two supplied alignments)
+seqs_a <- c('ATGCAA', 'ATGCAC', 'ATGCAG')
+seqs_b <- c('ACGTAA', 'ACGTAC', 'ACGTAG')
 ggseqlogo(list(TFA = seqs_a, TFB = seqs_b),
           method = 'bits',
           col_scheme = 'nucleotide')
@@ -77,6 +79,8 @@ ggseqlogo(list(TFA = seqs_a, TFB = seqs_b),
 
 ```r
 # Custom color scheme (protein motif, kinase substrate)
+protein_pwm <- matrix(rep(1 / 20, 20 * 3), ncol = 3,
+                      dimnames = list(strsplit('ACDEFGHIKLMNPQRSTVWY', '')[[1]], NULL))
 ggseqlogo(protein_pwm,
           method = 'bits',
           seq_type = 'aa',                      # auto-detected usually
@@ -100,29 +104,32 @@ counts_df = pd.DataFrame({'A': [10, 0, 5, 8],
                           'G': [0, 2, 0, 0],
                           'T': [0, 0, 0, 1]})
 
-# Convert counts -> information (bits)
+# Convert counts -> information (bits). Set pseudocount deliberately:
+# Logomaker defaults to 1, which changes small-sample heights.
 ic_df = logomaker.transform_matrix(counts_df,
                                     from_type='counts',
                                     to_type='information',
-                                    background=[0.25] * 4)    # uniform; pass real background for corrected IC
+                                    background=[0.25] * 4,
+                                    pseudocount=0)
 
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(6, 2))
-logo = logomaker.Logo(ic_df,
+logo = logomaker.Logo(ic_df, ax=ax,
                       color_scheme='classic',           # 'NajafabadiEtAl2017' for protein
                       shade_below=0.5,
-                      fade_below=0.5,
-                      font_name='Arial Rounded MT Bold')
+                      fade_below=0.5)
 logo.style_xticks(rotation=0)
 logo.ax.set_ylabel('Bits')
 ```
 
 ```python
-# Weight matrix (signed) -- enrichment vs depletion
+# Signed log-odds matrix -- enrichment vs depletion.
+# This is not an EDLogo implementation, which has additional methodology.
 weight_df = logomaker.transform_matrix(counts_df,
                                         from_type='counts',
                                         to_type='weight',
-                                        background=genome_composition)
+                                        background=[0.29, 0.21, 0.21, 0.29],
+                                        pseudocount=0)
 logo = logomaker.Logo(weight_df, color_scheme='classic',
                        flip_below=True)                  # depleted letters below axis
 ```
@@ -138,27 +145,45 @@ weblogo --format pdf --sequence-type dna \
         < aligned.fasta > logo.pdf
 ```
 
-WebLogo (Crooks 2004) is the original; supports many formats and is scriptable. For reproducible figures, prefer ggseqlogo or Logomaker (programmatic, easier to integrate with multi-panel figures).
+WebLogo (Crooks 2004) is the original; supports many formats and is scriptable. Use `--sequence-type rna` for alignments containing U; do not force the DNA mode. On Windows, PDF/PNG/SVG output from the pip package also needs Ghostscript available on PATH (EPS and logodata do not).
 
 ## Background Composition Correction
 
-The bits encoding assumes a uniform background by default. For genome-derived motifs, the background should match the genome:
+The standard bits encoding assumes a uniform background by default. To compare a motif to a genome composition q, use relative entropy: `D_KL(p || q) = sum_i p_i log2(p_i / q_i)`. A relative-entropy logo has total column height `D_KL` and letter i height `p_i D_KL`. The shipped ggseqlogo helper uses raw maximum-likelihood observed frequencies: it adds no pseudocount or smoothing. Choose and document a biological prior separately if sparse data need one.
 
 - Human genome: A=0.29, C=0.21, G=0.21, T=0.29 (approx)
-- GC-rich genomes (Streptomyces): A=0.18, C=0.32, G=0.32, T=0.18
+- GC-rich *Streptomyces* genomes (about 72% GC): A=0.14, C=0.36, G=0.36, T=0.14
 
-Without correction, a motif preferring GC in a genome where GC is rare overestimates information; conversely, an A-rich motif in an AT-rich genome underestimates.
+Uniform background **understates** conservation of letters rarer than 0.25 in the true background and **overstates** conservation of letters commoner than 0.25. For example, a fully conserved C is 2.252 bits against human C=0.21, not 2 bits; a fully conserved A is 1.786 bits against human A=0.29.
 
 ```r
-# ggseqlogo: pass `bg_freq`
-ggseqlogo(pwm, method = 'bits',
-          bg_freq = c(A = 0.29, C = 0.21, G = 0.21, T = 0.29))
+# ggseqlogo has no bg_freq parameter. Source the checked helper, then compute
+# a custom letter-height matrix.
+library(ggseqlogo)
+source(file.path('examples', 'relative_entropy_logo.R'))
+seqs <- c('ATGCAA', 'ATGCAC', 'ATGCAG', 'ATGCAT', 'ACGCAA')
+human_bg <- c(A = 0.29, C = 0.21, G = 0.21, T = 0.29)
+probabilities <- sequence_probability_matrix(seqs, names(human_bg))
+heights <- relative_entropy_heights(probabilities, human_bg)
+ggseqlogo(heights, method = 'custom')
 ```
 
 ```python
 logomaker.transform_matrix(counts_df, from_type='counts', to_type='information',
-                            background=[0.29, 0.21, 0.21, 0.29])
+                            background=[0.29, 0.21, 0.21, 0.29],
+                            pseudocount=0)
 ```
+
+### Small-sample behavior differs by tool
+
+Do not call all low-N corrections “Schneider correction”: their defaults are different.
+
+| Route | Default behavior | Reproducible choice |
+|-------|------------------|---------------------|
+| ggseqlogo, sequence vector, `method = 'bits'` | Applies the first-order Schneider entropy correction `e_n = (K-1)/(2 ln(2) N)`, clamped at zero. | Prefer this route for ordinary small-N uniform-background sequence logos; do not use it at N < 5. |
+| ggseqlogo, PWM/count/probability matrix | No small-sample correction because N is not available. | State the effective N and correction outside the plot if it is known. |
+| Logomaker `transform_matrix(..., from_type='counts')` | Adds pseudocount=1 by default; it is not Schneider correction. | Set `pseudocount=0` when you need raw information or implement and document a chosen correction yourself. |
+| WebLogo | Uses a composition-weighted Dirichlet prior by default. | State `--weight`; use `--weight 0` only when raw uncorrected frequencies are intended. |
 
 ## Per-Method Failure Modes
 
@@ -174,13 +199,13 @@ logomaker.transform_matrix(counts_df, from_type='counts', to_type='information',
 
 ### Background uniform when genome composition matters
 
-**Trigger:** Uniform `bg_freq = c(0.25, 0.25, 0.25, 0.25)` for a non-uniform genome.
+**Trigger:** Plotting a uniform-background bits logo for a non-uniform genome while describing it as background-corrected.
 
-**Mechanism:** Information content overestimates conservation for preferred bases.
+**Mechanism:** Uniform bits use `log2(K) - H(p)`, not `D_KL(p || q)`; the direction of error depends on the letter's true background frequency.
 
-**Symptom:** Reported motif looks more conserved than it actually is.
+**Symptom:** Bases rarer than 0.25 look less conserved than corrected; bases commoner than 0.25 look more conserved.
 
-**Fix:** Pass genome composition to `bg_freq` / `background` parameter.
+**Fix:** For ggseqlogo, calculate a custom relative-entropy height matrix; for Logomaker, pass `background`; for WebLogo, set `--composition`. Label the figure with the background only when that calculation was actually applied.
 
 ### PWM rows/columns reversed
 
@@ -192,15 +217,15 @@ logomaker.transform_matrix(counts_df, from_type='counts', to_type='information',
 
 **Fix:** Transpose the matrix; verify with `print(matrix.shape)` before plotting.
 
-### Custom alphabet not recognized
+### RNA or unusual symbols
 
-**Trigger:** RNA logo with `U` instead of `T`; protein logo with `J` or `Z`.
+**Trigger:** An alignment uses an alphabet the selected tool has not been told to accept, especially non-standard protein symbols.
 
 **Mechanism:** ggseqlogo and logomaker auto-detect alphabet from input; unusual characters may fail.
 
-**Symptom:** Letters render as boxes or missing entirely.
+**Symptom:** The tool errors, omits a character, or applies an unsuitable default color scheme.
 
-**Fix:** Explicit `seq_type = 'rna'` (ggseqlogo) or pass custom color scheme (Logomaker).
+**Fix:** ggseqlogo auto-detects ordinary RNA A/C/G/U, but set `seq_type = 'rna'` when clarity matters. Use `--sequence-type rna` for WebLogo RNA input; define a custom alphabet/color scheme for non-standard residues.
 
 ### Aligned sequences of unequal length
 
@@ -214,13 +239,13 @@ logomaker.transform_matrix(counts_df, from_type='counts', to_type='information',
 
 ### Logo for too few input sequences
 
-**Trigger:** PWM from N=5 sequences plotted as if N=500.
+**Trigger:** A logo from N < 20 sequences is presented with the certainty of a large alignment.
 
 **Mechanism:** Information content has small-N bias; even random sequences look "conserved" at N=5.
 
 **Symptom:** Logo appears more meaningful than the input warrants.
 
-**Fix:** Compute small-sample correction (Schneider 1986; standard in MEME); annotate N in caption; require N ≥ 20 for credible motif.
+**Fix:** Annotate N and the correction/prior used. Treat N < 5 as exploratory: ggseqlogo's sequence route can fall back to fabricated-looking full-height columns at N=1, and no default correction makes such a logo reliable. N ≥ 20 is a practical minimum for a credible motif.
 
 ### Stacked logos with different alphabets compared
 
@@ -236,8 +261,8 @@ logomaker.transform_matrix(counts_df, from_type='counts', to_type='information',
 
 | Pattern | Cause | Action |
 |---------|-------|--------|
-| ggseqlogo vs Logomaker show different heights | Different default backgrounds (uniform vs explicit) | Standardize background; recompute |
-| WebLogo vs Logomaker differ at low-conservation positions | Small-sample correction differs | Use consistent N; report sample-corrected IC |
+| ggseqlogo vs Logomaker show different heights | ggseqlogo bits are uniform-background; Logomaker may use explicit background or a pseudocount | Match the calculation: ggseqlogo custom heights or Logomaker background/pseudocount settings |
+| WebLogo vs Logomaker differ at low-conservation positions | Different prior/pseudocount defaults | Set and report WebLogo `--weight` and Logomaker `pseudocount` |
 | JASPAR vs MEME PWM look different | JASPAR uses observed counts; MEME has Dirichlet prior | Document source; cite version |
 
 ## Quantitative Thresholds
@@ -247,7 +272,7 @@ logomaker.transform_matrix(counts_df, from_type='counts', to_type='information',
 | Max IC per DNA position | 2 bits | Schneider-Stephens 1990 |
 | Max IC per protein position | 4.32 bits (log2(20)) | Schneider-Stephens 1990 |
 | Min N for credible motif | ≥ 20 instances; ≥ 100 ideal | Common practice |
-| Small-sample correction | Schneider 1986 entropy correction | MEME default; ggseqlogo via small-N tools |
+| Small-sample correction | Tool-specific; not interchangeable | See per-tool table above |
 | TF binding-site length typical | 6-20 bp | Biology |
 
 ## Common Errors
@@ -255,11 +280,12 @@ logomaker.transform_matrix(counts_df, from_type='counts', to_type='information',
 | Error / symptom | Cause | Solution |
 |-----------------|-------|----------|
 | Logo flat with all positions = 1 | Probability mode | Switch to bits |
-| Motif looks too conserved | Uniform bg in non-uniform genome | Pass `bg_freq` |
+| Motif background claim is false | Uniform-background bits labelled as genome-corrected | Use custom relative-entropy heights (ggseqlogo), `background` (Logomaker), or `--composition` (WebLogo) |
 | Letter count = N samples not motif length | Matrix transposed | Verify shape |
-| RNA U renders as box | Alphabet not recognized | `seq_type = 'rna'` |
+| RNA sequence loses U in WebLogo | DNA sequence type forced on RNA input | Use `--sequence-type rna` |
 | Logos at different scales overlaid | Different alphabets | Normalize OR separate |
 | Logo from N=5 looks meaningful | Small-sample bias | Require N>=20; annotate |
+| PDF/PNG WebLogo fails on Windows | Ghostscript unavailable | Install Ghostscript and put it on PATH, or emit EPS/logodata |
 
 ## References
 
