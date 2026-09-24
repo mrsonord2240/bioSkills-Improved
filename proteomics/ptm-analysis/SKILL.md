@@ -93,7 +93,7 @@ Benchmark result (Mueller-Dott 2025): across ~19 methods, simple z-score (KSEA/R
 | Scenario | Recommended | Why |
 |---|---|---|
 | Phospho-only run, want regulated sites | Acquire a PAIRED global proteome -> MSstatsPTM `groupComparisonPTM` -> require significance in `ADJUSTED.Model` | Unadjusted site changes are confounded with protein abundance |
-| No global proteome available | Report site changes as UNADJUSTED (`PTM.Model`; `ADJUSTED.Model` is absent) and flag the confound explicitly; optionally `use_unmod=TRUE` on `scripts/msstatsptm_labelfree.R` (passed as `use_unmod_peptides`) uses unmodified peptides co-enriched in the PTM runs as a weak protein proxy, which needs those unmodified rows kept in the evidence -- label those results proxy-adjusted | Cannot separate occupancy from abundance; do not claim "regulation" |
+| No global proteome available | Prefer reporting `PTM.Model` as unadjusted and flag the confound. The explicit fallback uses `scripts/run_proxy_checked.py` around `msstatsptm_labelfree.R ... use_unmod=TRUE`, with **no** `evidence_prot`, `proteinGroups`, or `annotation_protein` files present. It requires a bijective Raw.file annotation, unambiguous peptide-to-protein mappings, >=2 unique unmodified peptides per PTM protein, and >=2 biological replicates per condition with unmodified coverage for every PTM-protein × Condition × BioReplicate; after clean process completion the runner publishes the three proxy CSVs, their internal manifest, then outer completion marker `proxy_checked_complete.json` | Co-enriched unmodified peptides are a weak abundance proxy, not a paired global proteome. Label output proxy-adjusted candidates; never call them regulated |
 | TMT / isobaric plexes (enriched + global) | Same MSstatsPTM route with `labeling_type = 'TMT'`, `dataSummarizationPTM_TMT`, `groupComparisonPTM(data.type = 'TMT')`, and a `Condition = 'Norm'` reference channel in EVERY plex (`references/tmt-isobaric.md`) | The adjustment is identical; only the converter, the summarization function and the test branch differ |
 | More than one TMT plex | Refuse to compare until each plex carries the pooled reference channel; `reference_norm = TRUE` bridges them | Reporter ratios are meaningful only within a plex |
 | Between-method phospho difference | Suspect chemistry (TiO2 vs Fe-IMAC mono/multi bias) BEFORE biology | Enrichment is a confounded filter |
@@ -117,9 +117,12 @@ Runnable code lives in `scripts/`, each with a header (purpose, inputs, usage):
 
 | Script | Does |
 |---|---|
-| `scripts/msstatsptm_labelfree.R` | Class-I filter, MSstatsPTM label-free adjustment, TREAT-style calls; writes `adjusted_sites.csv` |
+| `scripts/msstatsptm_labelfree.R` | Class-I filter and MSstatsPTM label-free adjustment. Paired-global mode writes `adjusted_sites.csv`; the mutually exclusive `use_unmod=TRUE` no-global proxy writes labelled proxy, raw-PTM, QC, and final integrity-manifest files |
 | `scripts/msstatsptm_tmt.R` | The same for TMT/isobaric plexes; writes `adjusted_sites_tmt.csv` |
-| `scripts/ksea_scores.R` | KSEA z-scores per kinase from `adjusted_sites.csv` and a kinase-substrate prior, with the failure guards |
+| `scripts/run_checked.py` | Owns one process scope, requires a fresh private stage, validates one CSV after clean exit, and atomically publishes it without clobbering |
+| `scripts/run_proxy_checked.py` | Owns the no-global process scope, stream-copies and revalidates a non-aliased three-artifact bundle after clean exit, then writes outer marker `proxy_checked_complete.json` last into a new public directory |
+| `scripts/cli_windows_cleanup_guard.Rprofile` | Opt-in, one-process guard for the documented Windows `cli` 3.6.6 teardown fault; never install it globally |
+| `scripts/ksea_scores.R` | KSEA z-scores per kinase from a checked runner's published paired-global label-free or TMT result and a kinase-substrate prior, with the failure guards |
 | `scripts/motif_enrichment.py` | Fisher + BH motif enrichment against an experiment-matched background |
 | `scripts/ptmsea.py` | Build the PTM-SEA GCT from `Sequence window` and read ssGSEA2.0 scores back |
 
@@ -138,10 +141,133 @@ The runnable recipe is `examples/phospho_analysis.py`: it reads the sites table 
 **Approach:** MSstatsPTM carries TWO datasets -- a PTM dataset (enriched) and a PROTEIN dataset (global/unenriched). `groupComparisonPTM` fits independent linear models to each and returns a list of THREE: `PTM.Model` (unadjusted), `PROTEIN.Model`, and `ADJUSTED.Model`. The adjustment is `dFC_adj = dFC_PTM - dFC_protein` with `SE_adj = sqrt(SE_PTM^2 + SE_protein^2)`, so adjustment ADDS uncertainty -- a site can be significant unadjusted yet lose significance after adjustment. A confident regulation call requires significance in `ADJUSTED.Model`.
 
 ```bash
-Rscript scripts/msstatsptm_labelfree.R dir=<data_dir> out=<out_dir>   # writes <out_dir>/adjusted_sites.csv
+PYTHON=python
+RSCRIPT=/absolute/path/to/supported-R-launcher  # caller supplies its version-pinned launcher
+DATA=/absolute/path/to/data_dir
+OUT=/absolute/path/to/out_dir
+RUN_ID=$($PYTHON -c 'import uuid; print(uuid.uuid4().hex)')
+# FINAL's parent must permit a temporary sibling: run_checked copies the verified
+# bytes there, fsyncs them, then exposes the complete file by atomic no-clobber link.
+STAGE="$OUT/.checked-labelfree-$RUN_ID"
+RECEIPT="$OUT/receipt-labelfree-$RUN_ID.json"
+FINAL="$OUT/adjusted_sites-$RUN_ID.csv"        # must not already exist, including as a dangling symlink
+
+$PYTHON scripts/run_checked.py \
+  --timeout 1800 --grace 0.15 \
+  --receipt "$RECEIPT" --stage-dir "$STAGE" \
+  --publish-source adjusted_sites.csv --publish-dest "$FINAL" \
+  --csv adjusted_sites.csv --require-columns Protein,Label,log2FC,adj.pvalue_lfc --min-rows 1 \
+  -- "$RSCRIPT" scripts/msstatsptm_labelfree.R "dir=$DATA" "out=$STAGE" use_unmod=FALSE
 ```
 
-`scripts/msstatsptm_labelfree.R` runs the whole route, with the traps in its comments: class-I pre-filter on the enriched evidence (best `Phospho (STY) Probabilities` >= 0.75; unmodified rows kept only with `use_unmod=TRUE`); `MaxQtoMSstatsPTMFormat` with the global run's `evidence_prot`, `proteinGroups` and annotation, then `stopifnot('PROTEIN' %in% names(input))`; `dataSummarizationPTM(use_log_file = FALSE, append = FALSE)`; an explicit `Treatment vs Control` contrast; `groupComparisonPTM(data.type = 'LabelFree')`; site rows of `ADJUSTED.Model` only (`Protein_<residue><position>`); and the TREAT-style test `pt((|log2FC| - lfc) / SE, DF)` with BH, in place of a post-hoc `adj.pvalue < 0.05 & |log2FC| > 1` double filter (whose FDR refers to log2FC != 0). Compare `PTM.Model` against `ADJUSTED.Model` to see how much of each call was protein-driven. For TMT plexes see `references/tmt-isobaric.md`.
+### Opt-in Windows `cli` teardown guard
+
+Some Windows R 4.4.3 audit runtimes with `cli` 3.6.6 can complete MSstatsPTM computation and then terminate nonzero during `cli` namespace teardown. Prefer a compatible runtime that exits cleanly. If an audit or disposable batch process must use the affected runtime, opt in for that one checked run only:
+
+```bash
+# Git Bash / WSL-on-Windows form:
+CLI_GUARD="$(pwd)/scripts/cli_windows_cleanup_guard.Rprofile"
+R_PROFILE_USER="$CLI_GUARD" "$PYTHON" scripts/run_checked.py \
+  --timeout 1800 --grace 0.15 \
+  --receipt "$RECEIPT" --stage-dir "$STAGE" \
+  --publish-source adjusted_sites.csv --publish-dest "$FINAL" \
+  --csv adjusted_sites.csv --require-columns Protein,Label,log2FC,adj.pvalue_lfc --min-rows 1 \
+  -- "$RSCRIPT" scripts/msstatsptm_labelfree.R "dir=$DATA" "out=$STAGE" use_unmod=FALSE
+```
+
+For native PowerShell, use the resolved absolute helper path and scope the environment change to the
+one checked invocation:
+
+```powershell
+$PYTHON = 'python'
+$RSCRIPT = 'C:\absolute\path\to\supported-Rscript.exe'
+$DATA = 'C:\absolute\path\to\data_dir'
+$OUT = 'C:\absolute\path\to\out_dir'
+$RUN_ID = [guid]::NewGuid().ToString('N')
+$STAGE = Join-Path $OUT ".checked-labelfree-$RUN_ID"
+$RECEIPT = Join-Path $OUT "receipt-labelfree-$RUN_ID.json"
+$FINAL = Join-Path $OUT "adjusted_sites-$RUN_ID.csv"
+$oldRProfileUser = $env:R_PROFILE_USER
+$env:R_PROFILE_USER = (Resolve-Path '.\scripts\cli_windows_cleanup_guard.Rprofile').Path
+$exitCode = 0
+try {
+  & $PYTHON scripts/run_checked.py `
+    --timeout 1800 --grace 0.15 `
+    --receipt $RECEIPT --stage-dir $STAGE `
+    --publish-source adjusted_sites.csv --publish-dest $FINAL `
+    --csv adjusted_sites.csv --require-columns Protein,Label,log2FC,adj.pvalue_lfc --min-rows 1 `
+    -- $RSCRIPT scripts/msstatsptm_labelfree.R "dir=$DATA" "out=$STAGE" use_unmod=FALSE
+  $exitCode = $LASTEXITCODE
+} finally {
+  if ($null -eq $oldRProfileUser) {
+    Remove-Item Env:R_PROFILE_USER -ErrorAction SilentlyContinue
+  } else {
+    $env:R_PROFILE_USER = $oldRProfileUser
+  }
+}
+if ($exitCode -ne 0) { exit $exitCode }
+```
+
+The profile registers only an `onLoad` hook: on Windows, after `cli` loads, it marks `clienv$unloaded` so `cli` skips its final native `clic_unload` call. It does not load packages, set `.Last`, install globally, or alter MSstatsPTM inputs, models, contrasts, or output code. Do **not** put it in a user/site profile or use it for an interactive session: it changes `cli` lifecycle state for the whole R process, so explicit later `cli` unload becomes a no-op. For auditable batch evidence, set `CLI_WINDOWS_CLEANUP_GUARD_RECEIPT` to a new path; the hook creates it without clobbering and records `cli_unloaded=TRUE` plus the worker PID. Disclose the exact scoped environment command, absolute helper path/hash, guard receipt path/hash, OS/R/`cli` versions (this evidence is Windows + `cli` 3.6.6), runner PID/receipt and natural exit status, and input/source/output hashes. For a new runtime, compare retained computation output against an unprofiled or known-clean route before treating it as equivalent.
+
+`scripts/msstatsptm_labelfree.R` runs the paired-global route, with the traps in its comments: class-I pre-filter on the enriched evidence (best `Phospho (STY) Probabilities` >= 0.75); `MaxQtoMSstatsPTMFormat` with the global run's `evidence_prot`, `proteinGroups` and annotation; `dataSummarizationPTM(use_log_file = FALSE, append = FALSE)`; an explicit `Treatment vs Control` contrast; `groupComparisonPTM(data.type = 'LabelFree')`; site rows of `ADJUSTED.Model`; and a TREAT-style test `pt((|log2FC| - lfc) / SE, DF)` with BH rather than a post-hoc double filter. The checked wrapper owns the process scope, retains a receipt, validates the staged CSV, and publishes the versioned final only after clean completion. A bare `Rscript scripts/msstatsptm_labelfree.R ...` run is diagnostic-only: do not treat its output as complete for unattended use. Compare `PTM.Model` against `ADJUSTED.Model` to see how much of each call was protein-driven. For TMT plexes see `references/tmt-isobaric.md`.
+
+When no paired global run exists, the only supported proxy invocation is the checked multi-file transaction:
+
+```bash
+PYTHON=python
+RSCRIPT=/absolute/path/to/supported-R-launcher
+DATA=/absolute/path/to/data_dir
+OUT=/absolute/path/to/out_dir
+RUN_ID=$($PYTHON -c 'import uuid; print(uuid.uuid4().hex)')
+STAGE="$OUT/.checked-proxy-$RUN_ID"
+RECEIPT="$OUT/receipt-proxy-$RUN_ID.json"
+FINAL_DIR="$OUT/proxy-$RUN_ID"  # the directory must not already exist, including as a dangling symlink
+
+$PYTHON scripts/run_proxy_checked.py \
+  --timeout 1800 --grace 0.15 \
+  --receipt "$RECEIPT" --stage-dir "$STAGE" --publish-dir "$FINAL_DIR" \
+  -- "$RSCRIPT" scripts/msstatsptm_labelfree.R "dir=$DATA" "out=$STAGE" use_unmod=TRUE
+```
+
+On the affected Windows runtime, use this self-contained native PowerShell form so the guard applies
+only to the checked proxy child and both caller environment values are restored:
+
+```powershell
+$PYTHON = 'python'
+$RSCRIPT = 'C:\absolute\path\to\supported-Rscript.exe'
+$DATA = 'C:\absolute\path\to\data_dir'
+$OUT = 'C:\absolute\path\to\out_dir'
+$RUN_ID = [guid]::NewGuid().ToString('N')
+$STAGE = Join-Path $OUT ".checked-proxy-$RUN_ID"
+$RECEIPT = Join-Path $OUT "receipt-proxy-$RUN_ID.json"
+$FINAL_DIR = Join-Path $OUT "proxy-$RUN_ID"
+$GUARD_RECEIPT = Join-Path $OUT "cli-guard-$RUN_ID.txt"
+$oldRProfileUser = $env:R_PROFILE_USER
+$oldGuardReceipt = $env:CLI_WINDOWS_CLEANUP_GUARD_RECEIPT
+$env:R_PROFILE_USER = (Resolve-Path '.\scripts\cli_windows_cleanup_guard.Rprofile').Path
+$env:CLI_WINDOWS_CLEANUP_GUARD_RECEIPT = $GUARD_RECEIPT
+$exitCode = 0
+try {
+  & $PYTHON scripts/run_proxy_checked.py `
+    --timeout 1800 --grace 0.15 `
+    --receipt $RECEIPT --stage-dir $STAGE --publish-dir $FINAL_DIR `
+    -- $RSCRIPT scripts/msstatsptm_labelfree.R "dir=$DATA" "out=$STAGE" use_unmod=TRUE
+  $exitCode = $LASTEXITCODE
+} finally {
+  if ($null -eq $oldRProfileUser) { Remove-Item Env:R_PROFILE_USER -ErrorAction SilentlyContinue }
+  else { $env:R_PROFILE_USER = $oldRProfileUser }
+  if ($null -eq $oldGuardReceipt) { Remove-Item Env:CLI_WINDOWS_CLEANUP_GUARD_RECEIPT -ErrorAction SilentlyContinue }
+  else { $env:CLI_WINDOWS_CLEANUP_GUARD_RECEIPT = $oldGuardReceipt }
+}
+if ($exitCode -ne 0) { exit $exitCode }
+```
+
+Do not place any paired-global input file in `DATA` for this mode: `use_unmod=TRUE` and paired-global files are mutually exclusive. The script keeps unmodified enriched-run rows, rejects retained evidence `Raw.file` values absent from annotation, collapses only exact duplicate annotation rows (conflicting `Raw.file` assignments fail), validates one protein per modified/unmodified peptide, >=2 unique unmodified peptides per PTM protein, and >=2 biological replicates per condition with unmodified coverage for every PTM protein × Condition × BioReplicate, then makes the MSstatsPTM proxy inside the private stage. After worker exit zero and zero owned descendants, `run_proxy_checked.py` opens stable regular stage files, stream-copies them into the new `FINAL_DIR` without aliasing the retained stage, rechecks the exact internal-manifest schema, artifact set, sizes/MD5s, required output columns, and non-regulatory labels, copies `proxy_adjusted_manifest.csv`, and writes **last** the outer marker `proxy_checked_complete.json`. A nonzero exit (including a teardown crash), timeout, lingering child, bad manifest, hash mismatch, invalid label/schema, or existing target writes no outer marker; even if rollback is impeded and unmarked partial files remain, they are not a valid bundle. Consumers must reject the whole proxy set unless (1) the internal manifest has exactly the three expected CSVs with `schema_version=1`, `mode=no-global-proxy`, `complete=TRUE`, and matching sizes/MD5s, and (2) `proxy_checked_complete.json` has `schema_version=1`, `mode=no-global-proxy`, `complete=true`, `worker_exit=0`, `active_processes_after_root_exit=0`, the matching internal-manifest filename/bytes/SHA-256, and matching artifact filenames/bytes/MD5/SHA-256. A bare R run can create only the internal diagnostic manifest, never the outer checked marker. These are **proxy-adjusted candidates, not regulation calls**; retain/report the raw PTM model alongside them and acquire a paired global proteome before claiming regulated sites.
+
+On the affected Windows `cli` runtime, use the scoped profile and guard receipt above. Never use a bare R invocation as completion evidence: even a valid-looking private manifest is not public until the outer runner observes clean process completion.
+
+`run_checked.py` is mandatory for paired-global single-file label-free and TMT runs; it owns the process scope and publishes one validated CSV from an otherwise private stage directory. The proxy route deliberately uses `run_proxy_checked.py` and its copied-bundle/internal-manifest/outer-marker contract instead: the single-output runner must not be used to expose a partial proxy set.
 
 ## A Note on Home-Grown Ascore
 
@@ -163,6 +289,9 @@ def illustrative_localization_score(matched_site_ions, total_ions, depth_p=0.04)
 
 ### Skipping protein-level adjustment
 **Trigger:** Differential testing on a phospho-only run with no paired global proteome. **Mechanism:** `log2FC(PTM_observed) = log2FC(occupancy) + log2FC(protein)`; the two terms are inseparable. **Symptom:** Pathway-coherent "regulated sites" that are pure protein-abundance changes (cyclins/histones in cell cycle, stabilized substrates under drug). **Fix:** Run a matched global proteome and adjust via MSstatsPTM; route the protein-level quant to quantification.
+
+### Windows `cli` teardown after a completed MSstatsPTM batch
+**Trigger:** A Windows R 4.4.3 process with `cli` 3.6.6 writes otherwise valid checked-run output, then exits nonzero while unloading namespaces. **Mechanism:** `cli`'s final native `clic_unload` path faults during teardown; this is outside the MSstatsPTM calculation. **Symptom:** A result file appears but the checked runner records failure, so publication must not proceed. **Fix:** First select a compatible runtime that exits naturally. Only for a retained audit/batch run on the affected stack, use `R_PROFILE_USER=/absolute/path/cli_windows_cleanup_guard.Rprofile` as documented above, keep it process-local, and disclose the profile, versions, PID, receipt, hashes, and output-equivalence evidence. Never install the guard globally or use it interactively.
 
 ### Collapsing the MaxQuant multiplicity
 **Trigger:** Quantifying on base `Intensity` instead of `Intensity___1/___2/___3`. **Mechanism:** The collapsed column mixes singly/doubly/triply-phospho forms of the same site. **Symptom:** A switch between forms is masked: the singly-phospho form dropping while the doubly-phospho form rises reads as no change (synthetic test: collapsed +0.16 log2, ___1 -1.40, ___2 +1.56). **Fix:** Expand multiplicity to long form (Perseus "Expand site table" or the melt in `examples/phospho_analysis.py`) before any stats.
@@ -204,15 +333,15 @@ def illustrative_localization_score(matched_site_ions, total_ions, depth_p=0.04)
 | `Extra columns included in the annotation file that are not required ... Run, Raw.file, Fraction, TechRepMixture, Channel, Condition, Mixture, BioReplicate` | a label-free annotation passed with `labeling_type = 'TMT'` | Use the TMT annotation columns the message itself lists |
 | One of several loud errors from `MaxQtoMSstatsPTMFormat`, depending on which half is mismatched: `A non-empty vector of column names for 'by' is required`; `Extra columns included in the annotation file ... Run, Raw.file, Condition, BioReplicate, IsotopeLabelType`; `Each MS run (Raw.file) can't have multiple conditions or BioReplicates` | TMT evidence left on the default `labeling_type = 'LF'` (or the reverse); none of the messages names the labeling type | Check `labeling_type` first whenever the converter rejects a TMT input: `'TMT'`, then `dataSummarizationPTM_TMT` and `data.type = 'TMT'` |
 | `the channel name must be matched with that in input data` | Annotation `Channel` counted from 1 (`channel.1` .. `channel.10`) while MaxQuant's reporter columns start at 0 | Name the channels from the evidence header: `channel.0` .. `channel.9` for a 10-plex |
-| `names(input)` is only `PTM`; `ADJUSTED.Model` missing | `evidence_prot` not passed to `MaxQtoMSstatsPTMFormat` | Pass the global run's evidence as `evidence_prot`; `stopifnot('PROTEIN' %in% names(input))` |
+| `names(input)` is only `PTM`; `ADJUSTED.Model` missing | paired-global input was incomplete, or the explicit no-global proxy had no usable unmodified peptides | Supply all three paired-global files with `use_unmod=FALSE`, or use `use_unmod=TRUE` with no global files and satisfy the proxy QC |
 | `z.score` NaN for every kinase from `KSEA.Scores` | a site with log2FC -Inf/Inf (missing in one condition) entered PX; FC = 0 passes `is.finite(FC)` | drop rows with non-finite `log2FC` before building PX |
 | `arguments imply differing number of rows: 0, 1` while building PX | the non-finite-`log2FC` filter emptied the table, and `Peptide = 'NULL'` is a length-1 literal against zero-length columns | guard `nrow(ks) == 0` with a message about one-condition sites, and use `rep('NULL', nrow(ks))` |
 | `no rows to aggregate` from `KSEA.Scores` | the prior overlaps the site list in 0 or 1 place -- usually the abbreviated `data(KSData)`, a non-HUGO `Gene` column, or residues written `pS473`/`Ser473` | count `paste(Gene, Residue.Both)` against `paste(SUB_GENE, SUB_MOD_RSD)` before calling and stop with the coverage number |
-| `Can't assign 4 names to a 0-column data.table` with `use_unmod_peptides = TRUE` | the evidence pre-filter removed every unmodified row | pass `use_unmod=TRUE` to `scripts/msstatsptm_labelfree.R` so unmodified rows are kept; the class-I rule applies to modified rows only |
+| proxy QC rejects `use_unmod=TRUE` | retained unmodified rows are absent, multi-protein, or do not cover every PTM protein × Condition × BioReplicate | use a paired global proteome, or repair the evidence/annotation mapping; do not relax the QC and call the result regulated |
 | Site signs inverted in KSEA / up-down calls | Default pairwise Label `Control vs Treatment` means log2FC = Control - Treatment | Check `adjusted$Label` or pass an explicit `contrast.matrix` |
 | Protein names without a site suffix in `ADJUSTED.Model` | Unmodified peptides from the enriched runs entered `$PTM` | Pre-filter evidence to modified rows; drop rows without `_<residue><position>` |
 | KeyError / NaN on `Gene names` | Column is FASTA-dependent, absent without gene annotation | Guard with `.notna()` and fall back to `Protein` |
-| All sites "regulated" and pathway-coherent | No protein-level adjustment | Require significance in MSstatsPTM `ADJUSTED.Model` |
+| All sites "regulated" and pathway-coherent | No paired-global protein-level adjustment | Require paired-global MSstatsPTM `ADJUSTED.Model`; `use_unmod=TRUE` produces only proxy-adjusted candidates |
 | `PTM.Q.Value` / `PhosphoSite` not found (DIA-NN) | Those columns do not exist | Use `PTM.Site.Confidence` and `Site.Occupancy.Probabilities` |
 | False "ubiquitination" sites | Iodoacetamide +114.0429 lysine artifact | Alkylate with chloroacetamide |
 | Acetyl confused with trimethyl | +42.0106 vs +42.0470 isobaric at nominal mass | Require high-res MS; check 0.0364 Da split |
