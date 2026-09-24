@@ -1,6 +1,6 @@
 ---
 name: bio-alignment-validation
-description: Validate alignment quality with insert size distribution, proper pairing rates, GC bias, strand balance, and other post-alignment metrics. Use when verifying alignment data quality before variant calling or quantification.
+description: Validate BAM integrity, reference-dictionary identity, alignment quality, contamination, and sample swaps with insert size, pairing, GC bias, strand balance, and post-alignment metrics. Use before variant calling or quantification.
 tool_type: mixed
 primary_tool: samtools
 license: MIT
@@ -11,7 +11,7 @@ author: GPTomics
 
 Reference examples tested with: matplotlib 3.8+, numpy 1.26+, picard 3.1+, pysam 0.22+, samtools 1.19+
 Checked on: samtools 1.24, pysam 0.24.1, Picard 3.5.0, VerifyBamID2 2.0.3, somalier 0.3.5, deepTools 4.0.0, RSeQC 5.0.4
-Install: `conda install -c bioconda samtools picard` and `pip install pysam numpy matplotlib`. `picard <Tool> KEY=VALUE` is the bioconda wrapper for `java -jar picard.jar <Tool> KEY=VALUE`; Picard 3.x still accepts the `KEY=VALUE` form.
+Install: `conda install -c bioconda samtools picard` and `pip install pysam numpy matplotlib`. Install R when requesting Picard charts (`H=` / `CHART=`): Picard invokes `Rscript` for those plots, while omitting the chart argument still writes the metrics table. `picard <Tool> KEY=VALUE` is the bioconda wrapper for `java -jar picard.jar <Tool> KEY=VALUE`; Picard 3.x still accepts the `KEY=VALUE` form.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
@@ -45,7 +45,7 @@ A file can pass `quickcheck` and still be malformed in ways that crash GATK thre
 samtools quickcheck -v in.bam || echo "QUICKCHECK FAILED"
 samtools quickcheck -v *.bam > bad_bams.fofn   # one fail-line per bad file
 
-# Slow but thorough: structural validation (R= enables the NM/MD checks)
+# Slow but thorough: structural validation (R= enables the NM check; use samtools calmd to check MD)
 picard ValidateSamFile I=in.bam MODE=SUMMARY R=ref.fa
 ```
 
@@ -60,7 +60,7 @@ What each check caught in 21 planted defects (synthetic BAMs derived from a real
 
 No tool here sees a whole block removed from the middle unless mates are orphaned; for transfers compare `md5sum` or the read count with the source.
 
-Picard noise on valid files (observed): `MATE_NOT_FOUND` on region-extracted BAMs (mates fall outside the slice), `MISSING_TAG_NM` warnings on BAMs without NM tags (STAR output), `RECORD_OUT_OF_ORDER` on a samtools name-sorted BAM (Picard likely orders query names differently from samtools). Read the SUMMARY before trusting a non-zero count.
+Picard noise on valid files (observed): `MATE_NOT_FOUND` on region-extracted BAMs (mates fall outside the slice), `MISSING_TAG_NM` warnings on BAMs without NM tags (STAR output), `RECORD_OUT_OF_ORDER` on a samtools name-sorted BAM (Picard likely orders query names differently from samtools). Long-read BAMs can also report missing `@RG PL` / other required header tags and NM-convention errors. Read the SUMMARY before trusting a non-zero count.
 
 `IGNORE=<TYPE>` removes a check. On the planted files `IGNORE=INVALID_MAPPING_QUALITY IGNORE=MISMATCH_FLAG_MATE_NEG_STRAND` turned 40, 2 and 2820 genuine errors into "No errors found". Ignore a type only after tracing it to a known harmless source.
 
@@ -103,11 +103,12 @@ somalier extract -d extracted/ -s /resources/sites.hg38.vcf.gz \
     -f ref.fa sample.bam
 somalier relate --infer extracted/*.somalier
 
-# Tumor/normal pairing verification: give both BAMs the same SM (patient id), or add
-# EXPECT_ALL_GROUPS_TO_MATCH=true; the exit code is 1 on an unexpected mismatch
+# Tumor/normal pairing verification: compare whole files so duplicate RG IDs/PUs cannot collapse
+# two samples into one group. Alternatively give every BAM a distinct RG ID and PU.
+# Give paired tumor/normal BAMs the same SM (patient id) or add EXPECT_ALL_GROUPS_TO_MATCH=true.
 picard CrosscheckFingerprints I=tumor.bam I=normal.bam \
     HAPLOTYPE_MAP=Homo_sapiens_assembly38.haplotype_database.txt \
-    LOD_THRESHOLD=-5 OUTPUT=crosscheck.metrics
+    CROSSCHECK_BY=FILE LOD_THRESHOLD=-5 OUTPUT=crosscheck.metrics
 # With LOD_THRESHOLD=-5: LOD > 5 = same individual; < -5 = different; in between = ambiguous
 ```
 
@@ -134,6 +135,8 @@ picard CollectInsertSizeMetrics \
     O=insert_metrics.txt \
     H=insert_histogram.pdf
 ```
+
+`H=` asks Picard to invoke `Rscript` for the histogram; omit `H=` if R is unavailable and retain `O=` for the metrics table.
 
 ### Expected Insert Sizes by Library
 
@@ -220,6 +223,8 @@ picard CollectGcBiasMetrics \
     S=gc_summary.txt \
     R=reference.fa
 ```
+
+`CHART=` likewise needs `Rscript`; omit it if only the `O=` / `S=` tables are needed.
 
 The summary (`S=`) has `AT_DROPOUT` and `GC_DROPOUT` (percent of reads lost in the low-AT / low-GC windows); the detail file (`O=`) has `NORMALIZED_COVERAGE` per GC bin (1.0 = mean coverage). The "GC bias" bands in the Quality Thresholds table are applied to `NORMALIZED_COVERAGE` of well-populated bins.
 
@@ -354,7 +359,7 @@ python examples/validate_alignment.py sample.bam        # whole file, no index n
 python examples/validate_alignment.py sample.bam -n 100000
 ```
 
-It reads with `fetch(until_eof=True)`: unplaced unmapped reads (RNAME `*`) are counted, whereas `fetch()` and `get_index_statistics()` never see them (a BAM with 30% unplaced unmapped reads then reads as 100% mapped). `-n N` samples the first N records only: head-of-file biased (chr1 differs in GC content and complexity from chrM/chrX/chrY/alt contigs), and in a coordinate-sorted BAM the unplaced tail is not reached, so the mapping rate is overestimated. For unbiased per-chromosome statistics use `samtools view -s 42.01 input.bam` (the `INT.FRAC` form uses `INT` as the seed; specify an explicit nonzero seed so the subsample is documented and consistent across paired runs).
+It reads with `fetch(until_eof=True)`: unplaced unmapped reads (RNAME `*`) are counted, whereas `fetch()` and `get_index_statistics()` never see them (a BAM with 30% unplaced unmapped reads then reads as 100% mapped). `-n N` prints a head-of-file bias warning: it samples the first N records only, and in a coordinate-sorted BAM the unplaced tail is not reached, so the mapping rate is overestimated. Both validators require `@SQ` and do not grade pairing or strand balance below 100 primary records; they print that limit instead of interpreting a one-read fraction. For unbiased per-chromosome statistics use `samtools view -s 42.01 input.bam` (the `INT.FRAC` form uses `INT` as the seed; specify an explicit nonzero seed so the subsample is documented and consistent across paired runs).
 
 ## Quality Thresholds Summary
 
