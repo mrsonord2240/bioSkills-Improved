@@ -12,9 +12,25 @@ Two TMT-specific traps for the ADJUSTMENT itself, not just for the quant:
 2. **Label the enriched and global aliquots in the SAME plex** where the design allows. Split across plexes, each dataset carries its own reference-channel normalization and the site-to-protein subtraction inherits both.
 
 ```bash
-Rscript scripts/msstatsptm_tmt.R dir=<data_dir> out=<out_dir>   # writes <out_dir>/adjusted_sites_tmt.csv
+PYTHON=python
+RSCRIPT=/absolute/path/to/supported-R-launcher  # caller supplies its version-pinned launcher
+DATA=/absolute/path/to/data_dir
+OUT=/absolute/path/to/out_dir
+RUN_ID=$($PYTHON -c 'import uuid; print(uuid.uuid4().hex)')
+# FINAL's parent must permit a temporary sibling: run_checked copies the verified
+# bytes there, fsyncs them, then exposes the complete file by atomic no-clobber link.
+STAGE="$OUT/.checked-tmt-$RUN_ID"
+RECEIPT="$OUT/receipt-tmt-$RUN_ID.json"
+FINAL="$OUT/adjusted_sites_tmt-$RUN_ID.csv"    # must not already exist, including as a dangling symlink
+
+$PYTHON scripts/run_checked.py \
+  --timeout 1800 --grace 0.15 \
+  --receipt "$RECEIPT" --stage-dir "$STAGE" \
+  --publish-source adjusted_sites_tmt.csv --publish-dest "$FINAL" \
+  --csv adjusted_sites_tmt.csv --require-columns Protein,Label,log2FC,SE,Tvalue,DF,pvalue,adj.pvalue,GlobalProtein,Adjusted,pvalue_lfc,adj.pvalue_lfc --min-rows 1 \
+  -- "$RSCRIPT" scripts/msstatsptm_tmt.R "dir=$DATA" "out=$STAGE"
 ```
 
-`scripts/msstatsptm_tmt.R` carries the whole route: the class-I pre-filter on the enriched evidence (as in the label-free script), `MaxQtoMSstatsPTMFormat(labeling_type = 'TMT', ...)` with the global run, `dataSummarizationPTM_TMT`, an explicit `Treatment vs Control` contrast, `groupComparisonPTM(data.type = 'TMT')`, and the site rows of `ADJUSTED.Model`. Its comments hold the `Channel` 0-indexing rule (annotation `channel.0` .. `channel.9` for a 10-plex, read off the evidence header) and the `Condition = 'Norm'` reference channel. From the adjusted table on, the TREAT-style threshold, the PTM.Model-vs-ADJUSTED.Model comparison and the KSEA step are identical to the label-free route.
+`scripts/msstatsptm_tmt.R` carries the whole route: the class-I pre-filter on the enriched evidence (as in the label-free script), `MaxQtoMSstatsPTMFormat(labeling_type = 'TMT', ...)` with the global run, `dataSummarizationPTM_TMT`, an explicit `Treatment vs Control` contrast, `groupComparisonPTM(data.type = 'TMT')`, and every site row of `ADJUSTED.Model` in its declared 12-column output schema. Only rows with `adj.pvalue_lfc < 0.05` are TREAT-regulated; the output deliberately retains all adjusted site rows for inspection. The checked wrapper owns the process scope, retains a receipt, validates the staged CSV, and publishes the versioned final only after clean completion. A bare `Rscript scripts/msstatsptm_tmt.R ...` run is diagnostic-only: do not treat its output as complete for unattended use. Its comments hold the `Channel` 0-indexing rule (annotation `channel.0` .. `channel.9` for a 10-plex, read off the evidence header) and the `Condition = 'Norm'` reference channel. From the adjusted table on, the TREAT-style threshold, the PTM.Model-vs-ADJUSTED.Model comparison and the KSEA step are identical to the label-free route.
 
 Starting from `Phospho (STY)Sites.txt` instead of `evidence.txt` (the `sites_data =` argument) is the one place `TMT_keyword` matters: there the converter builds column names as `Reporter.intensity.corrected.<n>.<TMT_keyword><mixture>`, so `TMT_keyword` must match how the site table's reporter columns were named. It is ignored on the `evidence =` route shown above.
