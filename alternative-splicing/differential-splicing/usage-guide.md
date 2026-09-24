@@ -14,7 +14,7 @@ Tell your AI agent what you want to do:
 ## Example Prompts
 
 ### Standard Replicate Designs
-> "I have n=3 vs n=3 RNA-seq BAMs; run rMATS-turbo with FDR<0.05 and |dPSI|>0.10, then require inclusion plus skipping coverage >=10 in every replicate."
+> "I have n=3 vs n=3 RNA-seq BAMs; run rMATS-turbo with FDR<0.05 and |dPSI|>0.10, then require inclusion plus skipping coverage >=10 in at least half the replicates of each group."
 
 > "Use leafcutter Dirichlet-multinomial GLM on intron clusters from regtools junctions for annotation-free differential splicing; include batch as a groups-file covariate if it is not aliased with condition."
 
