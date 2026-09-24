@@ -56,7 +56,7 @@ chr1    1000    rs123   A       G       30      PASS    DP=50   GT:DP   0/1:25
 
 ### The Header Contract
 
-Every INFO/FORMAT tag used in the body MUST be declared in a `##INFO`/`##FORMAT` line giving its ID, Number, and Type; parsers (bcftools, cyvcf2, pysam) read these declarations to know how many values a field holds and how to type it. An out-of-sync header -- a tag used but not declared, or declared with the wrong Number/Type -- silently breaks parsing: a `Number=1` declaration over data that holds a vector, or a missing `##contig`, makes tools drop, mistype, or mis-subset values with NO error thrown. After any hand-edit or annotation that adds a field, update the header to match (`bcftools +fill-tags` and `bcftools annotate` manage this automatically).
+For portable VCFs, declare every INFO/FORMAT tag used in the body in a `##INFO`/`##FORMAT` line giving its ID, Number, and Type. VCF permits absent meta-information, but BCF requires its dictionaries, and parsers (bcftools, cyvcf2, pysam) use these declarations to type and reshape fields. An out-of-sync header -- especially a wrong Number/Type such as `Number=1` over vector data -- can make a tool drop, mistype, or mis-subset values without a hard error. `##contig` declarations are recommended for VCF and required for BCF; include them for indexed/convertible files and known contig order. After any hand-edit or annotation that adds a field, update the header to match (`bcftools +fill-tags` and `bcftools annotate` manage this automatically).
 
 ### Data Columns
 
