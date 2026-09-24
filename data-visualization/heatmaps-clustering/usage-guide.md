@@ -57,14 +57,14 @@ Tell your AI agent what you want to do:
 6. Compute robust color bounds (1st-99th percentile of |matrix|); use symmetric bounds for diverging data.
 7. Optionally compute Optimal Leaf Ordering via seriation; pass dendrogram to ComplexHeatmap.
 8. Build column and row annotation tracks with explicit color lists.
-9. Render with `draw()` (a bare top-level `Heatmap()` is auto-drawn at the interactive R console but not in `Rscript`); set `use_raster=TRUE, raster_quality=5` for matrices >2000 rows.
+9. Render with `draw()` for portable explicit output (a bare, unassigned top-level `Heatmap()` can auto-print in the console and `Rscript`, but assignments and report hosts need not); set `use_raster=TRUE, raster_quality=5` for matrices >2000 rows.
 10. Export PDF with `cairo_pdf` for vector text + raster cells.
 
 ## Tips
 
 - **Always specify `ward.D2` explicitly.** `'ward'` and `'ward.D'` are legacy implementations that do not implement Ward's minimum-variance criterion (Murtagh-Legendre 2014). The names look interchangeable; the dendrograms are not.
 
-- **Use `draw()` in scripts.** A bare top-level `Heatmap(mat)` is auto-drawn at the interactive console, but not in `Rscript`; neither are objects created inside loops, functions, or Quarto chunks. Always `draw(Heatmap(mat, ...), merge_legends = TRUE)` for scripted output.
+- **Use `draw()` in scripts.** A bare, unassigned top-level `Heatmap(mat)` can auto-print at the console and in `Rscript`, but assignments, loops, functions, and Quarto/report hosts do not provide a dependable rendering contract. Always `draw(Heatmap(mat, ...), merge_legends = TRUE)` for portable scripted output.
 
 - **Robust symmetric color bounds.** `bounds <- quantile(abs(mat), 0.99); colorRamp2(c(-bounds, 0, bounds), c('#0072B2', 'white', '#D55E00'))`. Without quantile clipping, one outlier washes out the entire heatmap.
 

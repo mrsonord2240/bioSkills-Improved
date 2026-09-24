@@ -120,13 +120,16 @@ ha_col <- HeatmapAnnotation(
     annotation_name_gp = gpar(fontsize = 8)
 )
 
-# Row metadata
+# Row metadata: derive a complete palette from the observed pathway labels.
+pathway_levels <- unique(as.character(gene_info$pathway))
+pathway_colors <- setNames(grDevices::hcl.colors(length(pathway_levels), palette = "Dark 3"),
+                           pathway_levels)
 ha_row <- rowAnnotation(
     Pathway = gene_info$pathway,
     LogFC   = anno_barplot(gene_info$log2FC, baseline = 0,
                             gp = gpar(fill = ifelse(gene_info$log2FC > 0,
                                                      '#D55E00', '#0072B2'))),
-    col = list(Pathway = c(Metabolism = '#8491B4', Signaling = '#91D1C2'))
+    col = list(Pathway = pathway_colors)
 )
 
 ht <- Heatmap(mat_scaled,
@@ -147,7 +150,7 @@ draw(ht, merge_legends = TRUE)            # draw() not bare Heatmap()
 
 ### The `draw()` requirement (silent failure)
 
-A bare `Heatmap(mat)` entered at the interactive R console is auto-printed and therefore drawn. A top-level `Heatmap(mat)` in `Rscript`, and one constructed inside `for`, `lapply`, `function`, Quarto/Rmd chunks, is not auto-printed: it creates an object but does not render a page. Always call `draw()` for scripted output. Only `draw()` exposes `merge_legends`, `heatmap_legend_side`, `ht_gap`, and `padding`.
+A bare, unassigned top-level `Heatmap(mat)` can use ComplexHeatmap's auto-print path at the interactive R console and in `Rscript`. Do not rely on that behavior for an export contract: assigning the object, constructing it inside `for`, `lapply`, or `function`, and report chunks with host-specific print rules may leave it unrendered. Always call `draw()` when output must be portable and explicit. Only `draw()` exposes `merge_legends`, `heatmap_legend_side`, `ht_gap`, and `padding`.
 
 ## seaborn.clustermap (Python)
 
@@ -222,9 +225,9 @@ OncoPrint (Cerami 2012 *Cancer Discov* 2:401; canonical at cBioPortal) is a styl
 
 ### ComplexHeatmap silently produces no output in a script
 
-**Trigger:** Bare `Heatmap(mat)` at top level in an `Rscript` invocation, or inside a `for` loop, `lapply`, `function()`, or Quarto/Rmd code chunk.
+**Trigger:** An assigned Heatmap object, or one constructed inside `for`, `lapply`, `function()`, or a Quarto/Rmd report chunk whose host does not auto-print it.
 
-**Mechanism:** Auto-print only happens at the top-level R prompt; in non-interactive contexts the Heatmap object is created but never rendered.
+**Mechanism:** Auto-print can render a bare, unassigned top-level call, but it does not provide a reliable rendering contract for assignments, nested expressions, or report engines.
 
 **Symptom:** No error, no warning, no PDF output. Looks like the script ran successfully.
 

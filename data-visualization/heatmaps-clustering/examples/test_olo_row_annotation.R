@@ -16,10 +16,11 @@ mat <- matrix(c(
 ), nrow = 6, byrow = TRUE,
 dimnames = list(paste0("gene", 1:6), paste0("sample", 1:4)))
 
-pathway_levels <- c("Metabolism", "Signaling")
+declared_pathway_levels <- c("Metabolism", "Signaling", "Immune")
 pathway <- factor(c("Metabolism", "Metabolism", "Signaling",
-                    "Signaling", "Metabolism", "Signaling"),
-                  levels = pathway_levels)
+                    "Signaling", "Immune", "Immune"),
+                  levels = declared_pathway_levels)
+pathway_levels <- unique(as.character(pathway))
 
 d_rows <- dist(mat, method = "euclidean")
 hc_rows <- hclust(d_rows, method = "ward.D2")
@@ -27,9 +28,11 @@ olo_rows <- seriate(d_rows, method = "OLO", control = list(hclust = hc_rows))
 dend_rows <- as.dendrogram(olo_rows[[1]])
 expected_order <- order.dendrogram(dend_rows)
 
+pathway_colors <- setNames(grDevices::hcl.colors(length(pathway_levels), palette = "Dark 3"),
+                           pathway_levels)
 ha_row <- rowAnnotation(
   Pathway = pathway,
-  col = list(Pathway = c(Metabolism = "#8491B4", Signaling = "#91D1C2"))
+  col = list(Pathway = pathway_colors)
 )
 annotation_pathway <- ha_row@anno_list$Pathway@fun@var_env$value
 stopifnot(identical(ha_row@anno_list$Pathway@color_mapping@levels, pathway_levels))
