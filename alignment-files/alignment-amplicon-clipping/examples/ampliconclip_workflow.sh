@@ -36,6 +36,7 @@ trap 'rm -rf "$WORK"' EXIT
 python3 -c 'import pysam' 2>/dev/null || fail "pysam is required for the residual-primer check"
 # Normalize samtools-valid whitespace-delimited BED while ignoring UCSC track/browser headers.
 awk 'BEGIN{OFS="\t"}
+     {sub(/\r$/, "")}
      NF==0 || $1 ~ /^#/ || $1=="track" || $1=="browser" {next}
      {for(i=1;i<=NF;i++) printf "%s%s", $i, (i==NF ? ORS : OFS)}' \
     "$PRIMERS" > "$WORK/primers.bed"
