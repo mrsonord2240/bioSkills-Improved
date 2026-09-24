@@ -76,7 +76,7 @@ def is_outlier(adata, metric, nmads):
     return (M < np.median(M) - nmads * mad) | (np.median(M) + nmads * mad < M)
 
 # Choose before filtering; use None when tissue is unknown rather than copying a PBMC cap.
-mito_hard_caps = {'nuclei': 1, 'pbmc': 8, 'cardiac': 30, 'hepatic': 30, 'skeletal_muscle': 40, 'unknown': None}
+mito_hard_caps = {'nuclei': None, 'pbmc': 8, 'cardiac': 30, 'hepatic': 30, 'skeletal_muscle': 40, 'unknown': None}
 tissue = 'unknown'  # set from sample metadata; known high-mito parenchyma needs a raised cap or no hard cap
 mito_hard_cap = mito_hard_caps[tissue]
 hard_mito = adata.obs['pct_counts_mt'] > mito_hard_cap if mito_hard_cap is not None else np.zeros(adata.n_obs, dtype=bool)
@@ -104,7 +104,26 @@ adata.obs['outlier'] = adata.obs.groupby('sample', observed=True).apply(
 # '^MT-' matches gene SYMBOLS; with Ensembl-ID feature names it matches nothing and the mito filter silently does nothing
 seurat_obj[['percent.mt']] <- PercentageFeatureSet(seurat_obj, pattern = '^MT-')
 VlnPlot(seurat_obj, features = c('nFeature_RNA', 'nCount_RNA', 'percent.mt'), ncol = 3)
-seurat_obj <- subset(seurat_obj, subset = nFeature_RNA > 200 & nFeature_RNA < 5000 & percent.mt < 20)
+is_outlier <- function(x, nmads) {
+  centre <- median(x)
+  spread <- mad(x, constant = 1)
+  if (spread == 0) stop('MAD collapsed; use documented fixed cutoffs instead of MAD filtering')
+  x < centre - nmads * spread | x > centre + nmads * spread
+}
+mito_hard_caps <- c(nuclei = NA_real_, pbmc = 8, cardiac = 30, hepatic = 30,
+                    skeletal_muscle = 40, unknown = NA_real_)
+tissue <- 'unknown'  # set from sample metadata
+mito_hard_cap <- unname(mito_hard_caps[tissue])
+hard_mito <- if (is.na(mito_hard_cap)) rep(FALSE, ncol(seurat_obj)) else seurat_obj$percent.mt > mito_hard_cap
+seurat_obj$qc_outlier <- (
+  is_outlier(log1p(seurat_obj$nCount_RNA), 5) |
+  is_outlier(log1p(seurat_obj$nFeature_RNA), 5) |
+  is_outlier(seurat_obj$percent.mt, 3) |
+  hard_mito
+)
+survival_fraction <- mean(!seurat_obj$qc_outlier)
+if (survival_fraction < 0.80) stop(sprintf('Only %.1f%% of barcodes survive QC', 100 * survival_fraction))
+seurat_obj <- subset(seurat_obj, cells = colnames(seurat_obj)[!seurat_obj$qc_outlier])
 ```
 
 ### QC Thresholds and Rationale
@@ -114,7 +133,7 @@ seurat_obj <- subset(seurat_obj, subset = nFeature_RNA > 200 & nFeature_RNA < 50
 | `min_genes` | 200 | Below this is mostly empty droplets / debris; raise for deep data |
 | `log1p_total_counts` / `log1p_n_genes_by_counts` | 5 MAD | sc-best-practices loosens from scater's 3 MAD to avoid cutting real biology; filter on the log scale (depth is right-skewed) |
 | `pct_counts_in_top_20_genes` | 5 MAD | High value can flag low-complexity / dying cells, but platelets/megakaryocytes, erythrocytes, and other transcriptionally simple types are constitutively high; report removal rates per preliminary cluster or known cell type before subsetting |
-| `pct_counts_mt` | 3 MAD plus tissue-aware hard cap | Nuclei ~1%; PBMC 8%; cardiac/hepatic ~30%; skeletal muscle ~40%; unknown tissue = MAD only. Raise or remove the hard cap for known high-mito parenchyma |
+| `pct_counts_mt` | 3 MAD plus tissue-aware hard cap | Nuclei and unknown tissue = MAD only; PBMC 8%; cardiac/hepatic ~30%; skeletal muscle ~40%. Raise or remove the hard cap for known high-mito parenchyma |
 | `min_cells` (genes) | 3 | Remove genes seen in too few cells to be informative |
 
 Fixed cutoffs are a fast first pass for well-characterized tissue but silently delete valid populations; MAD-adaptive is the modern default; miQC (a mito-vs-detected-genes mixture model) helps when that relationship varies across samples.
