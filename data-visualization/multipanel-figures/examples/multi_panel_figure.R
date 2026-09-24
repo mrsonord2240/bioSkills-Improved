@@ -1,92 +1,69 @@
-# Reference: ggplot2 3.5+, patchwork 1.2+, dplyr 1.1+ | Verify API if version differs
+# Create a 183 x 140 mm multi-panel figure with one qualified shared guide.
+# Run: Rscript examples/multi_panel_figure.R
+# The four panels intentionally use identical x/y limits and the same colour scale,
+# so collecting axes and the Condition guide is semantically valid.
+
 library(ggplot2)
 library(patchwork)
-library(dplyr)
 
-theme_publication <- function(base_size = 10) {
-    theme_bw(base_size = base_size) +
-    theme(
-        panel.grid = element_blank(),
-        panel.border = element_rect(color = 'black', linewidth = 0.5),
-        axis.text = element_text(color = 'black'),
-        strip.background = element_blank(),
-        plot.title = element_text(size = 11, face = 'bold')
-    )
+width_mm <- 183
+height_mm <- 140
+dpi <- 300
+set.seed(42)
+
+df <- data.frame(
+  x = rnorm(240),
+  y = rnorm(240),
+  group = factor(rep(c("Control", "Treatment"), each = 120))
+)
+df$y <- df$y + ifelse(df$group == "Treatment", 0.35, -0.35)
+
+theme_publication <- theme_classic(base_size = 7) +
+  theme(
+    plot.title = element_text(size = 7, face = "plain"),
+    axis.title = element_text(size = 7),
+    axis.text = element_text(size = 6),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.25)
+  )
+palette <- c(Control = "#4DBBD5", Treatment = "#E64B35")
+
+make_panel <- function(seed, title) {
+  set.seed(seed)
+  d <- transform(df, y = y + rnorm(nrow(df), sd = 0.18))
+  ggplot(d, aes(x, y, colour = group)) +
+    geom_point(size = 1.1, alpha = 0.72) +
+    scale_colour_manual(values = palette, name = "Condition") +
+    coord_cartesian(xlim = c(-3.2, 3.2), ylim = c(-3.2, 3.2)) +
+    labs(x = "Standardized x", y = "Standardized y", title = title) +
+    theme_publication
 }
 
-set.seed(42)
-n <- 100
-df <- data.frame(
-    gene = paste0('Gene', 1:n),
-    log2FC = rnorm(n, 0, 2),
-    pvalue = 10^(-runif(n, 0, 10)),
-    expression = rnorm(n, 10, 3),
-    group = sample(c('Control', 'Treatment'), n, replace = TRUE)
-)
-df$padj <- p.adjust(df$pvalue, method = 'BH')
-df$significant <- df$padj < 0.05 & abs(df$log2FC) > 1
+panels <- Map(make_panel, 1:4, c("Discovery", "Replication", "Validation", "Sensitivity"))
+figure <- wrap_plots(panels, ncol = 2) +
+  plot_layout(guides = "collect", axes = "collect", axis_titles = "collect") +
+  plot_annotation(tag_levels = "a") &
+  # `& theme()` is required: the theme in plot_annotation() does not style tags.
+  theme(
+    plot.tag = element_text(size = 8, face = "bold"),
+    plot.tag.location = "panel",
+    plot.tag.position = c(0.02, 0.98),
+    legend.position = "bottom"
+  )
 
-p_volcano <- ggplot(df, aes(log2FC, -log10(pvalue), color = significant)) +
-    geom_point(alpha = 0.6) +
-    scale_color_manual(values = c('grey60', 'red3')) +
-    geom_vline(xintercept = c(-1, 1), linetype = 'dashed') +
-    labs(x = expression(Log[2]~Fold~Change), y = expression(-Log[10]~P-value),
-         title = 'Differential Expression') +
-    theme_publication() +
-    theme(legend.position = 'none')
+save_cairo_pdf <- function(path, plot, width_mm, height_mm) {
+  Cairo::CairoPDF(path, width = width_mm / 25.4, height = height_mm / 25.4)
+  on.exit(dev.off(), add = TRUE)
+  print(plot)
+}
+save_cairo_pdf("Figure1.pdf", figure, width_mm, height_mm)
+ggsave("Figure1.png", figure, width = width_mm, height = height_mm,
+       units = "mm", dpi = dpi, device = ragg::agg_png)
 
-pca_data <- data.frame(
-    PC1 = rnorm(20),
-    PC2 = rnorm(20),
-    group = rep(c('Control', 'Treatment'), each = 10)
-)
-
-p_pca <- ggplot(pca_data, aes(PC1, PC2, color = group)) +
-    geom_point(size = 3) +
-    stat_ellipse(level = 0.95) +
-    scale_color_manual(values = c('Control' = '#4DBBD5', 'Treatment' = '#E64B35')) +
-    labs(title = 'PCA', color = 'Group') +
-    theme_publication()
-
-expr_df <- data.frame(
-    gene = rep(paste0('Gene', 1:5), each = 10),
-    expression = c(rnorm(10, 8), rnorm(10, 12), rnorm(10, 6),
-                   rnorm(10, 10), rnorm(10, 9)),
-    group = rep(c('Control', 'Treatment'), 25)
-)
-
-p_boxplot <- ggplot(expr_df, aes(gene, expression, fill = group)) +
-    geom_boxplot(alpha = 0.7, outlier.shape = NA) +
-    geom_jitter(position = position_jitterdodge(jitter.width = 0.2), alpha = 0.5, size = 1) +
-    scale_fill_manual(values = c('Control' = '#4DBBD5', 'Treatment' = '#E64B35')) +
-    labs(x = NULL, y = 'Expression', title = 'Top DE Genes', fill = 'Group') +
-    theme_publication() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-bar_df <- data.frame(
-    category = c('Upregulated', 'Downregulated', 'Not Significant'),
-    count = c(sum(df$significant & df$log2FC > 0),
-              sum(df$significant & df$log2FC < 0),
-              sum(!df$significant))
-)
-
-p_bar <- ggplot(bar_df, aes(category, count, fill = category)) +
-    geom_col() +
-    scale_fill_manual(values = c('Upregulated' = '#E64B35', 'Downregulated' = '#4DBBD5',
-                                  'Not Significant' = 'grey60')) +
-    labs(x = NULL, y = 'Number of Genes', title = 'DE Summary') +
-    theme_publication() +
-    theme(legend.position = 'none', axis.text.x = element_text(angle = 45, hjust = 1))
-
-combined <- (p_volcano | p_pca) / (p_boxplot | p_bar) +
-    plot_annotation(tag_levels = 'A') +
-    plot_layout(guides = 'collect') &
-    theme(
-        plot.tag = element_text(face = 'bold', size = 12),
-        legend.position = 'bottom'
-    )
-
-ggsave('Figure1.pdf', combined, width = 10, height = 8, units = 'in')
-ggsave('Figure1.png', combined, width = 10, height = 8, units = 'in', dpi = 300)
-
-message('Figure saved: Figure1.pdf and Figure1.png')
+# PNG dimensions provide a portable measurement during the example run; use
+# `pdfinfo Figure1.pdf` as the final PDF page-size check before submission.
+png_dim <- dim(png::readPNG("Figure1.png"))
+png_width <- png_dim[2]
+png_height <- png_dim[1]
+message(sprintf("Figure1.pdf target page: %d x %d mm (verify with pdfinfo)", width_mm, height_mm))
+message(sprintf("Figure1.png measured: %d x %d px = %.2f x %.2f mm at %d dpi",
+                png_width, png_height, png_width / dpi * 25.4, png_height / dpi * 25.4, dpi))
