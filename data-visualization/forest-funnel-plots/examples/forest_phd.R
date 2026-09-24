@@ -26,7 +26,10 @@ meta_label <- function(x) {
 }
 pred <- predict(res)
 ticks <- log(c(0.25, 0.5, 1, 2, 4))
-limits <- range(c(res$ci.lb, res$ci.ub, pred$pi.lb, pred$pi.ub, ticks), finite = TRUE)
+study_lb <- studies$log_or - qnorm(0.975) * studies$log_or_se
+study_ub <- studies$log_or + qnorm(0.975) * studies$log_or_se
+limits <- range(c(study_lb, study_ub, res$ci.lb, res$ci.ub,
+                  pred$pi.lb, pred$pi.ub, ticks), finite = TRUE)
 pdf("plots/forest.pdf", width = 8, height = 6)
 forest(res, atransf = exp, at = ticks, alim = limits, refline = 0,
        xlab = "Odds ratio (95% CI)", header = c("Study", "OR [95% CI]"),
