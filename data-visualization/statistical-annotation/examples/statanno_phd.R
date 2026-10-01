@@ -1,76 +1,62 @@
-# Reference: ggpubr 0.6+, ggsignif 0.6+, rstatix 0.7+ | Verify API if version differs
+# Purpose: run the adjusted pairwise, ID-checked paired, manual ggsignif, and nested workflows.
+# Inputs: optional three_group.csv paired.csv nested.csv output_dir; shipped fixtures are defaults.
+# Usage: Rscript examples/statanno_phd.R [THREE_GROUP.csv PAIRED.csv NESTED.csv OUTPUT_DIR]
 
-# PhD-level statistical annotation encoding the four correctness traps:
-# (1) Wilcoxon for non-normal small N, (2) Holm adjustment for multiple pairs,
-# (3) paired vs unpaired distinction, (4) effect size in caption.
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+if (length(script_arg) != 1L) stop("could not determine example path")
+example_dir <- dirname(normalizePath(sub("^--file=", "", script_arg)))
+skill_dir <- dirname(example_dir)
 
-library(ggplot2)
-library(ggpubr)
-library(rstatix)
-library(dplyr)
+source(file.path(skill_dir, "scripts", "annotate_pairwise.R"))
+source(file.path(skill_dir, "scripts", "annotate_paired.R"))
+source(file.path(skill_dir, "scripts", "annotate_nested.R"))
 
-# 1. NORMALITY CHECK -- pick test based on data, not by default
-shapiro_results <- df %>% group_by(group) %>%
-    summarise(shapiro_p = shapiro.test(value)$p.value)
-# If any group p < 0.05, prefer Wilcoxon over t-test for that comparison
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(ggsignif)
+})
 
-# 2. PAIRWISE TESTS with Holm adjustment
-pairs <- list(c('Control', 'Treatment'),
-              c('Control', 'Vehicle'),
-              c('Treatment', 'Vehicle'))
+args <- commandArgs(trailingOnly = TRUE)
+three_group_csv <- if (length(args) >= 1L) args[[1]] else file.path(example_dir, "data", "three_group.csv")
+paired_csv <- if (length(args) >= 2L) args[[2]] else file.path(example_dir, "data", "paired.csv")
+nested_csv <- if (length(args) >= 3L) args[[3]] else file.path(example_dir, "data", "nested.csv")
+output_dir <- if (length(args) >= 4L) args[[4]] else file.path(example_dir, "output")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
-# Wilcoxon for non-normal; t.test for normal
-stat_test <- df %>%
-    pairwise_wilcox_test(value ~ group,
-                          comparisons = pairs,
-                          p.adjust.method = 'holm') %>%
-    add_xy_position(x = 'group', step.increase = 0.1)
+# Adjusted Wilcoxon family. Place the omnibus label above the highest bracket.
+pairwise_result <- annotate_pairwise(
+  three_group_csv, file.path(output_dir, "pairwise-adjusted.png"), "wilcox", "holm"
+)
+pairwise_result$plot <- pairwise_result$plot +
+  labs(caption = sprintf(
+    "Wilcoxon pairwise, Holm-adjusted; rank-biserial r range %.2f-%.2f.",
+    min(pairwise_result$tests$effect_size), max(pairwise_result$tests$effect_size)
+  ))
+ggsave(file.path(output_dir, "pairwise-adjusted.png"), pairwise_result$plot,
+       width = 6.5, height = 5.5, dpi = 160)
 
-# 3. EFFECT SIZE -- Cliff's delta for non-parametric (Cohen's d for parametric)
-effect_sizes <- df %>% wilcox_effsize(value ~ group, ci = TRUE)
-print(effect_sizes)                              # report in caption / supplementary
+# ggsignif computes raw p-values when test= is used. Supply adjusted labels manually.
+manual_signif <- ggplot(pairwise_result$data, aes(group, value, fill = group)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.15, alpha = 0.45) +
+  geom_signif(comparisons = pairwise_result$pairs,
+              annotations = pairwise_result$tests$p.adj.signif,
+              y_position = pairwise_result$tests$y.position,
+              tip_length = 0.01) +
+  labs(caption = "Manual ggsignif labels from Holm-adjusted rstatix results.") +
+  theme_classic() +
+  theme(legend.position = "none")
+ggsave(file.path(output_dir, "ggsignif-adjusted.png"), manual_signif,
+       width = 6.5, height = 5.5, dpi = 160)
 
-# 4. PLOT with brackets and overall test
-p <- ggboxplot(df, x = 'group', y = 'value', color = 'group',
-               add = 'jitter', palette = c('#0072B2', '#D55E00', '#009E73'),
-               outlier.shape = NA) +
-    stat_pvalue_manual(stat_test, label = 'p.adj.signif',     # asterisks per adjusted p
-                       tip.length = 0.01, bracket.size = 0.3) +
-    stat_compare_means(method = 'kruskal.test',                # overall non-parametric
-                       label.y = 1.15 * max(df$value),
-                       label = 'p.format', size = 3) +
-    labs(x = NULL, y = 'Value',
-         caption = sprintf('Wilcoxon pairwise, Holm-adjusted. Cliff d ranges: %.2f-%.2f',
-                           min(effect_sizes$effsize), max(effect_sizes$effsize))) +
-    theme_classic(base_size = 10) + theme(legend.position = 'none')
+# Both time levels must contain exactly the same subject IDs before row-order pairing.
+annotate_paired(paired_csv, file.path(output_dir, "paired-adjusted.png"), "holm")
 
-ggsave('stat_annotated.pdf', p, width = 89, height = 75, units = 'mm', device = cairo_pdf)
+# Annotate the mixed-model contrast, never a cell-level rank test.
+annotate_nested(nested_csv, file.path(output_dir, "nested-lmm.png"), "holm")
 
-# 5. PAIRED EXAMPLE -- before/after measurements per subject
-paired_test <- df_paired %>%
-    pairwise_wilcox_test(value ~ time, paired = TRUE, p.adjust.method = 'holm')
-
-ggpaired(df_paired, x = 'time', y = 'value', id = 'subject_id',
-         color = 'time', line.color = '#888888', line.size = 0.2,
-         palette = c('#0072B2', '#D55E00')) +
-    stat_pvalue_manual(paired_test, label = 'p.adj') +
-    labs(caption = 'Wilcoxon signed-rank, paired by subject_id')
-
-# 6. NESTED DATA -- LMM, NOT pairwise t-test on cells
-# Wrong: pairwise tests treating each cell as independent
-# Right: aggregate to per-subject value OR use mixed model
-library(lme4)
-nested_lmm <- lmer(value ~ group + (1 | subject_id), data = df_nested)
-summary(nested_lmm)
-# For pairwise contrasts: emmeans::emmeans(lmm, pairwise ~ group, adjust = 'holm')
-
-# 7. ALTERNATIVE: ggsignif (lighter API)
-library(ggsignif)
-ggplot(df, aes(group, value, fill = group)) +
-    geom_boxplot(outlier.shape = NA, alpha = 0.7) +
-    geom_jitter(width = 0.2, alpha = 0.5) +
-    geom_signif(comparisons = pairs,
-                test = 'wilcox.test',
-                map_signif_level = TRUE,                    # asterisks
-                step_increase = 0.1) +
-    scale_fill_manual(values = c('#0072B2', '#D55E00', '#009E73'))
+expected <- file.path(output_dir, c(
+  "pairwise-adjusted.png", "ggsignif-adjusted.png", "paired-adjusted.png", "nested-lmm.png"
+))
+stopifnot(all(file.exists(expected)), all(file.info(expected)$size > 1000))
+print(expected)

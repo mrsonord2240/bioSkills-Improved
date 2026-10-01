@@ -3,276 +3,200 @@ name: bio-data-visualization-oncoprint-mutation-matrices
 description: Build OncoPrint and co-mutation matrix plots from somatic-variant cohorts using ComplexHeatmap, maftools, and comut.py with alteration-type stacking, sample ordering by mutational burden, mutual-exclusivity overlays, and clinical annotation tracks. Use when visualizing per-sample mutation patterns across recurrent driver genes, comparing alteration classes, or identifying mutually-exclusive / co-occurring driver pairs.
 tool_type: mixed
 primary_tool: ComplexHeatmap
-license: MIT
-author: GPTomics
 ---
 
 ## Version Compatibility
 
-Reference examples tested with: ComplexHeatmap 2.18+, maftools 2.18+, comut 0.0.3+, MAFtools requires R 4.0+; comut.py requires pandas 2.0+, matplotlib 3.8+.
+The shipped paths were checked with ComplexHeatmap 2.22.0, maftools 2.22.0,
+circlize 0.4.18, comut 0.0.3, pandas 2.3.3, and matplotlib 3.10. comut 0.0.3's
+continuous track is incompatible with pandas 3; run `scripts/comut_plot.py` in a
+pandas 2.x environment.
 
-Before using code patterns, verify installed versions match. If versions differ:
-- Python: `pip show <package>` then `help(module.function)` to check signatures
-- R: `packageVersion('<pkg>')` then `?function_name`
-
-If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
+Before adapting a path, check `packageVersion()` in R or `pip show` in Python.
+Install missing R packages with
+`BiocManager::install(c("ComplexHeatmap", "maftools"))` plus
+`install.packages("circlize")`; install the Python path with
+`pip install "pandas<3" comut matplotlib`.
 
 # OncoPrint and Mutation Matrix Plots
 
-**"Plot mutations across a cohort"** -> Render a gene-by-sample matrix where each cell stacks colored rectangles encoding alteration class (missense, truncating, splice, copy-gain, copy-loss, fusion). Sort samples by burden, optionally split by clinical group, and overlay co-mutation / mutual-exclusivity annotations. OncoPrint (Cerami 2012 *Cancer Discov* 2:401; canonical at cBioPortal) is the genre-defining visualization.
+An OncoPrint is a gene-by-sample matrix in which a cell can contain several
+alteration classes. Preserve those classes: a copy gain plus a missense event is
+not one categorical state.
 
-- R: `ComplexHeatmap::oncoPrint`, `maftools::oncoplot`
-- Python: `comut.CoMut`, `cbioportal`-style implementations
+## Choose the workflow and ordering
 
-## The Single Most Important Modern Insight -- Cell Stacking Encodes Multiple Alterations Per Cell
+| Question | Tool and ordering | Display |
+|---|---|---|
+| Which genes are most altered? | ComplexHeatmap with `row_order = order(-rowSums(mat != ''))` | Cohort-wide gene percentages and sample burden |
+| Canonical mutation staircase | ComplexHeatmap default column memo sort | Binary alteration pattern across top genes |
+| Per-patient burden | Explicit `column_order = order(-clinical$tmb)` | TMB track and sample labels when readable |
+| Subtype-driver enrichment | `column_split = clinical$Subtype` after exact ID alignment | Split columns; percentages and right bar remain cohort-wide |
+| Rapid TCGA MAF view | maftools `oncoplot()` | Only samples represented in the MAF |
+| Python workflow | `scripts/comut_plot.py` | Burden-sorted, cohort-complete comut plot |
+| Co-occurrence or mutual exclusion | maftools `somaticInteractions()` | Pairwise Fisher results plus the plotted signed significance |
 
-OncoPrint differs from a generic heatmap because each cell can encode multiple alterations simultaneously through *stacked* rectangles. A patient with both a missense and a copy-gain in TP53 shows one cell with two overlapping colored rectangles (e.g., green diamond inside red square). This stacking is the whole point — it preserves the multi-modal alteration landscape that flattening to a single category destroys.
+ComplexHeatmap's default row order counts alteration types, not unique mutated
+samples. A multi-class cell can therefore move a less-prevalent gene above a
+more-prevalent one. Pass the explicit `row_order` above when “most altered” means
+number of samples.
 
-In ComplexHeatmap's `oncoPrint`, the `alter_fun` argument is the rendering specification: a named list of functions, one per alteration class, each drawing its rectangle inside the cell. Get this right and the figure works; get it wrong and overlapping alterations are invisible.
+## Build a cohort-complete matrix first
 
-## Decision Tree by Cohort and Question
-
-| Question | Sort by | Display |
-|----------|---------|---------|
-| Which genes are most altered? | Gene frequency (default) | Bar above samples (sample TMB); bar right of genes (gene frequency) |
-| Per-patient burden patterns | Sample burden | TMB bar on top; sample-name labels |
-| Subtype-driver enrichment | Clinical group then burden | `column_split` by group; per-group frequency right bar |
-| Mutual exclusivity (BRAF vs NRAS) | Custom (alphabetic-by-mutation pattern) | Memo sort; overlay log10(OR) heatmap |
-| Co-occurrence (TP53 + MYC) | Custom | Same pattern; positive OR coloring |
-| Driver vs passenger comparison | Two panels | Concatenate two oncoPrints horizontally |
-
-## ComplexHeatmap::oncoPrint -- Canonical Implementation
-
-**Goal:** Render a cohort mutation matrix with stacked alteration-class encoding, sample annotations, and a sample-sorted, gene-frequency-ranked layout.
-
-**Approach:** Convert the MAF/variant table to a gene-by-sample matrix of `;`-delimited alteration strings; define `alter_fun` rendering one rectangle per class; pass to `oncoPrint()` with column annotations.
+`scripts/maf_to_oncoprint.R` is the canonical preparation seam. It maps coding
+MAF consequences, collapses duplicate same-class calls, accepts optional
+normalized Amp/HomDel/Fusion calls, includes zero-mutation samples from an
+explicit cohort list, rejects an all-empty selection, and aligns clinical rows
+by exact sample ID.
 
 ```r
-library(ComplexHeatmap)
-library(circlize)
-
-# Input: matrix where each cell is a string like 'Missense;Amp' or '' for no alteration
-# Rows = genes; columns = samples
-
-# Color per alteration class
-col <- c('Missense'   = '#56B4E9',
-         'Truncating' = '#000000',
-         'Splice'     = '#CC79A7',
-         'Amp'        = '#D55E00',
-         'HomDel'     = '#0072B2',
-         'Fusion'     = '#009E73')
-
-# alter_fun -- one function per class, each drawing inside the cell
-alter_fun <- list(
-    background = function(x, y, w, h)
-        grid.rect(x, y, w - unit(0.5, 'mm'), h - unit(0.5, 'mm'),
-                  gp = gpar(fill = '#EEEEEE', col = NA)),
-    Amp = function(x, y, w, h)
-        grid.rect(x, y, w - unit(0.5, 'mm'), h - unit(0.5, 'mm'),
-                  gp = gpar(fill = col['Amp'], col = NA)),
-    HomDel = function(x, y, w, h)
-        grid.rect(x, y, w - unit(0.5, 'mm'), h - unit(0.5, 'mm'),
-                  gp = gpar(fill = col['HomDel'], col = NA)),
-    Missense = function(x, y, w, h)
-        grid.rect(x, y, w - unit(0.5, 'mm'), h * 0.5,
-                  gp = gpar(fill = col['Missense'], col = NA)),
-    Truncating = function(x, y, w, h)
-        grid.rect(x, y, w - unit(0.5, 'mm'), h * 0.33,
-                  gp = gpar(fill = col['Truncating'], col = NA)),
-    Splice = function(x, y, w, h)
-        grid.rect(x, y, w - unit(0.5, 'mm'), h * 0.25,
-                  gp = gpar(fill = col['Splice'], col = NA)),
-    Fusion = function(x, y, w, h)
-        grid.points(x, y, pch = 17, size = unit(2, 'mm'),
-                    gp = gpar(col = col['Fusion'])))
-
-# Clinical column annotation
-ha_clin <- HeatmapAnnotation(
-    Subtype = clinical$subtype,
-    Stage   = clinical$stage,
-    col = list(Subtype = c(Luminal='#0072B2', Basal='#D55E00', HER2='#009E73'),
-               Stage   = c(I='#FFFFCC', II='#FED976', III='#FD8D3C', IV='#BD0026')))
-
-oncoPrint(mat,
-          alter_fun = alter_fun,
-          col = col,
-          top_annotation = ha_clin,
-          column_title = 'TCGA-BRCA mutation landscape',
-          row_names_gp = gpar(fontsize = 8),
-          pct_gp = gpar(fontsize = 7),
-          show_pct = TRUE,
-          remove_empty_columns = FALSE,
-          remove_empty_rows = FALSE)
+source("scripts/maf_to_oncoprint.R")
+maf_df <- read.delim("cohort.maf", comment.char = "#", check.names = FALSE)
+clinical <- read.delim("clinical.tsv", check.names = FALSE)
+mat <- maf_to_oncoprint(maf_df, clinical$Tumor_Sample_Barcode, top = 20)
+clinical <- align_oncoprint_clinical(clinical, colnames(mat))
+stopifnot(identical(clinical$Tumor_Sample_Barcode, colnames(mat)))
 ```
 
-## maftools::oncoplot -- Faster Onboarding
+The default map is explicit:
 
-For TCGA-style MAF files, `maftools::oncoplot` is the lower-friction option:
+- `Missense_Mutation`, `In_Frame_Ins`, `In_Frame_Del` -> `Missense`
+- `Nonsense_Mutation`, `Frame_Shift_Ins`, `Frame_Shift_Del`,
+  `Nonstop_Mutation`, `Translation_Start_Site` -> `Truncating`
+- `Splice_Site` -> `Splice`
+- `Silent`, intronic, RNA, IGR, flank, and other unmapped classifications are
+  excluded and attached to the matrix as `ignored_variant_classifications`.
+- Supply CNV/fusion rows through `additional_calls` with columns
+  `Hugo_Symbol`, `Tumor_Sample_Barcode`, and `alteration_class`.
+
+Do not rely on row position for annotations. ComplexHeatmap accepts positional
+vectors without warning, so a shuffled clinical table can silently label the
+wrong samples.
+
+## ComplexHeatmap rendering
+
+Run the complete cohort-aware implementation as:
+
+```bash
+Rscript examples/oncoprint_phd.R cohort.maf clinical.tsv oncoprint.pdf
+```
+
+The example defines one renderer per class. Amp and HomDel fill the cell;
+Missense, Truncating, and Splice use distinguishable partial-height rectangles;
+Fusion is a triangle. It retains all cohort columns, log-transforms TMB, aligns
+annotations, and orders rows by mutated-sample frequency.
+
+ComplexHeatmap percentages are calculated from every column in the input
+matrix. `remove_empty_columns = TRUE` hides empty displayed columns but does not
+recompute those percentages. Use `FALSE` to keep the cohort visible; construct
+`mat` from the explicit cohort list to make its denominator the intended cohort.
+
+## maftools quick path
+
+`clinicalData` must contain `Tumor_Sample_Barcode`. Give every discrete level a
+color; partial maps silently turn unlisted groups grey. Numeric annotations need
+a sequential palette.
 
 ```r
 library(maftools)
-maf <- read.maf(maf = 'tcga.maf', clinicalData = clinical)
-oncoplot(maf = maf,
-         top = 20,                            # top 20 mutated genes
-         clinicalFeatures = c('Subtype', 'Stage'),
-         annotationColor = list(Subtype = c(Luminal='#0072B2', Basal='#D55E00'),
-                                 Stage = c(I='#FFFFCC', IV='#BD0026')),
-         sortByAnnotation = TRUE,
-         removeNonMutated = FALSE)
+maf <- read.maf("cohort.maf", clinicalData = clinical)
+oncoplot(maf, top = 20,
+         clinicalFeatures = c("Subtype", "Stage"),
+         annotationColor = list(
+           Subtype = c(Luminal="#0072B2", Basal="#D55E00", HER2="#009E73"),
+           Stage = c(I="#FFFFCC", II="#FED976", III="#FD8D3C", IV="#BD0026")),
+         sortByAnnotation = TRUE, removeNonMutated = FALSE)
 ```
 
-maftools defaults handle alteration-class colors, sample sorting, and percentage bars automatically. Customization is more limited than ComplexHeatmap.
+maftools only knows samples present in the MAF. `removeNonMutated = FALSE` does
+not add cohort members with no MAF row, even if they occur in `clinicalData`.
+Use the explicit matrix plus ComplexHeatmap when the full cohort is the required
+denominator. maftools also uses black for `Multi_Hit`; do not equate that black
+tile with this Skill's black `Truncating` tile when comparing tools.
 
-## Mutual Exclusivity and Co-Occurrence
+## comut.py path
+
+Prepare tab-separated mutation, clinical, and TMB files with columns
+`sample`, `category`, `value`, plus a cohort file with `sample`. The script sets
+the full cohort before adding datasets, sorts samples by TMB (or mutation burden
+without TMB), reverses the y-axis category order so the most frequent gene is on
+top, derives the TMB range from the data with a zero lower bound, and adds a
+unified alteration/clinical legend. Cohort and track IDs are normalized to
+stripped strings; empty or NA IDs fail. TMB values must be finite and
+non-negative.
+
+```bash
+python scripts/comut_plot.py --mutations mutations.tsv --cohort cohort.tsv --clinical clinical.tsv --tmb tmb.tsv --output comut.pdf
+```
+
+Sample IDs are shown for cohorts of at most 50 samples and hidden automatically
+above that threshold. Change the cutoff with `--sample-label-threshold N`; use
+`0` to hide all labels or a larger value to force labels for a known-readable
+layout.
+
+Unknown cohort IDs and alteration classes fail loudly. Use pandas 2.x; do not
+work around the pandas 3 error by dropping the continuous track silently.
+
+## Mutual exclusivity and co-occurrence
 
 ```r
-# maftools provides somaticInteractions
-si <- somaticInteractions(maf = maf, top = 20,
-                          pvalue = c(0.05, 0.01),
-                          fontSize = 0.7)
-# Plot returns a matrix of -log10(p) with sign by direction (+ co-occur, - mutex)
+si <- somaticInteractions(maf, top = 20,
+                          pvalue = c(0.05, 0.01), fontSize = 0.7)
+si[, c("gene1", "gene2", "pValue", "oddsRatio", "Event", "pAdj")]
 ```
 
-Mutual-exclusivity testing on small cohorts (N < 50) is underpowered; reported "significant" mutex on n=20 with 2 mutations each is uninterpretable. Aggregate to larger cohorts (TCGA + ICGC pan-cancer) or report effect size with CI rather than p-value.
+The return value is a `data.table` with pair labels, p-values, odds ratios,
+2-by-2 cell counts (`00`, `01`, `11`, `10`), adjusted p-values, and `Event`.
+The signed `-log10(p)` representation belongs to the plot; it is not the return
+object.
 
-**Fisher exact vs DISCOVER:** standard 2x2 Fisher tests sample-mutation pairs, ignoring per-gene mutation rate background. DISCOVER (Canisius 2016 *Genome Biol* 17:261) models per-tumor mutation probability and is preferred for pan-cancer analyses where mutation rate varies 100× across samples.
+Fisher tests ignore sample-specific mutation-rate background. Prefer DISCOVER
+for pan-cancer analyses with large burden heterogeneity. At N < 50, treat the
+plot as descriptive, report per-gene exact-binomial intervals, and do not claim
+pairwise mutual exclusion from sparse cells. A 0.5 continuity correction can
+even reverse the apparent direction in very sparse tables; report raw 2-by-2
+counts and avoid classifying direction from a corrected odds ratio alone.
 
-## comut.py -- Python Equivalent
+## Quantitative guidance
 
-```python
-import comut
-import pandas as pd
-
-# Long-format: columns = sample, category (gene), value (alteration class)
-toy_comut = comut.CoMut()
-toy_comut.add_categorical_data(
-    data=mutation_long_df,
-    name='Mutations',
-    category_order=top_genes,
-    value_order=['Truncating', 'Missense', 'Splice', 'Amp', 'HomDel'],
-    mapping={'Truncating': '#000000', 'Missense': '#56B4E9',
-             'Splice': '#CC79A7', 'Amp': '#D55E00', 'HomDel': '#0072B2'})
-
-toy_comut.add_categorical_data(
-    data=clinical_long_df,
-    name='Subtype',
-    mapping={'Luminal': '#0072B2', 'Basal': '#D55E00'})
-
-toy_comut.add_continuous_data(
-    data=tmb_long_df,
-    name='TMB',
-    mapping='viridis',
-    value_range=(0, 30))
-
-toy_comut.plot_comut(figsize=(12, 8))
-toy_comut.figure.savefig('comut.pdf', dpi=300, bbox_inches='tight')
-```
-
-## Per-Method Failure Modes
-
-### Alterations flattened to a single class
-
-**Trigger:** Reducing each cell to a single most-severe alteration, losing the stack.
-
-**Mechanism:** Loses the multi-alteration biology (e.g., MYC amp + missense in TP53).
-
-**Symptom:** OncoPrint looks like a simple heatmap; co-occurring multi-class events invisible.
-
-**Fix:** Build the cell as `;`-separated alteration string; define `alter_fun` for each class.
-
-### Sample sort by gene 1 frequency only
-
-**Trigger:** Default `oncoPrint` sorts samples by altered-gene-1 status; weakens the "memo sort" pattern.
-
-**Mechanism:** True OncoPrint uses memoSort (Cerami 2012) which sorts by the binary altered-or-not pattern across the top genes.
-
-**Symptom:** Samples with the same alteration profile are not adjacent; "staircase" pattern lost.
-
-**Fix:** ComplexHeatmap `oncoPrint` uses memoSort by default; do NOT override `column_order` unless intentional.
-
-### Showing only mutated samples (`remove_empty_columns = TRUE`)
-
-**Trigger:** Default in some implementations.
-
-**Mechanism:** Drops samples with no mutations in the displayed genes — but those samples ARE part of the cohort.
-
-**Symptom:** Sample count differs from cohort N; denominator-based percentages wrong.
-
-**Fix:** `remove_empty_columns = FALSE` to preserve all samples; percentages now reflect true cohort fraction.
-
-### Hypermutators dominate visual
-
-**Trigger:** Cohort with 1-2 POLE-mutant or MSI-H samples; TMB bar saturates.
-
-**Mechanism:** Hypermutator TMB is 10-100× the typical sample.
-
-**Symptom:** All other samples' TMB bars are invisible; one column dominates.
-
-**Fix:** Log-transform the TMB annotation: `anno_barplot(log10(tmb + 1))`; OR cap with `ylim`.
-
-### Mutex/co-occurrence p-values overinterpreted on small cohorts
-
-**Trigger:** Fisher exact test on N < 50 with low mutation counts.
-
-**Mechanism:** With 2 mutations vs 3 mutations in 20 samples, all p-values are dominated by noise.
-
-**Symptom:** "Significant mutex" claim from a tiny pilot.
-
-**Fix:** Aggregate to ≥100 samples for credible mutex; use DISCOVER (Canisius 2016) instead of Fisher when mutation rate varies 100× across samples.
-
-## Small-Cohort Regime (N = 20-50)
-
-For rare-cancer cohorts where N < 50, the standard OncoPrint + Fisher mutex pipeline is statistically uninterpretable:
-
-| Action | What to do |
-|--------|------------|
-| Report per-gene frequencies | Use exact-binomial CI (Clopper-Pearson via `binom.test`) — Wald CI is invalid at low frequency |
-| Do NOT report mutex p-values | Fisher exact on 2x2 with cell counts ≤ 5 has no power; the "significant" mutex finding is noise |
-| Hypothesis generation only | Pool with TCGA Pan-Cancer + ICGC for credible mutex; treat the cohort as the *replication* not the discovery |
-| Co-occurrence reporting | OR with Haldane-Anscombe 0.5 correction for zero cells; report alongside cohort N |
-
-Show the OncoPrint for visual transparency, but the per-gene-frequency *table* (with exact-binomial CIs) is the load-bearing scientific output, not the mutex test.
-
-## Reconciliation: When Implementations Differ
-
-| Pattern | Cause | Action |
-|---------|-------|--------|
-| ComplexHeatmap and maftools show different sample orders | Different memoSort defaults | Specify `sortByAnnotation` explicitly; report sort criterion in caption |
-| Percentage labels differ | `remove_empty_columns = TRUE` vs FALSE | Document denominator (cohort-N vs altered-N) |
-| Some alterations missing from a sample | Filtering: silent SNVs, low VAF | Document filtering criteria upstream |
-
-## Quantitative Thresholds
-
-| Threshold | Value | Source |
-|-----------|-------|--------|
-| Cohort N for valid mutex | ≥100 (pan-cancer); ≥50 (single-cohort with effect-size focus) | Common practice |
-| Display top genes | 10-25 in single panel | More creates visual clutter |
-| Sample N for OncoPrint | 50-1000 (above: switch to summary panel) | Visualization practical |
+| Item | Guidance |
+|---|---|
+| Displayed genes | Usually 10-25 in one panel |
+| Sample labels | Hide when the cohort is too dense to read |
+| Hypermutator track | `log10(tmb + 1)` or a clearly disclosed cap |
+| Pair testing | Prefer N >= 100; use effect-size focus from 50-99 |
+| Very small cohorts | Exact frequency intervals; no discovery claim from mutex tests |
 
 ## Common Errors
 
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| Co-occurring multi-class events invisible | Single-class flattening | Use `;`-separated cells + alter_fun list |
-| Sample order doesn't show staircase | column_order override | Trust default memoSort |
-| Sample count differs from cohort | `remove_empty_columns = TRUE` | Set to FALSE |
-| TMB bar dominated by 1-2 samples | Hypermutators on linear scale | log10 + 1 transform |
-| Mutex p-values on N=20 | Underpowered | Aggregate cohorts; use DISCOVER |
-| Gene frequency right-bar mismatches percentages | Denominator definition | Document cohort-N vs altered-N |
+| Error or symptom | Cause | Correction |
+|---|---|---|
+| Multi-class events disappear | One class retained per cell | Keep unique classes separated by `;` |
+| Wrong annotation over samples | Clinical rows used positionally | Match exact IDs and assert order |
+| All-grey annotation | Clinical and mutation IDs do not match | Stop on missing matches; normalize IDs upstream deliberately |
+| Misleading gene order | Default counts alteration events | Pass `row_order = order(-rowSums(mat != ''))` |
+| Samples absent from maftools plot | They have no MAF row | Use a cohort-complete ComplexHeatmap matrix |
+| All-empty matrix fails obscurely | No mapped event remains | Check classes/genes; the helper stops with context |
+| Partial maftools annotation is grey | Incomplete `annotationColor` | Map every discrete level and numeric feature |
+| comut top gene appears at bottom | Natural category order supplied | Reverse `category_order`; the script does this |
+| comut continuous track errors | pandas 3 with comut 0.0.3 | Use pandas 2.x |
+| TMB colors saturate | Hard-coded range | Use `(0, observed maximum)` |
+| comut sample IDs overlap | Dense cohort exceeds 50 samples | Let the script hide them, or set `--sample-label-threshold` explicitly |
+| comut accepts invalid burden values | TMB was not range-checked | Require finite, non-negative TMB; the script rejects invalid values |
 
 ## References
 
-- Canisius S, Martens JWM, Wessels LFA. 2016. A novel independence test for somatic alterations in cancer shows that biology drives mutual exclusivity but chance explains most co-occurrence. *Genome Biol* 17:261.
-- Cerami E, Gao J, Dogrusoz U, et al. 2012. The cBio cancer genomics portal: an open platform for exploring multidimensional cancer genomics data. *Cancer Discov* 2(5):401-404.
-- Gao J, Aksoy BA, Dogrusoz U, et al. 2013. Integrative analysis of complex cancer genomics and clinical profiles using the cBioPortal. *Sci Signal* 6(269):pl1.
-- Gu Z, Eils R, Schlesner M. 2016. Complex heatmaps reveal patterns and correlations in multidimensional genomic data. *Bioinformatics* 32(18):2847-2849.
-- Mayakonda A, Lin DC, Assenov Y, Plass C, Koeffler HP. 2018. Maftools: efficient and comprehensive analysis of somatic variants in cancer. *Genome Res* 28(11):1747-1756.
+- Canisius S, Martens JWM, Wessels LFA. 2016. *Genome Biol* 17:261.
+- Cerami E, Gao J, Dogrusoz U, et al. 2012. *Cancer Discov* 2:401-404.
+- Gao J, Aksoy BA, Dogrusoz U, et al. 2013. *Sci Signal* 6:pl1.
+- Gu Z, Eils R, Schlesner M. 2016. *Bioinformatics* 32:2847-2849.
+- Mayakonda A, Lin DC, Assenov Y, Plass C, Koeffler HP. 2018. *Genome Res* 28:1747-1756.
 
 ## Related Skills
 
-- data-visualization/heatmaps-clustering - Generic heatmap underlying oncoPrint
-- data-visualization/lollipop-protein-maps - Per-gene mutation maps on protein domains
-- data-visualization/color-palettes - Alteration-class palette selection
-- clinical-databases/variant-prioritization - Filter variants before OncoPrint
-- variant-calling/variant-annotation - Annotate consequences upstream
-- copy-number/cnv-annotation - Integrate CNV calls into the oncoprint
+- data-visualization/heatmaps-clustering
+- data-visualization/lollipop-protein-maps
+- data-visualization/color-palettes
+- clinical-databases/variant-prioritization
+- variant-calling/variant-annotation
+- copy-number/cnv-annotation

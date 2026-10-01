@@ -1,312 +1,152 @@
 ---
 name: bio-chipseq-allele-specific-binding
-description: Detects allele-specific transcription factor or histone modification binding from heterozygous-variant ChIP-seq using WASP (reference-bias filter; mandatory upstream), RASQUAL (joint QTL + bias-corrected testing), BaalChIP (Bayesian beta-binomial with copy-number-aware overdispersion), and AlleleSeq (personalized diploid genome). Handles imprinted-locus awareness, X-inactivation artifacts, cancer copy-number imbalance, and integration with downstream caQTL / bQTL mapping. Use when identifying variants with allelic effects on TF binding, fine-mapping causal regulatory variants, validating deep-learning variant predictions, or characterizing cis-acting regulatory effects.
+category: Data Analysis
+description: Detects allele-specific transcription factor or histone modification binding from heterozygous-variant ChIP-seq using WASP (reference-bias filter), RASQUAL (joint QTL and allelic testing), BaalChIP (Bayesian beta-binomial testing with measured RAF or gDNA correction), and an explicitly external-only AlleleSeq route. Handles imprinted-locus awareness, X-inactivation artifacts, cancer allele-dose imbalance, and downstream caQTL or bQTL integration. Use when identifying variants with allelic effects on TF binding, fine-mapping causal regulatory variants, validating sequence-model predictions, or characterizing cis-acting regulatory effects.
 tool_type: mixed
 primary_tool: WASP
 license: MIT
 author: GPTomics
 ---
 
-## Version Compatibility
+## Version compatibility
 
-Reference examples tested with: WASP 0.3.4+, RASQUAL 1.1+, BaalChIP 1.30+ (Bioconductor), AlleleSeq 2.0+, samtools 1.19+, bcftools 1.19+, GATK 4.5+, pysam 0.22+.
+The executable contracts were checked against WASP v0.3.4 (`f980683`), RASQUAL commit `5aa553c`, and BaalChIP 1.36.0 from Bioconductor 3.22 on R 4.5. The AlleleSeq2 route is documentation-only against [`trgaleev/AlleleSeq2`](https://github.com/trgaleev/AlleleSeq2) commit `cfe8acf` until its official legacy prerequisites are supplied. The prepared environment used samtools/bcftools 1.21 and pysam 0.22.1.
 
-# Allele-Specific Binding (ASB)
+Before running a workflow, inspect the installed version and its help or API documentation. In particular, verify BaalChIP argument names against `?getASB`; releases may differ on `Iter` versus `nIter`.
 
-**"Identify variants that affect transcription factor or histone modification binding in cis"** -> Compare ChIP-seq read counts at the reference and alternate alleles of heterozygous variants in a single sample. Differential read counts (ALT vs REF at hetSNPs in peaks) reveal allele-specific binding.
+# Allele-specific binding from ChIP-seq
 
-- CLI (mandatory bias filter): WASP `mapping pipeline` to remove reference-allele mapping bias
-- CLI (joint association): RASQUAL for cis-QTL + ASB (genotype VCF piped in via tabix)
-- R (Bayesian beta-binomial): BaalChIP with copy-number-aware overdispersion
-- CLI (personalized genome): AlleleSeq with phased diploid genome
-- Statistical test: beta-binomial likelihood ratio or chi-squared on count tables
+Compare reference- and alternate-allele ChIP-seq read counts at heterozygous variants to identify cis-acting differences in transcription-factor or histone-mark binding.
 
-ASB analysis has three universal pitfalls: reference-allele mapping bias (universal across short-read aligners), imprinted loci (constitutively allele-skewed by biology), and copy-number variation (changes effective allele dose). All three must be addressed or results are unreliable.
+Never interpret raw allelic imbalance without addressing these confounders:
 
-## Method Taxonomy
+1. Reference-allele mapping bias. Apply WASP before count-based testing, or use a method such as RASQUAL that models mapping bias explicitly.
+2. Imprinted loci. Flag or filter loci such as H19, IGF2, MEG3, MEG8, and KCNQ1OT1 because constitutive allele skew is not differential binding.
+3. X-inactivation. Exclude chrX in female samples from the ordinary autosomal analysis, or analyze it separately with an appropriate model.
+4. Copy-number imbalance. In cancer samples, use a copy-number-aware analysis or exclude copy-number-altered regions.
 
-| Method | Year | Approach | Strength | Fails when |
-|--------|------|----------|----------|------------|
-| **WASP** (van de Geijn 2015) | 2015 | Map reads, swap alleles, re-map, drop discordant | Universal first step; aligner-agnostic; mandatory preprocessing | Drops 22-31% of reads; reduces power; not an analysis method itself |
-| **RASQUAL** (Kumasaka 2016) | 2016 | Joint genotype-phenotype association with per-feature `phi` bias parameter | Improves QTL mapping; integrates bias correction; works for ChIP/ATAC/RNA-seq | Computationally intensive; assumes binomial bias structure |
-| **BaalChIP** (de Santiago 2017) | 2017 | Bayesian beta-binomial; copy-number-aware overdispersion | Cancer genomes (copy-number imbalance); rigorous inference | Slower; assumes copy-number known |
-| **AlleleSeq** (Rozowsky 2011) | 2011 | Personalized diploid genome alignment | Avoids reference bias completely; conceptually cleanest | Requires phased genotype + diploid genome construction; computational cost |
-| **MBASED** (Mayba 2014) | 2014 | Meta-analysis-based ASE; gene-level | RNA-seq oriented; adapted for ChIP gene-body binning | Gene-level not peak-level; less precise for narrow TF peaks |
-| **AllelicImbalance** (R package) | — | Bioconductor multi-method | Easy R workflow | Requires variants and BAM; less rigorous than BaalChIP |
-| **deepSEA / chromBPNet variant effects** | 2015 / 2024 | Deep-learning predictions | Sequence-only; no chromatin sample needed | Predictive not measurement; see chip-deep-learning |
+## Route to the needed resource
 
-## Universal First Step: WASP Reference-Bias Filter
+- Read [methods-and-commands.md](references/methods-and-commands.md) for installation clues, the complete WASP, RASQUAL, and AlleleSeq command surfaces, input formats, and method-selection detail.
+- Read [pitfalls-and-troubleshooting.md](references/pitfalls-and-troubleshooting.md) when diagnosing reference skew, chromosome mismatches, convergence failures, sparse coverage, X-inactivation, imprinting, or copy-number artifacts.
+- Run or adapt [baalchip_workflow.R](scripts/baalchip_workflow.R) for the complete cancer-oriented BaalChIP example. It retains the provider's executable example as a script instead of duplicating it inline.
 
-**Goal:** Remove reads that show reference-allele mapping bias before any ASB testing.
+## Required inputs and preflight
 
-**Approach:** Align reads, identify those overlapping heterozygous SNPs, swap alleles and re-align; reads that don't map consistently to the same position with both alleles are discarded. The output is a bias-corrected BAM at the cost of 22-31% read loss.
+Gather and record:
 
-Reference-allele mapping bias is systematic: reads with the reference allele align more readily because the reference is the alignment target. This inflates REF allele frequency by 1-5% genome-wide. WASP fixes this:
+- coordinate-sorted ChIP-seq BAMs and their indexes;
+- peak calls for the same reference assembly;
+- a sample-specific heterozygous-variant VCF or table, preferably from matched-normal calling for cancer samples;
+- sample sex and the intended treatment of chrX;
+- an imprinted-locus interval set mapped to the same assembly;
+- a genome-build-matched blacklist;
+- either measured per-variant reference allele frequencies (`RAF`) or matching gDNA BAMs for BaalChIP cancer correction; ordinary population allele frequency (`AF`) and total/minor-copy-number segments are not substitutes;
+- phased genotypes when using RASQUAL population analyses or AlleleSeq personalized genomes.
 
-```bash
-# WASP mapping pipeline
-# 1. Initial alignment
-bowtie2 -x hg38 -1 R1.fq -2 R2.fq -S step1.sam
-samtools view -bS step1.sam | samtools sort -o step1.bam
-samtools index step1.bam
+Confirm that chromosome names, coordinates, declared assembly, and sample identifiers agree across BAM headers, peaks, variants, blacklist, imprinted loci, and the selected RAF/gDNA source. Do not silently substitute a population SNP panel for the sample's own heterozygous variants. Fail closed when correction inputs are missing: setting `RAFcorrection=TRUE` without real RAF or gDNA is not evidence of copy-number correction.
 
-# 2. Identify reads overlapping hetSNPs; swap alleles; re-map
-python /path/to/WASP/mapping/find_intersecting_snps.py \
-    --is_paired_end \
-    --is_sorted \
-    --output_dir wasp_out/ \
-    --snp_tab snps_tab.h5 \
-    --snp_index snps_index.h5 \
-    --haplotype haplotypes.h5 \
-    --samples sample_list.txt \
-    step1.bam
+## Choose the analysis path
 
-# 3. Re-map swapped reads
-bowtie2 -x hg38 -1 wasp_out/step1.remap.fq.gz -S step2.sam
-# (process step2.sam similarly)
+| Situation | Path | Reason |
+|---|---|---|
+| Single sample or replicate group with measured RAF or matching gDNA | WASP-filtered BAM -> BaalChIP | Bayesian beta-binomial inference with an explicit supported allele-dose correction input |
+| Population cohort with phased genotypes and cis-QTL goals | RASQUAL | Joint association and allelic signal with per-feature bias parameter `phi` |
+| One sample with high-quality phased genotype and maximum mapping-bias control | AlleleSeq | Aligns to personalized maternal and paternal genomes |
+| Simple count-table check after valid bias correction | Beta-binomial or chi-squared test | Useful as a transparent secondary analysis, not a replacement for bias correction |
 
-# 4. Filter reads that don't map back consistently
-python /path/to/WASP/mapping/filter_remapped_reads.py \
-    step1.to.remap.bam step2.bam step1.keep.bam
+WASP is preprocessing, not the ASB test. It swaps alleles in reads overlapping heterozygous SNPs, remaps them, and discards reads that do not return consistently. Mapping-bias filtering can materially reduce usable depth; measure and report actual stage counts rather than assuming a fixed attrition percentage. RASQUAL's `phi` is the documented alternative that models bias within the joint test.
 
-# 5. Final WASP-filtered BAM (use this for all downstream ASB analysis)
-samtools sort -o step1.wasp.bam step1.keep.bam
-samtools index step1.wasp.bam
-```
+## Core workflow
 
-**WASP always drops 22-31% of reads.** This is the cost of bias correction; downstream power is reduced but ASB calls are trustworthy.
+### 1. Establish heterozygous variants
 
-**Alternative to WASP filter:** RASQUAL's `phi` parameter models bias within the test rather than filtering reads. More sophisticated but assumes binomial bias structure.
+Use a sample-specific callset, restrict to heterozygous small variants, and normalize the representation before deriving tool-specific inputs. For tumor ChIP-seq, prefer variants called from a matched normal rather than inferring germline heterozygosity from copy-number-distorted tumor reads.
 
-## Workflow: BaalChIP (Recommended for Cancer / Copy-Number-Imbalanced Samples)
+### 2. Correct mapping bias
 
-```r
-library(BaalChIP)
-library(BSgenome.Hsapiens.UCSC.hg38)
+For the default path, run WASP with SNP tables built from the sample-specific VCF:
 
-# Sample metadata
-samples <- data.frame(
-    SampleID = c('HCC1395_FOXA1_rep1', 'HCC1395_FOXA1_rep2'),
-    Tissue = 'TNBC',
-    Target = 'FOXA1',
-    BAM = c('rep1.wasp.bam', 'rep2.wasp.bam'),
-    Peaks = c('rep1_peaks.bed', 'rep2_peaks.bed'),
-    Group = 'HCC1395'
-)
+1. Align reads and coordinate-sort the initial BAM.
+2. Identify reads overlapping heterozygous SNPs and generate allele-swapped reads.
+3. Remap the swapped reads with the same reference and aligner settings.
+4. Keep only reads that map back consistently.
+5. Sort and index the final `.wasp.bam` used downstream.
 
-# hetSNP file: VCF or BED with chrom, pos, ref, alt, allele frequencies
-hetSNPs <- 'het_snps.bed'
+Use the exact command sequence and dependency clues in [methods-and-commands.md](references/methods-and-commands.md). Record input and retained read counts rather than assuming a fixed loss rate.
 
-# CNV file for copy-number-aware overdispersion (critical for cancer)
-cnvs <- 'cnvs.bed'
+### 3. Remove or stratify known biological confounders
 
-# Initialize BaalChIP object
-res <- BaalChIP(samplesheet = samples, hets = hetSNPs)
+- Remove imprinted loci before ordinary ASB interpretation.
+- Exclude chrX from the ordinary analysis for female samples, or report a separate X-aware analysis.
+- For cancer, supply measured per-variant RAF or matching gDNA through the tested BaalChIP interface; otherwise exclude altered segments and do not call the result copy-number-aware.
+- Apply a matched genome blacklist and restrict tests to the called ChIP-seq peaks.
 
-# Run filters and Bayesian test
-res <- alleleCounts(res, min_base_quality = 10, min_mapq = 15)
-res <- QCfilter(res, RegionsToFilter = list(blacklist = rtracklayer::import('blacklist_v2.bed')))
-res <- mergePerGroup(res)
-res <- filter1allele(res)
-res <- getASB(res, Iter = 5000, conf_level = 0.95)
-# Verify parameter names against the installed BaalChIP version (`?getASB`); some releases
-# use `nIter` instead of `Iter`.
+Keep the excluded set and reason codes so that biologically skewed loci are auditable rather than silently lost.
 
-# Results
-asb_table <- BaalChIP.report(res)
-head(asb_table)
-```
+### 4. Run the selected model
 
-BaalChIP outputs per-hetSNP: allelic ratio (AR), bias-corrected ratio (Corrected.AR), a Bayesian credible interval (Bayes_lower/Bayes_upper), and the ASB call (isASB).
-
-## Workflow: RASQUAL (Joint cis-QTL + ASB)
+For BaalChIP, use the shipped fail-closed single-group runner. Every assembly declaration must agree, the official five-column sample sheet and `ID/CHROM/POS/REF/ALT[/RAF]` het contract are validated, and the output directory must not already exist:
 
 ```bash
-# Prepare input
-# - BAM filtered by WASP
-# - Genotype VCF (phased)
-# - Peak BED
-
-# Run RASQUAL. The genotype VCF is piped in from tabix (there is NO --vcf flag);
-# options are single-dash. Inputs -y/-k/-x are BINARY files built by RASQUAL's
-# txt2bin utilities (not .txt). One run per feature: -j selects the feature row,
-# -l = number of test (cis) SNPs, -m = number of feature SNPs in the window.
-tabix genotypes.vcf.gz chr:start-end | \
-  rasqual -y Y.bin -k K.bin -x X.bin \
-    -n N_samples -j FEATURE_INDEX -l N_TEST_SNPS -m N_FEATURE_SNPS \
-    -s EXON_STARTS -e EXON_ENDS -f PEAK_ID \
-    > rasqual_results.txt
-
-# Output columns: chrom, peak_id, n_RSNPs, n_FSNPs, n_imputed, summarized_phi,
-#                 summarized_overdispersion, summarized_pi, beta, log10_BF, ...
+Rscript scripts/baalchip_workflow.R \
+  --samples samples.tsv --hets tumor-hets.tsv --group TUMOR \
+  --blacklist hg38-blacklist.bed --imprinted imprinted-hg38.bed \
+  --sex female --assembly GRCh38 --samples-assembly GRCh38 \
+  --hets-assembly GRCh38 --blacklist-assembly GRCh38 \
+  --imprinted-assembly GRCh38 --correction raf \
+  --samtools /opt/conda/bin/samtools --out results/TUMOR
 ```
 
-RASQUAL's `phi` parameter is the per-feature bias estimate; `pi` is the allelic ratio.
+Use `--correction gdna --gdna-bam matched-normal.bam` instead when gDNA should produce RAF. The runner removes any het-table RAF in that mode because BaalChIP otherwise gives it priority. It preserves pre-model exclusions with reason codes, selects the requested group from the report list, writes correction provenance and structured terminal state, and refuses an existing output directory. `--preflight-only` validates contracts without claiming model execution.
 
-## Workflow: AlleleSeq (Personalized Diploid Genome)
+For RASQUAL, use `scripts/rasqual_cohort.py`: `prepare` validates text matrices and invokes the pinned source's official `txt2bin.R`; `run` requires a complete one-row-per-feature manifest, checks native-double binary sizes, invokes tabix and RASQUAL without a shell, rejects non-converged or malformed 25-column rows, and applies Benjamini-Hochberg correction to the rows actually emitted across the cohort run.
 
-```bash
-# Build personalized diploid genome from phased VCF
-java -jar vcf2diploid.jar -id SAMPLE -chr hg38.fa -vcf SAMPLE.phased.vcf   # per-haplotype FASTAs written to CWD (no -outDir option)
+AlleleSeq is external-only in this skill. Do not execute a partial local sketch or substitute an unofficial `vcf2diploid` artifact. Follow the exact unavailable-toolchain boundary in [methods-and-commands.md](references/methods-and-commands.md), then hand off to a restored official environment.
 
-# Align reads to both maternal and paternal copies
-bowtie2-build personalized/maternal.fa maternal_index
-bowtie2-build personalized/paternal.fa paternal_index
-bowtie2 -x maternal_index -1 R1.fq -2 R2.fq -S maternal.sam
-bowtie2 -x paternal_index -1 R1.fq -2 R2.fq -S paternal.sam
+### 5. Validate the result
 
-# AlleleSeq2 pipeline (Makefile-based; there is no AlleleSeq2.pl entry point)
-make -f PIPELINE.mk PGENOME_DIR=personalized/ REFGENOME_VERSION=GRCh38 ALIGNMENT_MODE=ASB NTHR=8
+At minimum:
 
-# Output: per-hetSNP allelic counts and binomial test
-```
+- compare the genome-wide or tested-site REF allelic-ratio distribution with 0.5 after filtering;
+- count input, remapped, retained, tested, and significant loci at each stage;
+- inspect significant loci for blacklist, imprinting, chrX, and copy-number overlap;
+- check replicate agreement and read depth at each reported site;
+- verify REF/ALT orientation and chromosome naming in exported tables;
+- distinguish measured ASB from sequence-model predictions such as chromBPNet or deepSEA.
 
-Personalized genome avoids reference bias by construction. Cost: per-sample diploid genome generation and indexing.
+A strong prediction without measured ASB can reflect insufficient coverage or model extrapolation; disagreement is not by itself proof that either result is wrong.
 
-## Three Universal Pitfalls
+### 6. Report the analysis contract
 
-### Pitfall 1: Imprinted Loci Are Constitutively Skewed
+Report the reference assembly, aligner, WASP or alternative bias strategy, genotype source, variant and peak filters, sample sex, chrX handling, imprinting resource, blacklist, copy-number source and handling, ASB method and version, model parameters, minimum depth, multiple-testing or posterior criterion, replicate strategy, and read/locus attrition.
 
-Imprinted loci (H19, IGF2, MEG3, MEG8, KCNQ1OT1, etc.) show extreme allele bias by biology, not from differential binding.
+Per-site output should retain chromosome, position, REF, ALT, allele counts, raw allelic ratio, corrected ratio when available, uncertainty or test statistic, significance call, depth, and exclusion/annotation flags.
 
-```bash
-# Filter imprinted loci before ASB analysis
-# Imprinted-gene coordinates are derived from a catalog (geneimprint.com or the
-# Otago Imprinted Gene Catalogue, igc.otago.ac.nz) mapped to hg38; there is no
-# canonical hosted hg38 BED. Given imprinted_loci_hg38.bed:
-bedtools intersect -v -a hetSNPs.bed -b imprinted_loci_hg38.bed > hetSNPs.non_imprinted.bed
-```
+## Interpretation boundaries
 
-### Pitfall 2: X-Inactivation in Females
-
-In female samples, X-linked genes show extreme allele skew because each cell silences one X chromosome. This appears as ASB at every X-linked hetSNP.
-
-```bash
-# Filter chrX in female samples
-awk '$1 != "chrX"' hetSNPs.bed > hetSNPs.autosomal.bed
-# Or analyze chrX separately with imprinting-aware methods
-```
-
-### Pitfall 3: Copy-Number Imbalance (Cancer Genomes)
-
-In cancer cells, copy-number gain of one allele alters effective allele dose; raw allelic ratios mix dose and binding effects. BaalChIP's copy-number-aware overdispersion handles this; other methods require pre-filtering CN-altered regions.
-
-```bash
-# Use ASCAT / Sequenza / FACETS to call allele-specific CNVs
-# Exclude CN-altered regions from ASB analysis OR use BaalChIP
-```
-
-## Per-Tool Failure Modes
-
-### WASP -- Reference panel mismatch
-
-**Trigger:** Using a WASP SNP file from a different population than the sample.
-
-**Mechanism:** WASP swaps alleles at known hetSNPs; if the variant isn't in the SNP file, no swap happens; reads retain reference bias.
-
-**Symptom:** Sample-specific hetSNPs (not in 1KG) still show reference bias after WASP.
-
-**Fix:** Build WASP SNP file from the sample's own genotype VCF, not a population panel; OR use RASQUAL which handles novel hetSNPs.
-
-### WASP -- Excessive read loss
-
-**Trigger:** WASP filter removes >40% of reads.
-
-**Mechanism:** Many reads span multiple hetSNPs; each must re-map consistently after every allele swap; combinatorial loss.
-
-**Fix:** Accept the loss (genuine bias correction) OR switch to AlleleSeq (personalized genome avoids the swap-and-remap step) OR RASQUAL (no read filtering).
-
-### RASQUAL -- Convergence failure
-
-**Trigger:** Sparse data (few hetSNPs per peak); strong copy-number imbalance.
-
-**Mechanism:** EM convergence requires enough hetSNPs per feature; sparse data underspecifies the model.
-
-**Fix:** Require well-imputed SNPs (`--imputation-quality-fsnp`); combine replicates; or switch to BaalChIP for sparse-data robustness.
-
-### BaalChIP -- CN file mismatch
-
-**Trigger:** CN BED uses different naming convention (chrX vs X) than BAMs.
-
-**Mechanism:** BaalChIP silently doesn't apply CN-aware overdispersion if CN positions don't match BAM chromosomes.
-
-**Symptom:** ASB calls at CN-altered regions look bimodal (one allele appears 100% bound).
-
-**Fix:** Verify chromosome naming matches across CN file, BAM, hetSNP VCF.
-
-### AlleleSeq -- Insufficient phasing
-
-**Trigger:** Using unphased VCF for diploid genome construction.
-
-**Mechanism:** AlleleSeq requires phased genotypes; without phasing, maternal and paternal genomes are randomly assigned.
-
-**Fix:** Use trio or read-based phasing (HapCUT2, WhatsHap) before AlleleSeq.
-
-### Imprinted loci not filtered
-
-**Trigger:** Reporting ASB at H19 or IGF2.
-
-**Mechanism:** These loci are biologically allele-skewed; the "ASB" call is correct but uninformative.
-
-**Fix:** Always filter imprinted loci before reporting / interpreting ASB.
-
-### Female chrX ASB artifacts
-
-**Trigger:** Reporting ASB at chrX in female samples without X-inactivation correction.
-
-**Mechanism:** Random X-inactivation silences one X per cell; population of cells shows extreme allele bias at any X-linked variant.
-
-**Fix:** Filter chrX in female samples OR use methods that model X-inactivation (rare in standard ASB pipelines).
-
-### Reference allele bias not corrected
-
-**Trigger:** Running BaalChIP / chi-squared test directly without WASP or RASQUAL bias handling.
-
-**Mechanism:** 1-5% genome-wide REF allele over-representation produces false-positive REF-favoring ASB calls.
-
-**Symptom:** ASB calls skewed toward REF allele.
-
-**Fix:** Always apply WASP (or RASQUAL's phi parameter) before testing.
-
-## Reconciliation
-
-| Pattern | Likely cause | Action |
-|---------|--------------|--------|
-| WASP filter applied; still REF-biased | Sample-specific hetSNPs not in WASP SNP file | Use sample's own genotype VCF for WASP |
-| BaalChIP and RASQUAL disagree at sparse hetSNPs | Different sparse-data behavior | BaalChIP Bayesian more conservative for sparse; check posterior |
-| ASB call at imprinted locus | Biology, not differential binding | Filter imprinted loci |
-| ASB at chrX in female | X-inactivation | Filter chrX |
-| ASB call where copy-number altered | Cancer dose effect | Use BaalChIP with CN file OR exclude CN-altered regions |
-| chromBPNet predicts strong variant effect; ASB doesn't | Sample has low coverage at variant; chromBPNet predicts in counterfactual | Increase depth; ASB requires actual chromatin sample |
-
-## Common Errors
-
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| WASP `find_intersecting_snps.py` fails | h5 SNP table format wrong | Build SNP tables from VCF via `snp2h5` (HDF5) or `extract_vcf_snps.sh` (text SNP dir) |
-| BaalChIP "no overlap with peaks" | hetSNP and peak chrom naming mismatch | Standardize chrom prefixes |
-| RASQUAL OOM | cis-window too large; too many features | Narrow the cis-window (tabix region and `-l`/`-m`); chunk feature list |
-| AlleleSeq "diploid genome too large" | Many SVs in genome | Use small-variant only VCF; exclude SV-rich regions |
-| ASB calls cluster at REF allele | WASP not applied OR insufficient | Re-run WASP with sample-specific SNP file |
-| Many ASB at chrX in female | X-inactivation | Filter chrX |
-| All "ASB" calls are at imprinted loci | Imprinting not filtered | Apply imprinted-loci BED |
+- ASB is a within-sample allelic measurement at heterozygous sites; a caQTL or bQTL is a population-level association.
+- A significant imprinted or X-linked skew can be biologically real but is not automatically evidence of differential TF binding.
+- Copy-number-driven allele dose can mimic binding imbalance.
+- Personalized-genome alignment avoids reference bias but does not remove imprinting, X-inactivation, copy-number, low-depth, or peak-selection concerns.
+- Deep-learning variant effects are predictions in a counterfactual sequence context; ASB measures the assayed sample and cell state.
 
 ## References
 
-- Rozowsky J et al 2011 Mol Syst Biol 7:522 (AlleleSeq)
-- van de Geijn B et al 2015 Nat Methods 12:1061 (WASP)
-- Kumasaka N et al 2016 Nat Genet 48:206 (RASQUAL)
-- de Santiago I et al 2017 Genome Biol 18:39 (BaalChIP)
-- Mayba O et al 2014 Genome Biol 15:405 (MBASED)
-- Chen J et al 2016 Nat Commun 7:11101 (1000 Genomes ASB / ASE survey)
+- Rozowsky J et al. 2011. *Molecular Systems Biology* 7:522 (AlleleSeq; <https://doi.org/10.1038/msb.2011.54>).
+- van de Geijn B et al. 2015. *Nature Methods* 12:1061 (WASP; <https://doi.org/10.1038/nmeth.3582>).
+- Kumasaka N et al. 2016. *Nature Genetics* 48:206 (RASQUAL; <https://doi.org/10.1038/ng.3366>).
+- de Santiago I et al. 2017. *Genome Biology* 18:39 (BaalChIP; <https://doi.org/10.1186/s13059-017-1165-7>).
+- Mayba O et al. 2014. *Genome Biology* 15:405 (MBASED).
+- Chen J et al. 2016. *Nature Communications* 7:11101 (1000 Genomes ASB/ASE survey).
 
-## Related Skills
+## Related skills
 
-- chip-seq/peak-calling - Peak calling upstream
-- chip-seq/chipseq-qc - QC before ASB analysis
-- chip-seq/chip-deep-learning - Validate DL variant predictions against ASB
-- chip-seq/peak-annotation - Annotate ASB variants to genes / cCREs
-- atac-seq/allele-specific-accessibility - Parallel ATAC ASB workflow
-- causal-genomics/fine-mapping - ASB as fine-mapping orthogonal evidence
-- variant-calling/variant-annotation - Annotate hetSNPs before ASB
-- phasing-imputation/haplotype-phasing - Required for AlleleSeq
+- chip-seq/peak-calling - call peaks upstream.
+- chip-seq/chipseq-qc - evaluate ChIP-seq quality before ASB.
+- chip-seq/chip-deep-learning - compare measured ASB with predicted variant effects.
+- chip-seq/peak-annotation - annotate ASB variants to genes and cCREs.
+- atac-seq/allele-specific-accessibility - parallel accessibility workflow.
+- bio-causal-genomics-fine-mapping - use ASB as orthogonal fine-mapping evidence.
+- bio-variant-annotation - annotate heterozygous variants.
+- phasing-imputation/haplotype-phasing - prepare phased genotypes for AlleleSeq.

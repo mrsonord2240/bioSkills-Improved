@@ -1,292 +1,93 @@
 ---
 name: bio-atac-seq-footprinting
 description: Detect transcription factor binding footprints in ATAC-seq using TOBIAS, HINT-ATAC, Wellington, or scprinter. Use when identifying bound TF sites within accessible regions, correcting Tn5 insertion bias before footprinting, choosing between cleavage-based and aggregate-based footprinters, or comparing differential TF activity between conditions.
-tool_type: cli
-primary_tool: tobias
 license: MIT
-author: GPTomics
 ---
 
-## Version Compatibility
+# TF footprinting
 
-Reference examples tested with: TOBIAS 0.16+, RGT HINT-ATAC 1.0.2+, Wellington (pyDNase) 0.3+, scprinter 0.1+, samtools 1.19+, bedtools 2.31+, pyBigWig 0.3+, MEME suite 5.5+.
+Detect short DNA stretches (typically 6-20 bp) of reduced Tn5 cleavage within accessible regions, where a bound TF protects DNA. This requires (1) Tn5 sequence-bias correction, (2) per-base footprint scoring, and (3) motif-anchored detection.
 
-Before using code patterns, verify installed versions match. If versions differ:
-- Python: `pip show <package>` then `help(module.function)` to check signatures
-- CLI: `<tool> --version` then `<tool> --help` to confirm flags
+Tn5 has a strong sequence preference over roughly +/- 4 bp around the insertion site (Karabacak Calviello 2019). Without bias correction, "footprints" reflect enzyme preference rather than TF binding; this is the most important step.
 
-If code throws unexpected errors, introspect the installed package and adapt rather than retrying.
+## Workflow
 
-# TF Footprinting
+1. Confirm inputs: a deduplicated, MAPQ-filtered, chrM-stripped BAM with at least about 50M nuclear reads (below that, weak or transient binders cannot be called reliably; power saturates above about 100M), a consensus peakset, a reference FASTA matching the BAM build, an assembly-matched blacklist, and a motif database (JASPAR 2024 CORE vertebrates by default; see the reference for alternatives).
+2. Optionally restrict to nucleosome-free fragments (below).
+3. Choose the tool for the goal: TOBIAS three-step pipeline for standard and differential two-condition work; HINT-ATAC or Wellington (`-A`) as independent second call sets; scPrinter for multi-scale bulk scoring. For non-model organisms use a custom motif set and a naked-DNA or retrained bias model. The decision table and tool comparison are in the reference. Single-cell/cluster scPrinter and seq2PRINT training are not covered or tested here.
+4. Correct Tn5 bias, score footprints, then classify bound and unbound motif sites (TOBIAS commands below).
+5. Check the positive control: `scripts/run_tobias.sh` plots the CTCF aggregate per condition at all, bound, and unbound sites on uncorrected and corrected signal. A central dip with flanking peaks at bound sites and a flatter unbound profile means the scoring separates sites sensibly; a shallow, flat, or inverted profile points to depth or bias-correction failure. Bound sites are chosen by footprint score, so the dip alone does not prove correction worked: compare the uncorrected panel and the ATACorrect report PDF. A motif file without a CTCF motif makes the script exit 3 (`ALLOW_NO_CTCF=1` accepts that); supply another positive control then.
+6. For differential work use the identical peakset and blacklist for every condition, otherwise scores are not comparable.
+7. Report the tool, bias model, thresholds, genome build, motif database, and software versions. Treat single-tool calls as exploratory; for higher confidence add an independent call set (HINT-ATAC or Wellington footprints, or ChIP-seq peaks) and report site-level concordance with `scripts/site_concordance.sh`, always beside the unbound-site control (definition and measured values in the reference). Absence of a footprint is not absence of binding, especially for nuclear receptors, pioneer factors, and short-motif TFs; see the per-TF caveats in the reference.
 
-**"Identify TF binding footprints in my ATAC-seq data"** -> Detect short DNA stretches (typically 6-20 bp) of reduced Tn5 cleavage within accessible regions, where a bound TF physically protects DNA. Requires (1) Tn5 sequence-bias correction, (2) per-base footprint scoring, (3) motif-anchored detection.
+## Tn5 cut geometry
 
-- CLI: `TOBIAS ATACorrect` -> `TOBIAS ScoreBigwig` (formerly `FootprintScores`) -> `TOBIAS BINDetect`
-- CLI: `rgt-hint footprinting --atac-seq` (HINT-ATAC, single-step)
-- CLI: `wellington_footprints.py` (legacy DNase, adapted for ATAC)
-- Python: `scprinter` (multi-scale, single-cell aware; Hu 2025 Nature)
+Tn5 cuts with a 9 bp stagger. Apply a +4 bp shift on the + strand and a -5 bp shift on the - strand to read 5' ends before per-base counting. TOBIAS, HINT-ATAC, and scprinter do this internally; custom counting must apply it (deepTools `alignmentSieve --ATACshift` applies the same shift). Skipping it produces roughly 9 bp asymmetry in aggregate footprints.
 
-Tn5 has a strong sequence preference (Karabacak Calviello 2019), reading approximately +/- 4 bp around the insertion site. Without bias correction, "footprints" reflect Tn5 sequence preference rather than TF binding. This is the single most important step.
+## TOBIAS three-step pipeline
 
-## Algorithmic Taxonomy
-
-| Tool | Bias model | Scoring | Min depth | Strength | Fails when |
-|------|-----------|---------|-----------|----------|------------|
-| TOBIAS (BINDetect) | +/-12 bp k-mer window (`--k_flank` 12), dinucleotide weight matrix (DWM) | Two-step: continuous footprint score then motif-anchored bound/unbound classification | >= 50M nuclear reads | Mature, peer-reviewed (Bentsen 2020), differential support, modular pipeline | Below 50M reads; sequencing errors near motif inflate background |
-| HINT-ATAC | Hidden-Markov + dinucleotide bias correction | HMM emits open/footprint/closed states; calls ranked footprints | >= 50M | Single-step; integrates motif matching; handles DNase too | Less control over individual stages; HMM occasionally over-segments |
-| Wellington (pyDNase) | DNase-developed; ATAC adaptation by post-shift | Cleavage-rate Poisson Z-score | >= 50M (DNase >= 80M) | Original footprinting framework; well-validated for DNase | Designed for DNase II; ATAC-specific bias not corrected as carefully |
-| PIQ | Bayesian latent variable on cut sites | Genome-wide PWM scan + cleavage profile | >= 30M (lower because of model) | Per-TF posterior probabilities; works on lower depth | Outdated; not actively maintained; harder to install |
-| scprinter | Multi-scale CNN-based footprint and TF activity | Resolves footprints at multiple TF size scales (CTCF vs nuclear receptors) | >= 1M cells (sc) or 50M (bulk) | Modern ML approach; single-cell; multi-scale resolves problematic TF families | Newer tool; benchmarks evolving; GPU recommended |
-| TOBIAS + scprinter combination | TOBIAS bias correction + scprinter scoring | Two-step bridging | >= 50M | Combines the best bias model with multi-scale scoring | Manual pipeline, no single CLI |
-
-Methodology evolves; verify against the current Bentsen 2020, Karabacak Calviello 2019, and scPrinter (Hu 2025) benchmarks. ATAC footprinting power saturates above 100M nuclear reads; below 50M, weak-binding TFs (transient occupancy) cannot be reliably called.
-
-## Tn5 Bias and Why Correction Matters
-
-**Trigger:** Tn5 inserts preferentially at certain k-mers (Karabacak Calviello 2019 measured the protocol-specific 6-mer insertion-bias model used for bias correction). The preference is reproducible and biologically uninteresting.
-
-**Mechanism:** Without correction, every "TF footprint" near a high-bias k-mer reads as occupancy. Conversely, regions with low-bias flanks but real binding may show no footprint dip relative to corrected expectation.
-
-**Symptom:** Aggregate footprint at random GC-rich motifs shows V-shape; aggregate at AT-rich motifs shows inverse-V (peak instead of dip).
-
-**Fix:** Apply ATACorrect (TOBIAS), seqOutBias (Martins 2018), or HINT's dinucleotide model. Bias correction subtracts the Tn5-expected per-base profile from observed cleavage. After correction, V-shape is preserved only at TF-bound sites.
-
-**Goal:** Subtract Tn5 sequence-bias from the per-base cleavage signal so residual footprints reflect TF binding rather than enzyme preference.
-
-**Approach:** Run TOBIAS ATACorrect over the deduplicated BAM with the reference genome, consensus peaks, and ENCODE blacklist; it emits per-condition uncorrected, bias, expected, and corrected bigWigs for downstream scoring.
+`ScoreBigwig` was formerly `FootprintScores`. `ATACorrect` writes `<bam-prefix>_uncorrected.bw`, `_bias.bw`, `_expected.bw`, and `_corrected.bw` per input BAM; substitute the real prefix below.
 
 ```bash
-# TOBIAS ATACorrect: produces uncorrected, bias, expected, and corrected bigWigs
-TOBIAS ATACorrect \
-    --bam sample.dedup.bam \
-    --genome hg38.fa \
-    --peaks consensus_peaks.bed \
-    --blacklist hg38-blacklist.v2.bed \
-    --outdir corrected/ \
-    --cores 8
-# Output: sample_uncorrected.bw, sample_bias.bw, sample_expected.bw, sample_corrected.bw
-```
-
-## Tn5 Cut Geometry: +4 / -5 Dual-Cut
-
-Tn5 dimers cut both strands of DNA but with a 9 bp staggered offset. The cleavage event creates two free 5' ends: one shifted +4 bp from the binding center on the forward strand and -5 bp on the reverse strand. Footprinting tools must apply this shift before per-base counting:
-
-| Strand | Read 5' end correction |
-|--------|------------------------|
-| + strand | shift +4 bp downstream |
-| - strand | shift -5 bp upstream |
-
-**Trigger:** Computing per-base Tn5 cut signal manually.
-
-**Symptom:** Footprint aggregates show ~9 bp asymmetry (apex shifted from motif center).
-
-**Fix:** Apply +4/-5 shift before counting; TOBIAS, HINT-ATAC, and scprinter handle this internally. Custom analyses must apply explicitly. deepTools provides this via `alignmentSieve --ATACshift` (which applies the canonical +4 / -5 shift in one step).
-
-## Bias Correction Alternatives
-
-| Method | Approach | When to use |
-|--------|---------|-------------|
-| TOBIAS ATACorrect | +/-12 bp k-mer window, dinucleotide weight matrix (DWM) | Default for most ATAC; fast |
-| chromBPNet bias model (Pampari 2024) | CNN trained on naked-DNA control or k-mer baseline | Best when sequence context complex; handles low-complexity flanks |
-| seqOutBias (Martins 2018) | Genome-wide k-mer frequency scaling (observed vs expected cut counts) | Independent of footprinting tool; works upstream |
-| HINT-ATAC dinucleotide | HMM-integrated dinucleotide bias | Built into HINT pipeline; less control |
-| Naked-DNA empirical | Sequence Tn5 on protein-free DNA | Gold standard for non-model organisms; expensive wet-lab |
-
-For non-model organisms (no published Tn5 bias model), naked-DNA control is required. chromBPNet's bias model is the modern standard for human/mouse and outperforms TOBIAS at low-complexity sequence contexts (Pampari 2024). See atac-seq/deep-learning-atac.
-
-## In Silico Variant Effect at Footprinted TF Motifs
-
-**Trigger:** A GWAS-fine-mapped or rare variant falls inside a TOBIAS-bound motif site.
-
-**Mechanism:** Sequence-based DL models (chromBPNet, Enformer) predict per-base accessibility at ref vs alt allele; combined with footprint evidence (TOBIAS bound site overlap), this produces a mechanistic hypothesis: "variant disrupts binding of TF X at enhancer Y."
-
-**Workflow:** Run TOBIAS BINDetect to identify bound motif sites; for variants in bound sites, score with chromBPNet (atac-seq/deep-learning-atac) for ref/alt log2FC; |log2FC| > 1 supports functional disruption. Cross-reference with allele-specific accessibility (atac-seq/allele-specific-accessibility) for observed evidence.
-
-## Per-TF Footprinting Failure Modes
-
-Different TF families produce different footprint signatures. The same tool can report a clean V-shape for one family and noise for another.
-
-### CTCF -- The gold standard
-
-**Trigger:** Footprinting CTCF.
-
-**Mechanism:** CTCF has high ChIP-seq concordance, deep V-shaped footprint (~19-20 bp protected), strong sequence specificity. ChIP-seq overlap is typically >70%.
-
-**Symptom:** Aggregate corrected footprint shows clean ~20 bp dip with bilateral cleavage shoulders.
-
-**Verification:** Always validate footprinting output by checking CTCF first; if CTCF footprint is shallow, the bias correction or depth is the problem, not the biology.
-
-### Nuclear receptors (ER, AR, GR) -- Transient binding
-
-**Trigger:** Glucocorticoid response, hormone-stimulated systems.
-
-**Mechanism:** Steroid receptors bind transiently (residence time minutes vs hours for CTCF); average ATAC sample captures binding probability < 30% per allele.
-
-**Symptom:** Aggregate footprint is shallow or absent despite ChIP-seq peaks at the same sites.
-
-**Fix:** Use scprinter's multi-scale model OR limit to ChIP-validated sites OR pool replicates for higher effective depth. Do not interpret absence of footprint as absence of binding.
-
-### Pioneer TFs (FOXA1, GATA, OCT4) -- Half-site footprint
-
-**Trigger:** Pioneer-factor binding to nucleosomal DNA.
-
-**Mechanism:** Pioneer factors bind one DNA face; the back face is on the histone octamer. Footprint is asymmetric (one side protected, other side accessible).
-
-**Symptom:** Aggregate plot shows asymmetric V; one shoulder is taller than the other.
-
-**Fix:** Use single-stranded scoring; HINT-ATAC has stranded mode. Treat asymmetric footprints as biologically meaningful, not artefactual.
-
-### AP-1 family (FOS, JUN) -- Heterodimer composite footprint
-
-**Trigger:** AP-1 enrichment; the JASPAR motif is composite of multiple heterodimer combinations.
-
-**Mechanism:** Different AP-1 dimers (FOS+JUN, FOS+JUNB, JUNB+JUNB) bind slightly different motifs. JASPAR entries are degenerate; scoring averages over all.
-
-**Fix:** Use specific HOCOMOCO motifs per heterodimer when distinguishing matters. Otherwise accept the composite call.
-
-### ZBTB family / BTB-zinc finger -- Dynamic / unfootprintable
-
-**Trigger:** Footprinting ZBTB16, BCL6, others.
-
-**Mechanism:** Dynamic binding kinetics + cofactor-mediated stabilization mean steady-state occupancy is highly variable. Some ZBTBs simply do not produce reliable ATAC footprints despite genuine ChIP-seq binding.
-
-**Fix:** Document the failure; use ChIP-seq for these TFs. Footprinting cannot rescue everything.
-
-### Forkhead / homeobox (FOX, HOX) -- Short footprint < 8 bp
-
-**Trigger:** Short-motif TFs.
-
-**Mechanism:** Footprint extent matches motif length; <8 bp footprints are at the resolution limit of Tn5 (which has ~4 bp positional uncertainty).
-
-**Fix:** Multi-scale scoring (scprinter); aggregate over thousands of sites; do not rely on per-site calls for short motifs.
-
-## Decision Tree by Goal
-
-| Goal | Recommended pipeline |
-|------|---------------------|
-| Identify all TFs differentially bound between two conditions | TOBIAS ATACorrect (per condition) -> ScoreBigwig -> BINDetect with `--cond_names` |
-| Find the strongest single-TF binding (e.g., CTCF) | TOBIAS PlotAggregate over JASPAR CTCF motif sites; verify V-shape |
-| Per-cell footprinting (scATAC) | scprinter (single-cell mode); avoid TOBIAS unless pseudobulking by cluster |
-| Multi-scale TF activity (handle short and long simultaneously) | scprinter or TOBIAS + custom multi-scale | 
-| Differential nuclear-receptor binding | TOBIAS pooled-replicate footprints + ChIP cross-validation; raw ATAC alone often misses transient binding |
-| Plant / non-model organism | TOBIAS or HINT-ATAC with custom motifs; bias model retrained from genomic background |
-
-## TOBIAS Three-Step Pipeline
-
-**Goal:** Call bound/unbound TF motif sites per condition and detect differential occupancy across two conditions.
-
-**Approach:** Run ATACorrect to subtract Tn5 bias from cleavage counts, ScoreBigwig to compute a continuous per-base footprint score, then BINDetect to anchor footprints to motif positions and produce per-TF differential bound calls with p-values.
-
-```bash
-# Step 1: Bias correction
+# Step 1: bias correction, per condition, same peaks and blacklist
 TOBIAS ATACorrect \
     --bam cond1.bam --genome hg38.fa \
     --peaks consensus.bed --blacklist hg38-blacklist.v2.bed \
     --outdir cond1_corrected/ --cores 16
 
-# Step 2: Per-base footprint scoring (continuous)
+# Step 2: continuous per-base footprint score
 TOBIAS ScoreBigwig \
     --signal cond1_corrected/cond1_corrected.bw \
     --regions consensus.bed \
     --output cond1_footprints.bw \
     --cores 16
 
-# Step 3: Motif-anchored bound/unbound calls + differential
+# Step 3: motif-anchored bound/unbound calls and differential
 TOBIAS BINDetect \
     --motifs JASPAR2024_CORE_vertebrates.pfm \
     --signals cond1_footprints.bw cond2_footprints.bw \
     --genome hg38.fa --peaks consensus.bed \
     --outdir bindetect/ \
-    --cond_names cond1 cond2 \
+    --cond-names cond1 cond2 \
     --cores 16
 ```
 
-BINDetect output columns: `output_prefix`, motif info, condition counts (`cond1_bound`, `cond2_bound`), `cond1_mean_score`, `cond2_mean_score`, `cond1_cond2_change` (differential), `cond1_cond2_pvalue` (one-sided per direction).
+BINDetect reports per-motif bound counts, mean scores, `cond1_cond2_change`, and `cond1_cond2_pvalue`. A positive change with a low p-value means more bound in cond1; a negative change means more bound in cond2. The change is a difference in mean footprint score across motif sites, not a fold-change; there is no formal cutoff, so calibrate against positive controls (observed magnitudes are in the reference). Further interpretation patterns are in the reference.
 
-## Differential Reading
+## Independent second call sets
 
-| BINDetect output | Interpretation |
-|------------------|----------------|
-| `cond1_cond2_change` > 0, low pvalue | TF more bound in cond1 |
-| `cond1_cond2_change` < 0, low pvalue | TF more bound in cond2 |
-| Both `cond1_bound` and `cond2_bound` near 0 | Motif present but no footprint either condition; TF likely not active |
-| `cond1_bound` >> `cond2_bound` but change small | High dynamic range; differential per-site rather than aggregate |
-
-The differential score is the difference in mean footprint score across motif sites, not a fold-change. Magnitudes around 0.1-0.5 are typical for biologically relevant changes (TOBIAS BINDetect tutorials / Bentsen 2020 examples; no formally published cutoff -- calibrate against positive controls in the current dataset).
-
-## Reconciling TOBIAS vs HINT-ATAC
-
-| Pattern | Likely cause | Action |
-|---------|--------------|--------|
-| TOBIAS calls binding, HINT does not | TOBIAS more sensitive; HINT's HMM filters edge calls | Trust if motif is canonical; suspect for novel/weak motifs |
-| HINT calls binding, TOBIAS does not | HINT's HMM occasionally over-segments and reports spurious | Verify by aggregate footprint at the called sites |
-| Both call same TF as differential but opposite directions | Different bias correction model; different bound/unbound thresholds | Re-check ATACorrect output; one bias model may be miscalibrated |
-| Both flat | Library too shallow; chromatin too closed at motif sites | Pool replicates; consider scprinter multi-scale |
-
-**Operational rule:** For high-confidence reporting, require two-tool concordance (TOBIAS + HINT-ATAC OR TOBIAS + ChIP-seq overlap > 50%). Single-tool calls should be reported as exploratory.
-
-## NFR-Filtering Before Footprinting
-
-**Goal:** Restrict footprinting input to nucleosome-free (sub-100 bp) fragments where TF binding signal lives.
-
-**Approach:** Stream the BAM through awk, keep header lines and fragments whose insert size is between -100 and 100 bp, then re-index.
+Both tools take the ATAC BAM directly (paired-end) and need a regions BED; HINT-ATAC also needs RGT data set up once (usage guide).
 
 ```bash
-# Filter to fragments < 100 bp (NFR) -- TF binding lives here, not on nucleosomes
+rgt-hint footprinting --atac-seq --paired-end --organism=hg38 \
+    --output-location hint_out --output-prefix sample reads.bam peaks.bed   # hint_out/sample.bed
+
+wellington_footprints.py -A peaks.bed reads.bam wellington_out/             # -A = ATAC mode; *FDR*.bed files
+```
+
+## scPrinter multi-scale footprints (bulk, GPU advised)
+
+`scripts/scprinter_footprint.py` runs the tested classic route: genome Tn5 bias prediction, fragment import, and `get_footprint_score` at scales 2-100 around each region centre. Each `mode` is a footprint scale in bp (footprint and flank radius default to it); in the tested chr1 slice CTCF separated bound from unbound sites at modes 10-30 but not at 50. Setup pins and the fragment-file recipe are in the usage guide. Compare bound versus unbound motif sites, as with TOBIAS.
+
+## Nucleosome-free fragment filtering
+
+Sub-100 bp fragments carry most TF signal. Filtering sharpens footprints but discards nucleosome-borne information, so keep the unfiltered BAM for other analyses.
+
+```bash
 samtools view -h sample.bam | \
     awk 'substr($0,1,1)=="@" || ($9 > 0 && $9 < 100) || ($9 < 0 && $9 > -100)' | \
     samtools view -b > sample.nfr.bam
 samtools index sample.nfr.bam
-# Use this NFR BAM as input to TOBIAS ATACorrect
 ```
 
-Filtering NFR strengthens footprint signal but discards di-nucleosome-borne information. Keep the unfiltered BAM for nucleosome-positioning analysis.
+## Routed material
 
-## Motif Database Choice
+- Run the two-condition TOBIAS pipeline with per-condition CTCF positive-control plots and a ranked differential summary (|change| among p <= 0.05, `PMAX` to change) through [`scripts/run_tobias.sh`](scripts/run_tobias.sh). Its positional arguments are the two BAMs, peaks, genome FASTA, blacklist, motif file, output directory, and cores. Review input paths and the motif file name before running.
+- Compare two call sets with [`scripts/site_concordance.sh`](scripts/site_concordance.sh) (bound sites, unbound sites, footprints BED).
+- Run bulk scPrinter scoring with [`scripts/scprinter_footprint.py`](scripts/scprinter_footprint.py).
+- Use [`references/method-reference.md`](references/method-reference.md) for the tested-with versions, tool taxonomy, Tn5 bias and alternatives, per-TF failure modes, goal decision table, call-set concordance, motif databases, in silico variant effects, common errors, citations, and related Skills.
+- Use [`references/usage-guide.md`](references/usage-guide.md) for per-tool environments, RGT and scPrinter setup, fragment preparation, and request examples.
 
-| Database | Coverage | Format | Notes |
-|----------|---------|--------|-------|
-| JASPAR 2024 CORE vertebrates | ~880 vertebrate non-redundant motifs (curated, experimentally derived) | JASPAR PFM, MEME, etc. | Default for vertebrate ATAC |
-| HOCOMOCO v12 | ~1443 curated motifs (v12 CORE) | JASPAR PFM | Best for resolving paralogues; provides secondary motif subtypes per TF |
-| CIS-BP 2.0 | ~80,000 motifs across 1000+ species | PWM, .meme | Broadest coverage including non-model species |
-| MEME-CHIP / homer | Custom from peaks | .meme, .motif | When de novo motif needed |
+## License and provenance
 
-JASPAR motifs are conservatively curated; HOCOMOCO is comprehensive for human/mouse with quality scores per motif (A/B/C/D); CIS-BP excels for non-model organisms.
-
-## Common Errors
-
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| Aggregate footprint inverted (peak instead of dip) | No bias correction; or wrong genome FASTA | Run ATACorrect; verify FASTA matches BAM build |
-| BINDetect reports zero bound sites | Default cutoff too stringent; or peakset too narrow | Raise `--bound-pvalue` (default 0.001) and inspect; verify peaks include where binding expected |
-| TOBIAS ATACorrect out of memory | Genome FASTA huge or many cores | Reduce `--cores`; use `samtools faidx` to confirm FASTA index exists |
-| Differential score noisy / random | Per-condition bias correction inconsistent | Re-run ATACorrect with identical peakset and blacklist for each |
-| Empty motif file warning | JASPAR PFM format mismatch | Use `MEME suite` to convert; TOBIAS expects JASPAR format |
-| HINT-ATAC reports many tiny footprints | Default HMM over-segments | Use `--organism` flag explicitly; check `--region-file` is consensus, not raw peaks |
-| Wellington crashes on paired-end ATAC | Wellington was DNase-targeted, single-end model | Use TOBIAS instead, or convert paired-end to cuts-only BED |
-| Per-site footprint is V-shape but aggregate is flat | Mixing strands; some motifs on - strand | Aggregate function should handle strand; verify input motif strand column |
-
-## References
-
-- Buenrostro JD et al 2013 Nat Methods 10:1213 (ATAC-seq protocol)
-- Karabacak Calviello A et al 2019 Genome Biol 20:42 (protocol-specific Tn5/DNase bias modeling for footprinting)
-- Bentsen M et al 2020 Nat Commun 11:4267 (TOBIAS framework, benchmark)
-- Li Z et al 2019 Genome Biol 20:45 (HINT-ATAC)
-- Piper J et al 2013 NAR 41:e201 (Wellington / pyDNase)
-- Sherwood RI et al 2014 Nat Biotechnol 32:171 (PIQ)
-- Hu Y et al 2025 Nature 638:779 (scPrinter/PRINT; multi-scale single-cell footprinting)
-- Martins AL et al 2018 NAR 46:e9 (seqOutBias bias correction alternative)
-- Castro-Mondragon JA et al 2022 NAR 50:D165 (JASPAR 2022, recently 2024)
-- Vorontsov IE et al 2024 NAR 52:D154 (HOCOMOCO v12)
-
-## Related Skills
-
-- atac-seq/atac-peak-calling - Generate input peakset (NFR-only optional)
-- atac-seq/atac-qc - Confirm depth >= 50M before footprinting
-- atac-seq/single-cell-atac - scprinter for single-cell footprinting
-- atac-seq/motif-deviation - Complementary chromVAR for accessibility variability
-- atac-seq/deep-learning-atac - chromBPNet bias correction alternative; in silico variant effect at footprints
-- atac-seq/allele-specific-accessibility - Observed allelic imbalance at TF-bound sites
-- chip-seq/peak-annotation - Cross-validate footprints with ChIP peaks
-- sequence-manipulation/motif-search - Underlying motif scanning patterns
-- gene-regulatory-networks/scenic-regulons - Downstream regulatory network inference
+This derived Skill retains GPTomics/bioSkills material by Domen Jemec, from commit `d91ed3d563019e649dc854c56ccd62551359488a`. See [`LICENSE`](LICENSE) for the preserved MIT notice.

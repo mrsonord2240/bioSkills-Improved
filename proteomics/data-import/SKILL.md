@@ -1,6 +1,5 @@
 ---
 name: bio-proteomics-data-import
-category: Data Analysis
 description: Loads mass-spectrometry data into Python/R and strips the search engine's bookkeeping before any number is trusted -- removes decoys (REV__/Reverse), contaminants (CON__/Potential contaminant), Only-identified-by-site groups, and resolves semicolon razor/leading protein-ID ambiguity in MaxQuant proteinGroups.txt, DIA-NN report.parquet, and mzML/mzXML. Distinguishes Intensity (raw) vs LFQ intensity (MaxLFQ) vs iBAQ, treats a MaxQuant zero as missing (NaN, not log2(-inf)), and diagnoses the missingness contract (intensity-dependent in both DDA and DIA; DIA has fewer missing values). Use when starting an analysis from raw spectra or a search engine output. Downstream normalization and stats are differential-abundance; reporter-ion/MaxLFQ quant is quantification; protein grouping is protein-inference.
 tool_type: mixed
 primary_tool: pyOpenMS
@@ -295,6 +294,7 @@ def assess_missingness(matrix, sample_cols):
 | NaN gene labels break a merge | `Gene names` is a semicolon list, sometimes blank | `.where(notna(), '').str.split(';').str[0]` |
 | Ratios track loading not biology | Read `Intensity` (raw) instead of `LFQ intensity` | Use `LFQ intensity` for between-sample comparison |
 | `get_peaks()` unpacking error | Expecting a 2D array | It returns a tuple `(mz, intensity)` of two numpy arrays |
+| Correct QFeatures summary followed by Windows exit `3221225477` / `0xC0000005` | A native Windows dependency can crash during process teardown; one reproduced case was `cli.dll` in `cli__kill_thread`, after the analysis had finished | Treat the nonzero exit as failure. Reinstall/update `cli` in a clean R library, or run the same script in WSL/Linux; confirm a zero exit code rather than relying on printed output |
 
 ## References
 

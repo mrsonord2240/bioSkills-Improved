@@ -7,8 +7,10 @@ PCA, t-SNE, UMAP, and PHATE are the four standard methods for projecting high-di
 ## Prerequisites
 
 ```bash
-pip install scanpy umap-learn openTSNE phate scikit-learn matplotlib
+pip install scanpy umap-learn openTSNE phate scikit-learn matplotlib scikit-misc igraph
 ```
+
+The shipped `examples/embedding_phd.py` expects an `.h5ad` with raw, non-negative integer counts in `X`, at least 100 cells and 2,000 genes, and `obs['condition']`. `obs['pseudotime']` is optional. It uses Scanpy's igraph Leiden flavor, so it does not require the separate `leidenalg` Python package.
 
 ```r
 install.packages(c('Rtsne', 'uwot', 'PCAtools', 'phateR'))
@@ -20,7 +22,7 @@ BiocManager::install(c('PCAtools', 'DESeq2'))
 Tell your AI agent what you want to do:
 - "Make a PCA plot of bulk RNA-seq for sample QC, colored by condition and shaped by batch"
 - "Compute UMAP from scanpy AnnData using n_neighbors=30, min_dist=0.3, random_state=42"
-- "Run t-SNE with Kobak-Berens defaults: PCA init, perplexity 30, learning_rate n/12"
+- "Run openTSNE with an explicit PCA init, perplexity 30, auto learning rate, and random_state 42"
 - "Plot PHATE for trajectory display instead of UMAP"
 - "Annotate PCA axes with variance explained percentages"
 - "Show loadings as arrows on PC1 vs PC2"
@@ -37,7 +39,7 @@ Tell your AI agent what you want to do:
 
 ### Kobak-Berens t-SNE
 
-> "Run openTSNE with PCA initialization, perplexity=30, learning_rate=n/12. Plot the embedding colored by cluster assignment."
+> "Run openTSNE with PCA initialization, perplexity=30, learning_rate='auto', and random_state=42. Plot the embedding colored by cluster assignment."
 
 ### PHATE for trajectory
 
@@ -50,7 +52,7 @@ Tell your AI agent what you want to do:
 ## What the Agent Will Do
 
 1. Decide method: PCA for variance-explained QC; UMAP for cluster overview; t-SNE if cluster boundaries are critical; PHATE for continuous trajectories.
-2. Pre-process input: normalize, log-transform, scale (for PCA); compute PCA(50) before t-SNE/UMAP for single-cell.
+2. Pre-process input: normalize library size, log-transform, then scale; compute PCA(50) before t-SNE/UMAP for single-cell. Run `seurat_v3` HVG selection on raw counts, before normalization.
 3. Set explicit hyperparameters: perplexity / n_neighbors / min_dist / random_state.
 4. Fit the projection with a fixed seed for reproducibility.
 5. Plot with axis labels: PCA shows variance %; UMAP/t-SNE/PHATE label only "UMAP1 / UMAP2" (no units).
@@ -58,31 +60,9 @@ Tell your AI agent what you want to do:
 7. Annotate with cluster labels on-plot OR via legend depending on cluster count.
 8. State in caption: hyperparameters used; embedding's interpretation limit.
 
-## Tips
+## Implementation Notes
 
-- **2D embeddings lose >95% of high-dim geometry** (Chari-Pachter 2023). Distance between clusters is NOT meaningful. Density within clusters is dominated by `min_dist`, not biology. State this limit in the caption.
-
-- **Always set `random_state`** (umap-learn, sklearn) or `seed=` (uwot, Rtsne). Without it, layouts vary across runs.
-
-- **For t-SNE, use Kobak-Berens defaults**: `init='pca'`, perplexity 30, learning_rate = n/12. Default learning_rate=200 over-shrinks large data.
-
-- **Always label PCA axes with variance explained**: `PC1 (45%) PC2 (12%)`. Without this, "clusters" at PC1=4%, PC2=3% may be noise.
-
-- **PC1 = library size is the canonical pre-processing failure.** Use `vst()` / `rlog()` (DESeq2) or `log + scale` before PCA.
-
-- **`n_neighbors` controls local-vs-global trade-off in UMAP.** Small (5-10) = fragmented; large (50+) = merged. 15-30 is standard.
-
-- **`min_dist` controls tightness, NOT cluster membership.** Smaller = denser; does not change which cells cluster together.
-
-- **Do not interpret cluster shape.** UMAP/t-SNE cluster shape is an embedding artifact, not biology. Cluster membership is the biological observation.
-
-- **Loadings only exist for PCA.** UMAP/t-SNE have no loadings; "what gene drives the axis" requires PCA.
-
-- **scanpy save trap**: `sc.pl.umap(save='_x.pdf')` writes to `sc.settings.figdir + 'umap_x.pdf'`, not cwd. Default DPI 150 - set 300+ for publication.
-
-- **Trajectory claims require validation.** Don't infer trajectories from UMAP "gaps." Use RNA velocity, diffusion pseudotime, or PHATE - and validate against orthogonal markers.
-
-- **Batch correction MUST precede UMAP.** UMAP preserves local neighborhoods and can hide batch effects that PCA exposes. Diagnose batch in PCA; correct upstream; then UMAP.
+All thresholds, method-specific recipes, failure modes, seed semantics, output-path guidance, and interpretation limits live in `SKILL.md`. Its **Reference Files** section links the runnable comparison and the neighborhood/batch validation procedure; use those instead of duplicating the rules here.
 
 ## Related Skills
 

@@ -3,268 +3,153 @@ name: bio-data-visualization-statistical-annotation
 description: Add p-value brackets, significance asterisks, and effect-size annotations to distribution plots using ggpubr, ggsignif, and statannotations with correct test selection (parametric vs non-parametric vs paired), multiple-testing adjustment, and rendering of negative results. Use when a boxplot/violin/raincloud needs in-figure statistical comparisons between groups.
 tool_type: mixed
 primary_tool: ggpubr
-license: MIT
-author: GPTomics
 ---
-
-## Version Compatibility
-
-Reference examples tested with: ggpubr 0.6+, ggsignif 0.6+, rstatix 0.7+, statannotations 0.6+ (Python), seaborn 0.13+.
-
-Before using code patterns, verify installed versions match. If versions differ:
-- R: `packageVersion('<pkg>')` then `?function_name`
-- Python: `pip show <package>` then `help(module.function)` to check signatures
-
-If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
 
 # Statistical Annotation
 
-**"Add p-values to my plot"** -> Render pairwise group comparisons as brackets with the correct statistical test (parametric vs non-parametric, paired vs unpaired, independent vs nested), adjusted for multiple testing, with rendering of significance as either numerical p OR asterisks. The choices that matter: which test is appropriate for the data, what multiple-testing adjustment applies, and whether to show n.s. (non-significant) results.
+Render pre-specified group comparisons as brackets with the statistical test that matches the design, adjust the intended comparison family, and report an effect size alongside the p-value. The bracket is only presentation; compute and validate the statistics before drawing it.
 
-- R: `ggpubr::stat_compare_means`, `ggsignif::geom_signif`, `rstatix::t_test`/`wilcox_test`
-- Python: `statannotations.Annotator`, `scipy.stats` directly
+## Version Compatibility and Installation
 
-## The Single Most Important Modern Insight -- The Test Must Match the Data
-
-Tool defaults are NOT data-appropriate. `ggpubr::stat_compare_means(method='t.test')` uses Welch's two-sample t-test assuming approximate normality and unequal variances. This is wrong when:
-
-1. **Data are non-normal and N is small (<30):** use Mann-Whitney U (`method='wilcox.test'`).
-2. **Data are paired:** use paired t-test or paired Wilcoxon (`paired = TRUE`).
-3. **Comparing >2 groups:** ANOVA / Kruskal-Wallis with post-hoc, not all-pairs t-test (multiple-testing penalty).
-4. **Data are nested (cells within patients, replicates within samples):** linear mixed model, NOT pairwise test.
-
-The bracket-and-asterisk visual is the same; the underlying statistics are not. Choose the test deliberately.
-
-## Decision Tree for Test Selection
-
-| Question | Recommended test | Function |
-|----------|------------------|----------|
-| 2 unpaired groups, normal, N≥30 | Welch t-test | `t.test()`, `stat_compare_means(method='t.test')` |
-| 2 unpaired groups, non-normal or small N | Mann-Whitney U (Wilcoxon rank-sum) | `wilcox.test()`, `stat_compare_means(method='wilcox.test')` |
-| 2 paired groups | Paired t-test OR Wilcoxon signed-rank | `paired = TRUE` |
-| 3+ groups, normal | One-way ANOVA + Tukey HSD post-hoc | `aov()`, `TukeyHSD()` |
-| 3+ groups, non-normal | Kruskal-Wallis + Dunn post-hoc | `kruskal.test()`, `dunn.test()` |
-| Nested data (cells in patients) | Linear mixed model | `lme4::lmer()` |
-| Time-course / repeated measures | Repeated-measures ANOVA OR LMM | `nlme::lme()` |
-| Two-way factorial | Two-way ANOVA + interaction term | `aov(y ~ a*b)` |
-| Survival / time-to-event | Log-rank, NOT t-test | `survdiff()` |
-| Categorical outcome | Chi-square OR Fisher exact | `chisq.test()`, `fisher.test()` |
-
-## Multiple Testing Adjustment
-
-For pairwise comparisons among K groups, there are K(K-1)/2 unadjusted p-values. Without adjustment, family-wise error rate inflates rapidly:
-- 3 groups: 3 comparisons; α_FW = 14% at nominal 5%
-- 4 groups: 6 comparisons; α_FW = 26%
-- 6 groups: 15 comparisons; α_FW = 54%
+The workflows were executed with R 4.4.3, ggpubr 1.0.0, ggsignif 0.6.4, rstatix 1.1.0, lme4 2.0.1, emmeans 2.0.3, Python 3.12, statannotations 0.7.2, seaborn 0.13.2, scipy 1.18.1, and statsmodels 0.15.0.
 
 ```r
-# rstatix supports per-comparison adjustment
-library(rstatix)
-df %>%
-    pairwise_wilcox_test(value ~ group, p.adjust.method = 'bonferroni') %>%
-    add_xy_position(x = 'group')
+install.packages(c('ggplot2', 'ggpubr', 'ggsignif', 'rstatix', 'dplyr', 'tidyr', 'lme4', 'emmeans'))
 ```
 
-`p.adjust.method` options:
-- `'bonferroni'` — strictest; controls FWER
-- `'holm'` — stepwise Bonferroni; uniformly more powerful than Bonferroni
-- `'BH'` (Benjamini-Hochberg) — FDR; less strict than FWER; standard for genomics
-- `'fdr'` — alias for BH
+```bash
+pip install statannotations seaborn scipy statsmodels pandas matplotlib
+```
 
-For figure annotations, **holm** is the modern default — controls FWER and is more powerful than bonferroni. For a small number of pre-planned comparisons (≤3), Bonferroni is fine.
+When versions differ, inspect `packageVersion()` / `?function_name` in R or `pip show` / `help()` in Python. Do not retry an incompatible call unchanged.
 
-## ggpubr -- Standard ggplot2 Workflow
+## Choose the Test from the Design
 
-**Goal:** Add per-comparison p-value brackets between groups on a distribution plot, using a test appropriate to data shape and adjusting for multiple comparisons.
+Do not trust a plotting helper to infer the design. In ggpubr 1.0.0, `stat_compare_means()` defaults to Wilcoxon for two groups and Kruskal-Wallis for more than two; neither default discovers pairing, nesting, repeated measures, or a planned parametric analysis.
 
-**Approach:** Build the base plot with `ggboxplot()`; add `stat_compare_means()` with explicit `method`, `comparisons`, `p.adjust.method`, and `label` arguments; render as asterisks (`p.signif`) for terse display or numeric (`p.format`) for precise display.
+| Design | Recommended test | Runnable route |
+|---|---|---|
+| 2 unpaired groups, approximately normal | Welch t-test | R `t.test()` / ggpubr `method='t.test'`; Python statannotations `t-test_welch` |
+| 2 unpaired groups, skewed or small N | Mann-Whitney / Wilcoxon rank-sum | R `wilcox.test()`; Python `Mann-Whitney` |
+| 2 paired groups | Paired t or Wilcoxon signed-rank | `scripts/annotate_paired.R` or `.py`; both validate subject IDs first |
+| 3+ groups, approximately normal | ANOVA then Tukey HSD | `scripts/annotate_pairwise.R ... tukey tukey` |
+| 3+ groups, non-normal | Kruskal-Wallis then Dunn | `scripts/annotate_pairwise.R ... dunn holm` |
+| Nested observations | Linear mixed model, then model-based contrasts | `scripts/annotate_nested.R` |
+| Time-course / repeated measures | Repeated-measures model or LMM | `nlme::lme()` / mixed model |
+| Two-way factorial | Factorial model with interaction | `aov(y ~ a*b)` or an appropriate mixed model |
+| Survival / time-to-event | Log-rank or survival model | `survival::survdiff()`; not a t-test |
+| Categorical outcome | Chi-square or Fisher exact | `chisq.test()` / `fisher.test()` |
+
+Normality pre-testing alone is a weak selector: Shapiro-Wilk has little power at small N and flags negligible departures at large N. Use the sampling design, distribution shape, residual diagnostics, robustness needs, and domain assumptions together.
+
+## Adjust the Intended Comparison Family
+
+For all pairwise comparisons among K groups there are K(K-1)/2 tests. At nominal 0.05, the probability of at least one false positive is about 14% for 3 groups, 26% for 4, and 54% for 6 under independence.
+
+- `holm`: default for family-wise error control; uniformly at least as powerful as Bonferroni.
+- `bonferroni`: simple, conservative family-wise control.
+- `BH` / `fdr`: false-discovery-rate control, commonly used for larger genomic families.
+
+The family is the comparisons actually passed to the correction routine. If only two selected pairs are supplied, the correction uses two tests, not every possible pair. Define the scientific family before filtering results, pass all of it together, and state it in the caption.
+
+## R: Adjust First, Then Annotate
+
+Use the runnable workflow (Wilcoxon is the default mode):
+
+```bash
+Rscript scripts/annotate_pairwise.R data.csv annotated.png wilcox holm
+```
+
+The script requires `group,value`, computes `pairwise_wilcox_test(..., p.adjust.method='holm')`, independently checks its adjusted values with `p.adjust`, adds bracket positions, and writes both the figure and a `*.results.csv` table. The table includes the test, raw and adjusted p-values, adjustment, family size, `effect_type`, and signed `effect_size`; rank-based modes use rank-biserial r and Tukey mode uses Hedges' g, with positive values meaning the first named group tends higher. Use mode `dunn` after Kruskal-Wallis. Use mode `tukey` with adjustment label `tukey` after ANOVA; it runs `rstatix::tukey_hsd()` and uses Tukey's simultaneous adjustment, not Holm, before `stat_pvalue_manual()`.
+
+Bracket spacing is derived from the family size and the y scale is expanded above the omnibus label. For a specific layout, pass a positive spacing fraction as the fifth argument, for example `... wilcox holm 0.16`. When a full family is still too dense, keep the complete results table but use comparison facets or a compact-letter display for the family-wide result instead of forcing every bracket into one panel; state that the alternate view does not show exact per-pair p-values or effects.
+
+Do not use this pattern for adjusted pairwise labels:
 
 ```r
-library(ggpubr)
-
-# Default boxplot + p-value bracket(s)
-ggboxplot(df, x = 'group', y = 'value', color = 'group',
-          add = 'jitter', palette = 'npg') +
-    stat_compare_means(method = 'wilcox.test',           # explicit; default is t-test
-                       comparisons = list(c('Control', 'Treatment'),
-                                          c('Control', 'Vehicle'),
-                                          c('Treatment', 'Vehicle')),
-                       label = 'p.signif',               # 'p.signif' for asterisks; 'p.format' for numeric
-                       p.adjust.method = 'holm',
-                       method.args = list(alternative = 'two.sided'))
+stat_compare_means(comparisons = pairs, p.adjust.method = 'holm')
 ```
 
-For an overall test plus pairwise:
+In ggpubr 1.0.0, `p.adjust.method` is not a formal argument of `stat_compare_means()`, and the `comparisons=` route displays unadjusted pairwise p-values. `stat_compare_means()` remains suitable for a single overall Kruskal-Wallis or ANOVA label. Alternatively, `ggpubr::geom_pwc(method='wilcox_test', p.adjust.method='holm', label='p.adj.signif')` performs adjusted pairwise annotation.
+
+For ggsignif, compute the adjusted labels first and pass them manually; `test=` computes raw per-pair tests:
 
 ```r
-# Overall + per-comparison
-ggboxplot(df, x = 'group', y = 'value', color = 'group') +
-    stat_compare_means(method = 'kruskal.test',          # overall test
-                       label.y = 1.05 * max(df$value)) +
-    stat_compare_means(comparisons = pairs,
-                       method = 'wilcox.test',
-                       p.adjust.method = 'holm',
-                       label = 'p.signif')
+geom_signif(comparisons = pairs,
+            annotations = stat_test$p.adj.signif,
+            y_position = stat_test$y.position)
 ```
 
-## ggsignif -- Lighter Alternative
+With `map_signif_level=TRUE`, ggsignif 0.6.4 uses `***`, `**`, `*`, and `NS.` rather than ggpubr's four-star / `ns` convention.
 
-```r
-library(ggsignif)
-ggplot(df, aes(group, value, fill = group)) +
-    geom_boxplot() +
-    geom_signif(comparisons = list(c('Control', 'Treatment')),
-                test = 'wilcox.test',
-                map_signif_level = TRUE,                  # asterisks vs numeric p
-                step_increase = 0.1) +
-    scale_fill_manual(values = c('#0072B2', '#D55E00'))
+## Python: Supply Adjusted Values Explicitly
+
+```bash
+python scripts/annotate_pairwise.py data.csv annotated.png holm
 ```
 
-`map_signif_level = TRUE` converts p-values to asterisks per Wasserstein-Lazar 2016 convention:
-- `***` p < 0.001
-- `**` p < 0.01
-- `*` p < 0.05
-- `ns` p ≥ 0.05
+The script computes Mann-Whitney p-values and signed rank-biserial r values with SciPy, adjusts the whole family with `statsmodels.stats.multitest.multipletests`, supplies those adjusted values through `Annotator.set_pvalues()` before `annotate()`, and persists `effect_type` plus `effect_size` with the p-value fields.
 
-For literal p-values, set `FALSE`.
+In statannotations 0.7.2, `comparisons_correction='holm'` and `'BH'` are type-1 corrections: they can append a significance-loss suffix, but the displayed number or stars remain based on raw p-values. Do not present those labels as adjusted. Supplying adjusted p-values explicitly works; the built-in `bonferroni` route also rewrites p-values.
 
-## statannotations (Python)
+`t-test_ind` is Student's independent t-test. Use `t-test_welch` for Welch's unequal-variance test. R may use an exact Wilcoxon calculation where SciPy selects an asymptotic calculation, so cross-language figures can differ slightly unless the same algorithm is requested explicitly.
 
-```python
-import seaborn as sns
-from statannotations.Annotator import Annotator
+## Paired Data: Validate IDs Before Testing
 
-ax = sns.boxplot(x='group', y='value', data=df, palette=['#0072B2', '#D55E00', '#009E73'])
+Both rstatix paired tests and statannotations paired tests pair values by row order; they do not accept a subject-ID key. Sorting without checking completeness is insufficient. The paired scripts reject duplicate subject/time rows, require the same ID set in both levels, reshape by `subject_id`, and only then test and plot:
 
-pairs = [('Control', 'Treatment'),
-         ('Control', 'Vehicle'),
-         ('Treatment', 'Vehicle')]
-
-annotator = Annotator(ax, pairs, data=df, x='group', y='value')
-annotator.configure(test='Mann-Whitney',                    # 't-test_ind', 't-test_paired', 'Wilcoxon', etc
-                    comparisons_correction='holm',
-                    text_format='star',                     # 'star', 'simple', 'full'
-                    line_height=0.02,
-                    text_offset=0.5)
-annotator.apply_and_annotate()
+```bash
+Rscript scripts/annotate_paired.R paired.csv paired.png holm
+python scripts/annotate_paired.py paired.csv paired-python.png holm
 ```
 
-## Per-Method Failure Modes
+Inputs require `subject_id,time,value`. The R figure uses `ggpaired(id='subject_id')`; the Python figure draws subject trajectories and annotates the independently computed paired p-value.
 
-### Default t-test on non-normal data
+## Nested Data: Put the Model-Based Contrast on the Figure
 
-**Trigger:** `stat_compare_means(method='t.test')` (default) on log-distributed expression.
+Cells or technical replicates are not independent biological replicates. The nested workflow requires `group,subject_id,value`, verifies each subject belongs to one group, fits `lmer(value ~ group + (1|subject_id))`, derives Holm-adjusted `emmeans` contrasts, and passes those p-values to `stat_pvalue_manual()`:
 
-**Mechanism:** t-test assumes approximate normality; non-normal data with small N inflates Type-I.
+```bash
+Rscript scripts/annotate_nested.R nested.csv nested.png holm
+```
 
-**Symptom:** Significant p where rank test gives p > 0.05.
+`summary(lme4::lmer(...))` alone has no fixed-effect p-value column. Use model-based contrasts such as `emmeans`, or aggregate to one pre-specified summary per biological replicate and test those independent summaries.
 
-**Fix:** Switch to `method='wilcox.test'` for non-normal or small-N data. Verify normality with Shapiro-Wilk if borderline.
+## Labels, Exact Values, and Effect Sizes
 
-### Pairwise tests without adjustment
+For ggpubr 1.0.0 and statannotations 0.7.2, the default star bins are inclusive at the boundary: `****` for p <= 1e-4, `***` for p <= 0.001, `**` for p <= 0.01, `*` for p <= 0.05, and `ns` otherwise. ggsignif's default mapping differs as noted above. Treat stars as a display convention, not a substitute for exact adjusted p-values.
 
-**Trigger:** Multiple bracket annotations with raw p-values.
+ggpubr `label='p.format'` prints formatted values and may print `p < 2e-16` for extremely small p-values. Preserve a results table with the test, effect type and signed effect size, raw p, adjusted p, adjustment method, and comparison-family size. The default R and Python pairwise scripts implement this contract; paired and model-based workflows may require design-specific magnitudes rather than reusing an independent-groups effect.
 
-**Mechanism:** K(K-1)/2 comparisons inflate FWER without adjustment.
+Report magnitude alongside significance:
 
-**Symptom:** All-pairwise significant at nominal 0.05; doesn't replicate.
+- Cohen's d for a normal-location comparison.
+- Rank-biserial r, computed from Mann-Whitney U as `2U/(n1*n2) - 1` in the shipped pairwise scripts; this is not Cliff's delta.
+- Cliff's delta only when it was actually computed as Cliff's delta.
+- A median difference and confidence interval when that is easier to interpret.
 
-**Fix:** `p.adjust.method = 'holm'` (or 'bonferroni' or 'BH'). Document choice.
+## Failure Modes
 
-### Paired data tested as independent
-
-**Trigger:** Before/after measurements in same subjects, tested with unpaired t-test.
-
-**Mechanism:** Ignores within-subject correlation; loses power.
-
-**Symptom:** Non-significant p where paired test gives significant.
-
-**Fix:** `paired = TRUE` (R) or `t-test_paired` (statannotations). Verify subjects are correctly matched.
-
-### Nested data tested with pairwise t
-
-**Trigger:** Hundreds of cells per patient, tested as if each cell is independent.
-
-**Mechanism:** Pseudoreplication — within-patient correlation ignored; p-values dramatically over-significant.
-
-**Symptom:** p < 1e-50 from a dataset where the actual N is ~10 patients.
-
-**Fix:** Linear mixed model (`lme4::lmer(value ~ group + (1|patient_id))`); aggregate to per-patient median first; or pseudobulk.
-
-### Asterisks shown but p-values not reported anywhere
-
-**Trigger:** `label = 'p.signif'` exclusively.
-
-**Mechanism:** Reader cannot recover the actual p-value.
-
-**Symptom:** Reviewer asks for exact p; not in figure or supplementary.
-
-**Fix:** Either show numeric p (`label = 'p.format'`) or include test results table in supplementary.
-
-### n.s. annotation hidden
-
-**Trigger:** Showing only significant brackets, omitting non-significant.
-
-**Mechanism:** Selective reporting biases interpretation.
-
-**Symptom:** Reader assumes untested pairs were significant.
-
-**Fix:** Either annotate all comparisons (with n.s. for non-significant) OR pre-specify which pairs are tested in the legend/caption.
-
-### Reading effect size from p-value
-
-**Trigger:** Conclusion "highly significant difference" from p = 1e-10 on a tiny effect.
-
-**Mechanism:** Large N inflates significance for trivial differences.
-
-**Symptom:** Effect size negligible despite extreme p.
-
-**Fix:** Always report effect size (Cohen's d, Cliff's delta, median difference with CI) alongside p. The bracket should convey direction AND magnitude, not just significance.
-
-## Reconciliation: When Tests Disagree
-
-| Pattern | Cause | Action |
-|---------|-------|--------|
-| t-test significant; Wilcoxon n.s. | Outliers driving t-test; rank test robust | Trust Wilcoxon for non-normal data |
-| Unpaired n.s.; paired significant | Within-subject correlation matters | Use paired if subjects are matched |
-| Pairwise all-significant; ANOVA n.s. | Multiple-testing inflation in pairwise | ANOVA / Kruskal-Wallis is the overall test; pairwise post-hoc only after omnibus significant |
-| Pseudo-replicated p < 1e-50; LMM p = 0.1 | Pseudoreplication | LMM is correct; pseudo-replicated p is meaningless |
-| Bonferroni-adjusted n.s.; raw p < 0.05 | Adjustment correctly identified borderline | Trust adjusted; document the test family |
-
-## Quantitative Thresholds
-
-| Threshold | Value | Source |
-|-----------|-------|--------|
-| α for FWER control | 0.05 family-wise | Standard |
-| α for FDR control | 0.05 expected FDR (BH) | Benjamini-Hochberg 1995 |
-| Asterisk convention | * <0.05, ** <0.01, *** <0.001 | Common practice |
-| Bonferroni cutoff | 0.05 / K(K-1)/2 | Standard |
-| Holm step-down | better than Bonferroni for all K | Holm 1979 |
-| FDR (BH) | less strict than FWER | Genomics standard |
-
-## Common Errors
-
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| Reviewer asks "why t-test?" | Default not justified | Pre-justify test choice |
-| Many pairwise-significant; doesn't replicate | No multiple-testing adjustment | Holm or BH |
-| Effect "highly significant" but tiny | Large N inflates p | Report effect size |
-| Asterisks only; no p-values | `label = 'p.signif'` exclusively | Show p.format OR provide table |
-| Pseudoreplication inflated p | Cells treated as independent | LMM or pseudobulk |
-| n.s. comparisons hidden | Selective reporting | Annotate all pre-specified pairs |
-| Numeric p truncated to '<2.22e-16' | R default precision | Manual formatting or report as `< 2e-16` |
+| Symptom | Cause | Fix |
+|---|---|---|
+| t-test and rank test disagree on skewed small-N data | `method='t.test'` was chosen without checking assumptions | Choose deliberately from design, shape, diagnostics, and robustness needs |
+| Raw pairwise stars survive but adjusted p-values do not | Annotation helper displayed raw p | Compute the family once, adjust, then supply `p.adj` / adjusted values |
+| Paired plot lines look right but p-value changes after row shuffle | Test paired by row order | Validate identical ID sets and reshape by ID before testing |
+| Cell-level p is extreme but patient-level/model p is null | Pseudoreplication | LMM/cluster-aware method or one pre-specified summary per replicate |
+| Bracket pyramid omits null comparisons | Selective display | Show all pre-specified comparisons or name the tested subset in the caption |
+| Tiny effect has an extreme p at large N | Significance is not magnitude | Report effect size and uncertainty |
+| Asterisks have no recoverable value | Exact results were discarded | Save a results table or show formatted adjusted p-values |
 
 ## References
 
-- Benjamini Y, Hochberg Y. 1995. Controlling the false discovery rate: a practical and powerful approach to multiple testing. *J R Stat Soc B* 57:289-300.
-- Dunn OJ. 1964. Multiple comparisons using rank sums. *Technometrics* 6(3):241-252.
-- Holm S. 1979. A simple sequentially rejective multiple test procedure. *Scand J Stat* 6(2):65-70.
-- Kassambara A. 2020. *Practical Statistics in R for Comparing Groups: Numerical Variables.* (ggpubr / rstatix tutorial).
-- Wasserstein RL, Lazar NA. 2016. The ASA's statement on p-values: context, process, and purpose. *Am Stat* 70(2):129-133.
+- Benjamini Y, Hochberg Y. 1995. Controlling the false discovery rate. *J R Stat Soc B* 57:289-300.
+- Dunn OJ. 1964. Multiple comparisons using rank sums. *Technometrics* 6:241-252.
+- Holm S. 1979. A simple sequentially rejective multiple test procedure. *Scand J Stat* 6:65-70.
+- Wasserstein RL, Lazar NA. 2016. The ASA's statement on p-values. *Am Stat* 70:129-133.
 
 ## Related Skills
 
-- data-visualization/distribution-plots - Underlying box/violin/raincloud
-- clinical-biostatistics/categorical-tests - Chi-square / Fisher tests for categorical outcomes
-- clinical-biostatistics/effect-measures - Effect size to report alongside p
-- experimental-design/multiple-testing - Methods for controlling FWER and FDR
+- data-visualization/distribution-plots - underlying box/violin/raincloud plots
+- clinical-biostatistics/categorical-tests - categorical outcomes
+- clinical-biostatistics/effect-measures - effect sizes and uncertainty
+- experimental-design/multiple-testing - choosing and documenting error control

@@ -4,13 +4,11 @@ description: Select colormaps and qualitative palettes for scientific figures us
 tool_type: mixed
 primary_tool: viridis
 goal_approach_exempt: true
-license: MIT
-author: GPTomics
 ---
 
 ## Version Compatibility
 
-Reference examples tested with: viridis 0.6+, RColorBrewer 1.1+, scico 1.5+ (Crameri colormaps in R), khroma 1.12+ (Tol/Crameri palettes in R), matplotlib 3.8+, colorcet 3.0+, ggsci 3.0+, colorspace 2.1+.
+Examples were checked with viridis 0.6.5, RColorBrewer 1.1.3, scico 1.5.0, ggsci 5.2.0, colorspace 2.1.2, matplotlib 3.11.2, cmcrameri 1.10, and colorspacious 1.1.2.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
@@ -20,113 +18,114 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 
 # Color Palettes for Scientific Visualization
 
-**"Pick a color palette"** -> Choose a colormap that (a) is perceptually uniform along the relevant data axis, (b) remains interpretable under common color-vision deficiencies, (c) prints correctly to grayscale, and (d) matches the data type — sequential, diverging, cyclic, or qualitative.
+**"Pick a color palette"** -> Choose a colormap that (a) is perceptually uniform along the relevant data axis, (b) remains interpretable under common color-vision deficiencies, (c) prints correctly to grayscale, and (d) matches the data type: sequential, diverging, cyclic, or qualitative.
 
-- R: `viridis::viridis`, `scico::scale_color_scico`, `khroma::color`, `RColorBrewer::brewer.pal`
-- Python: `matplotlib.colormaps`, `colorcet`, `seaborn.color_palette`, `cmcrameri.cm`
+- R: `viridis::viridis`, `scico::scale_color_scico`, `RColorBrewer::brewer.pal`
+- Python: `matplotlib.colormaps`, `seaborn.color_palette`, `cmcrameri.cm`
 
 ## The Three Modern Standards
 
 1. **Perceptual uniformity** -- equal data steps produce equal perceived color steps. viridis (van der Walt 2015), cividis (Nuñez 2018), and the Crameri family (batlow, roma, vik) are designed for this. Jet, rainbow, and red->green are not.
 
-2. **Color vision deficiency safety** -- ~6% of males have deuteranopia / protanopia (red-green deficiency). cividis was explicitly designed to be near-identical under normal and CVD viewing (Nuñez 2018 *PLOS ONE* 13:e0199239). The Okabe-Ito 8-color qualitative palette (popularized in Wong 2011 *Nat Methods* 8:441) is the CVD-safe categorical default.
+2. **Color vision deficiency (CVD) safety** -- ~6% of males have deuteranopia or protanopia (red-green deficiency). cividis was explicitly designed for CVD viewing (Nuñez 2018, *PLOS ONE* 13:e0199239). The Okabe-Ito qualitative palette (popularized in Wong 2011, *Nat Methods* 8:441) is the CVD-safe categorical default.
 
-3. **Grayscale monotonicity** -- a perceptually-uniform sequential colormap has monotonically increasing luminance. Convert the figure to grayscale; if the order is still readable, the colormap is luminance-monotonic. This is the single most actionable test.
+3. **Grayscale monotonicity** -- a perceptually uniform sequential colormap has monotonically changing luminance. Desaturate the actual palette; if its order remains readable, it is luminance-monotonic. This is not a substitute for CVD simulation.
 
 ## Palette Type by Data Type
 
 | Data type | Use | Avoid |
 |-----------|-----|-------|
 | Sequential (expression, coverage, density) | viridis, magma, cividis, batlow, lipari | jet, rainbow, hsv |
-| Diverging (log fold change, z-score, signed correlation) | vik, roma, RdBu, BrBG, PiYG | jet, rainbow |
-| Cyclic (phase, time-of-day, angle) | romaO, vikO, twilight | linear sequential (wrap creates artifactual jump) |
-| Categorical (≤8 groups) | Okabe-Ito (Wong 2011), Tol bright, Dark2 | rainbow with N=20, Set1 if CVD matters |
-| Categorical (9-20 groups) | tab20, Paired, Polychrome | too-many categorical hues -- consider faceting |
-| Categorical (>20) | None -- reconsider design | More colors will not help |
+| Diverging (log fold change, z-score, signed correlation) | vik, roma, RdBu, BrBG, PiYG; use symmetric limits | jet, rainbow |
+| Cyclic (phase, time-of-day, angle) | romaO, vikO, twilight | linear sequential (wrap creates an artifactual jump) |
+| Categorical (≤8 groups) | Named Okabe-Ito mapping | unnamed vectors; Set1 if CVD matters |
+| Categorical (9-20 groups) | No single palette is CVD-safe; pair color with shape, direct labels, or facets | relying on hue alone |
+| Categorical (>20) | Reconsider the design | adding more colors |
 
 ## The Crameri Scientific Colormaps
 
-Crameri 2020 *Nat Commun* 11:5444 documented the prevalence of misleading palettes (rainbow, red-green) across published science and released a family of perceptually-uniform CVD-safe colormaps via Zenodo (doi:10.5281/zenodo.8409685). Key entries:
+Crameri 2020 *Nat Commun* 11:5444 documented the prevalence of misleading palettes and released perceptually uniform scientific colormaps. Centres below were measured from 255 colors with scico 1.5.0; exact hexes can vary by implementation and sample count.
 
-| Crameri name | Type | Use case |
-|--------------|------|----------|
-| `batlow` | sequential | Default jet replacement; runs through dark-blue -> ochre -> light-yellow |
-| `lipari` | sequential | Higher-saturation alternative; better for projection |
-| `vik` | diverging | Blue -> white -> red equivalent, perceptually uniform |
-| `roma` | diverging | Slightly warmer than vik |
-| `bam` | diverging | Brown -> white -> green |
+| Crameri name | Type | Use case or measured centre |
+|--------------|------|-----------------------------|
+| `batlow` | sequential | Default jet replacement; dark blue -> ochre -> light pink |
+| `lipari` | sequential | Higher-saturation sequential alternative |
+| `vik` | diverging | Blue -> warm off-white (`#EBE5E0`) -> red |
+| `roma` | diverging | Red -> pale green (`#C0E9C2`) -> blue |
+| `bam` | diverging | Magenta -> near-white (`#F5F0F0`) -> green |
 | `romaO` | cyclic | Phase, time-of-day, angle data |
-| `vikO` | cyclic | Diverging cyclic |
+| `vikO` | cyclic | Diverging cyclic data |
 
 ```r
 library(scico)
-# Sequential
 ggplot(df, aes(x, y, fill = value)) + geom_tile() +
     scale_fill_scico(palette = 'batlow')
-# Diverging
+
+vmax <- quantile(abs(df$lfc), 0.99, na.rm = TRUE)
 ggplot(df, aes(x, y, fill = lfc)) + geom_tile() +
-    scale_fill_scico(palette = 'vik', midpoint = 0)
+    scale_fill_scico(palette = 'vik', midpoint = 0,
+                     limits = c(-vmax, vmax), oob = scales::squish)
 ```
 
 ```python
-from cmcrameri import cm
+import numpy as np
 import matplotlib.pyplot as plt
-plt.imshow(data, cmap=cm.batlow)         # sequential
-plt.imshow(data, cmap=cm.vik, vmin=-vmax, vmax=vmax)   # diverging, symmetric
+from cmcrameri import cm
+plt.imshow(data, cmap=cm.batlow)
+vmax = np.nanpercentile(np.abs(data), 99)
+plt.imshow(data, cmap=cm.vik, vmin=-vmax, vmax=vmax)
 ```
 
-## viridis Family (matplotlib default since 3.0)
+## viridis Family (matplotlib default since 2.0)
 
 ```r
 library(viridis)
-scale_color_viridis_c(option = 'viridis')   # default: dark blue -> yellow
+scale_color_viridis_c(option = 'viridis')   # dark blue -> yellow
 scale_color_viridis_c(option = 'magma')     # black -> red -> yellow
 scale_color_viridis_c(option = 'inferno')   # black -> purple -> yellow
 scale_color_viridis_c(option = 'plasma')    # purple -> pink -> yellow
 scale_color_viridis_c(option = 'cividis')   # CVD-optimized
-scale_color_viridis_c(option = 'turbo')     # jet-like but perceptually uniform
 ```
 
 ```python
-plt.imshow(data, cmap='viridis')   # 'magma', 'inferno', 'plasma', 'cividis', 'turbo'
+plt.imshow(data, cmap='viridis')   # also magma, inferno, plasma, cividis
 ```
 
-**cividis is the only viridis-family colormap optimized for CVD.** Use it for any figure intended to remain interpretable under deuteranopia/protanopia.
+Use viridis, cividis, or batlow as the default replacement for jet. Turbo is a smoother jet-like palette and can be a last resort when that appearance is required, but its luminance rises then falls, so it is neither perceptually uniform nor grayscale-monotonic.
 
 ## Okabe-Ito Categorical Palette (Wong 2011)
 
-The 8-color CVD-safe categorical palette. Memorize the hexes:
+Name every mapping so subsetting or reordering factor levels cannot silently recolor groups. Reserve light grey separately rather than consuming one of the seven chromatic colors.
 
 ```r
-okabe_ito <- c(
-    '#E69F00',  # orange
-    '#56B4E9',  # sky blue
-    '#009E73',  # bluish green
-    '#F0E442',  # yellow
-    '#0072B2',  # blue
-    '#D55E00',  # vermilion
-    '#CC79A7',  # reddish purple
-    '#000000'   # black
-)
-scale_color_manual(values = okabe_ito)
+cell_levels <- c('T', 'B', 'NK', 'Monocyte', 'Dendritic', 'Platelet', 'Erythroid')
+okabe_ito <- c('#E69F00', '#56B4E9', '#009E73', '#F0E442',
+               '#0072B2', '#D55E00', '#CC79A7')
+cell_colors <- c(setNames(okabe_ito, cell_levels), Unassigned = '#BBBBBB')
+scale_color_manual(values = cell_colors, drop = FALSE)
 ```
 
-Available as `palette.colors(8, 'Okabe-Ito')` in R 4.0+, `scale_color_manual(values = palette.colors(8, 'Okabe-Ito'))`. In matplotlib, `colorblind` style or manual hex list.
+Named vectors keep colors stable across panels and subsets. Under deutan simulation, `#CC79A7` and `#009E73` can approach mid-grey; check the full mapping and use a marker shape or direct label when the reserve class still collides. R 4.0+ also provides `palette.colors(8, 'Okabe-Ito')`. Matplotlib has no `colorblind` style; `seaborn-v0_8-colorblind` is only a six-color cycle, so use the explicit named mapping when identity must be stable.
 
 For DE plots, the canonical assignment is Up = `#D55E00` (vermilion), Down = `#0072B2` (blue), NS = `#999999` (grey).
 
 ## ColorBrewer (Harrower & Brewer 2003)
 
+| Palette | Type | Measured centre at maximum odd size |
+|---------|------|-------------------------------------|
+| `YlOrRd` | sequential | n/a |
+| `RdBu` | diverging | near-neutral `#F7F7F7` at 6/11 |
+| `Dark2` | qualitative | n/a; simulate before accessibility use |
+
 ```r
 library(RColorBrewer)
-display.brewer.all()                    # interactive palette browser
-display.brewer.all(colorblindFriendly = TRUE)   # CVD-safe subset only
-brewer.pal(n = 8, name = 'Dark2')       # qualitative
-brewer.pal(n = 9, name = 'YlOrRd')      # sequential
-brewer.pal(n = 11, name = 'RdBu')       # diverging
+display.brewer.all(colorblindFriendly = TRUE)
+brewer.pal(n = 8, name = 'Dark2')
+brewer.pal(n = 9, name = 'YlOrRd')
+brewer.pal(n = 11, name = 'RdBu')
 ```
 
-ColorBrewer's CVD-safe sequential and diverging palettes are publication-defaults. For qualitative beyond 8 colors, switch to Tol/Polychrome — ColorBrewer qualitative tops out at 12 (Set3).
+ColorBrewer's sequential and diverging palettes remain useful publication defaults. A near-neutral built-in centre is intentional; zero is anchored by `midpoint = 0` or symmetric limits, not by requiring the centre hex to be pure white.
 
 ## Scientific Journal Brand Palettes
 
@@ -140,66 +139,104 @@ scale_color_jco()       # JCO
 scale_color_nejm()      # NEJM
 ```
 
-These are CVD-imperfect — use journal palettes for stylistic compliance, not for accessibility. Verify by colorblindness simulation (below).
+These are CVD-imperfect. Use journal palettes for stylistic compliance, not as accessibility defaults, and simulate the chosen colors.
 
 ## CVD Simulation -- The Mandatory Check
 
+`colorspace::cvd_emulator()` takes an image filename and launches an interactive emulator; it does not transform a palette. Use `deutan()`, `protan()`, and `tritan()` for palette vectors.
+
 ```r
 library(colorspace)
-# Simulate deuteranopia / protanopia on a palette
-cvd_emulator(palette, type = 'deutan')
-cvd_emulator(palette, type = 'protan')
-cvd_emulator(palette, type = 'tritan')
-
-# Visual side-by-side
-demoplot(palette, type = 'heatmap')
+simulated <- list(deutan = deutan(palette), protan = protan(palette),
+                  tritan = tritan(palette))
+demoplot(simulated$deutan, type = 'heatmap')
+sapply(simulated, function(p) min(dist(coords(as(hex2RGB(p), 'LAB')))))
 ```
 
 ```python
-# colorspacious provides CVD simulation
-from colorspacious import cspace_converter
-# or use a CVD-safe palette by construction (cividis, Okabe-Ito, Crameri)
+import numpy as np
+from colorspacious import cspace_convert
+from matplotlib.colors import to_rgb
+from scipy.spatial.distance import pdist
+rgb = np.array([to_rgb(color) for color in palette])
+for name in ('deuteranomaly', 'protanomaly', 'tritanomaly'):
+    spec = {'name': 'sRGB1+CVD', 'cvd_type': name, 'severity': 100}
+    sim = np.clip(cspace_convert(rgb, spec, 'sRGB1'), 0, 1)
+    print(name, pdist(cspace_convert(sim, 'sRGB1', 'CAM02-UCS')).min())
 ```
 
-If a palette is unreadable under deutan simulation, do not use it for accessible figures. Period.
+Report the minimum pairwise distance and inspect the simulated figure. If categories become hard to distinguish, change the encoding; a single distance cutoff is not a guarantee of accessibility.
 
 ## Grayscale Monotonicity Test
 
 ```r
 library(scales)
-show_col(viridis(10))           # full color
-show_col(grey(seq(0, 1, length = 10)))   # equivalent grayscale gradient
+pal <- viridis::viridis(10)
+show_col(pal)
+show_col(desaturate(pal))
+L <- coords(as(hex2RGB(pal), 'LAB'))[, 'L']
+all(diff(L) >= 0) || all(diff(L) <= 0)
 ```
 
-In practice: save the figure as PNG, open in an image editor, desaturate. If the data order is still readable, the colormap is luminance-monotonic. If it shows arbitrary "rings" or "bands," the colormap is non-monotonic — fix before submitting.
-
-Rainbow / jet fails this test catastrophically. viridis and cividis pass.
+This tests the actual palette rather than replacing it with a generic 0-100 grey ramp. Grayscale monotonicity catches false bands in sequential maps; CVD simulation is a separate check. Rainbow, jet, and turbo fail the grayscale test because their luminance is non-monotonic.
 
 ## Diverging Palette Setup (LFC, z-score)
+
+Built-in palettes such as vik, roma, bam, and RdBu use near-neutral, sometimes tinted centres by design. Anchor zero with `midpoint = 0` and symmetric limits. Reserve pure white for a custom ramp whose specification requires it.
 
 ```r
 library(circlize)
 col_fun <- colorRamp2(c(-2, 0, 2), c('#0072B2', 'white', '#D55E00'))
-# Symmetric around 0; ALWAYS use symmetric bounds for signed data
 ```
 
 ```python
+import numpy as np
 import matplotlib.pyplot as plt
-plt.imshow(data, cmap='RdBu_r', vmin=-2, vmax=2)   # symmetric
-# do NOT use vmin=data.min(), vmax=data.max() for diverging data
+vmax = np.nanpercentile(np.abs(data), 99)
+plt.imshow(data, cmap='RdBu_r', vmin=-vmax, vmax=vmax)
 ```
 
-The most common diverging-palette error is asymmetric bounds (`vmin=min, vmax=max`) which mis-aligns zero with the white midpoint.
+Do not use `vmin=data.min(), vmax=data.max()` for signed data: asymmetric bounds move zero away from the palette centre.
+
+## Nonzero References and Missing Values
+
+The meaningful centre of a diverging scale is the scientific reference, not necessarily zero. State that reference explicitly, choose bounds on both sides of it, and keep missing or non-finite cells out of the quantitative scale. Give missing values a separate neutral color and label it as missing rather than implying a numeric value.
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
+
+reference = 0.5
+masked = np.ma.masked_invalid(data)
+norm = TwoSlopeNorm(vmin=0.0, vcenter=reference, vmax=1.0)
+cmap = plt.get_cmap('RdBu_r').copy()
+cmap.set_bad('#BBBBBB')
+plt.imshow(masked, cmap=cmap, norm=norm)
+```
+
+`TwoSlopeNorm` maps the declared reference to the palette centre. Validate that `vmin < reference < vmax`; if that is not true, a diverging scale is not defined for the supplied bounds. Report how many values were masked, and show missingness in the legend or caption.
+
+## Palette Audit Response Contract
+
+When recommending or auditing a palette, report this compact checklist:
+
+- palette name and type: sequential, diverging, cyclic, or categorical
+- normalization, bounds, and reference: include clipping or percentile rules
+- missing values: masked count and their separate neutral encoding
+- CVD minimum distances: deutan, protan, and tritan for categorical mappings
+- luminance verdict: monotonic, non-monotonic, or not applicable
+- redundant encoding: shape, labels, facets, or none with a reason
+- visual inspection: artifact opened, simulation inspected, and any limitation
 
 ## Custom Palette Construction
 
 ```r
-# Discrete categorical
-my_palette <- c('Control' = '#0072B2', 'Treatment' = '#D55E00', 'Vehicle' = '#009E73')
+my_palette <- c(Control = '#0072B2', Treatment = '#D55E00', Vehicle = '#009E73')
 scale_color_manual(values = my_palette)
 
-# Continuous gradient between custom colors
-colorRampPalette(c('#0072B2', 'white', '#D55E00'))(100)
+# Use an odd count when an exact sampled white centre is required.
+colorRampPalette(c('#0072B2', 'white', '#D55E00'))(101)
 ```
 
 ```python
@@ -207,92 +244,25 @@ from matplotlib.colors import LinearSegmentedColormap
 cmap = LinearSegmentedColormap.from_list('cvd_div', ['#0072B2', '#FFFFFF', '#D55E00'])
 ```
 
-When building a custom diverging palette: pick endpoints with similar luminance (so neither side dominates), pass through pure white at the midpoint (NOT light gray), and verify with the grayscale test.
+For a custom diverging palette, choose endpoints with similar luminance so neither side dominates, specify its centre deliberately, and run both grayscale and CVD checks.
 
 ## Common Failure Modes
 
-### Asymmetric bounds on diverging data
-
-**Trigger:** `vmin=data.min()`, `vmax=data.max()` on signed data with skewed distribution.
-
-**Mechanism:** Zero no longer maps to the midpoint (white) of the diverging palette.
-
-**Symptom:** Half the cells visually look "below zero" but are actually positive; reviewer confusion.
-
-**Fix:** `vmax = max(abs(data.min()), abs(data.max()))`; then `vmin = -vmax`. Or pre-clip data to a fixed range.
-
 ### Categorical palette with too many colors
 
-**Trigger:** 15+ groups all on one colormap.
-
-**Mechanism:** Human color discrimination saturates around 8-10 distinct hues.
-
-**Symptom:** Groups look identical; legend has no information value.
-
-**Fix:** Facet by category, or aggregate small groups into "Other," or use a categorical+marker-shape combination.
+Human color discrimination saturates around 8-10 hues, and the tested 9-20 color palettes had close pairs under deutan simulation. Facet, aggregate small groups into "Other," add marker shape, or use direct labels.
 
 ### Rainbow / jet still in use
 
-**Trigger:** Default colormaps in older matplotlib (<2.0), MATLAB-derived code, or `colorRampPalette(rainbow(...))`.
-
-**Mechanism:** Rainbow has non-monotonic luminance and includes a perceptual "yellow band" that creates artifactual boundaries.
-
-**Symptom:** Figures show banding that doesn't exist in the data; CVD viewers cannot interpret.
-
-**Fix:** Migrate to viridis (sequential) or vik/roma (diverging). For nostalgic jet-like appearance with perceptual properties, use `turbo` (matplotlib 3.3+).
-
-### Light gray midpoint instead of pure white
-
-**Trigger:** `colorRamp2(c(-2, 0, 2), c('blue', '#EEEEEE', 'red'))`.
-
-**Mechanism:** Light gray reads as "weakly significant" rather than zero — the visual "where is zero" anchor is lost.
-
-**Symptom:** Zero values appear muted, drawing the eye away from the actual midpoint.
-
-**Fix:** Use pure white `'#FFFFFF'` or `'white'` at the midpoint.
+Rainbow has non-monotonic luminance and creates artifactual yellow bands. Migrate sequential data to viridis or batlow and diverging data to vik or roma. Turbo preserves the jet-like appearance but also fails grayscale monotonicity.
 
 ### Wrong cmap for non-numeric data
 
-**Trigger:** Continuous colormap applied to a categorical variable (e.g., cluster ID as a continuous gradient).
-
-**Mechanism:** Cluster IDs are nominal — ordering is meaningless; gradient implies false ordering.
-
-**Symptom:** Cluster 2 "looks closer to" cluster 1 than cluster 8, but the cluster numbering is arbitrary.
-
-**Fix:** Use a qualitative categorical palette (Okabe-Ito ≤8; tab20 for more).
+A continuous gradient falsely implies order for nominal cluster IDs. Use a named qualitative mapping, preserving identities across panels and subsets.
 
 ### CVD-unsafe palette in a CVD-sensitive figure
 
-**Trigger:** Red-green Set1 in a clinical figure intended for broad audience.
-
-**Mechanism:** ~6% of male readers cannot distinguish red from green.
-
-**Symptom:** Reviewer or colleague reports the figure is unreadable.
-
-**Fix:** Pre-flight with `colorspace::cvd_emulator`; switch to Okabe-Ito for categorical, cividis for sequential.
-
-## Quantitative Thresholds
-
-| Threshold | Value | Source |
-|-----------|-------|--------|
-| Max distinguishable categorical hues | 8-10 | Wong 2011; perceptual research |
-| CVD prevalence (males of European descent) | ~6% deutan/protan, ~0.5% tritan | Various; Nuñez 2018 cites figures |
-| Diverging midpoint | pure white (#FFFFFF) | Not light gray; preserves zero anchor |
-| Crameri batlow / lipari -- general-purpose sequential | – | Crameri 2020 |
-| cividis -- CVD-optimal sequential | – | Nuñez 2018 |
-| Okabe-Ito -- 8-color qualitative CVD-safe | – | Wong 2011 |
-
-## Common Errors
-
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| Diverging plot with zero not at white | Asymmetric bounds | Use symmetric `vmin = -vmax` |
-| Rainbow "bands" visible in heatmap | Non-monotonic luminance of rainbow | Replace with viridis or turbo |
-| Categorical plot with indistinguishable groups | Too many hues | Facet, aggregate, or shape+color |
-| CVD viewer reports unreadable figure | Red-green palette | Switch to Okabe-Ito or cividis |
-| Light gray at diverging midpoint | Wrong center color | Use pure white |
-| Grayscale conversion shows banding | Non-luminance-monotonic colormap | Use viridis family or Crameri |
-| Heatmap with one cell saturating the scale | No quantile clipping | See data-visualization/heatmaps-clustering for robust bounds |
+Pre-flight the final mapping with the CVD simulation above. Switch to Okabe-Ito for up to eight categories or cividis for sequential data, and add a redundant encoding when colors still collide.
 
 ## References
 
@@ -310,4 +280,4 @@ When building a custom diverging palette: pick endpoints with similar luminance 
 - data-visualization/heatmaps-clustering - Robust diverging bounds for heatmaps
 - data-visualization/volcano-and-ma-plots - Okabe-Ito Up/Down/NS conventions
 - data-visualization/ggplot2-fundamentals - Applying palettes in ggplot2 scales
-- data-visualization/dimensionality-reduction-plots - Categorical palette for cluster labels
+- data-visualization/dimensionality-reduction-plots - Categorical palettes for cluster labels

@@ -4,7 +4,6 @@ description: ATAC-seq library quality control -- TSS enrichment, FRiP, fragment-
 tool_type: mixed
 primary_tool: deeptools
 license: MIT
-author: GPTomics
 ---
 
 ## Version Compatibility
@@ -25,21 +24,32 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 - CLI: `picard CollectInsertSizeMetrics`, `samtools flagstat`, `samtools idxstats`
 - CLI: `deeptools plotFingerprint`, `computeMatrix reference-point` + `plotProfile`
 - R: `ATACseqQC::TSSEscore`, `ATACseqQC::fragSizeDist`, `ATACseqQC::PTscore`
-- Python: custom NRF/PBC from coordinate hash; pyBigWig for TSS enrichment
+- Python: fragment-level NRF/PBC (pysam); pyBigWig for TSS enrichment
+
+## Workflow
+
+1. Collect alignment statistics: `samtools flagstat` for total alignment rate, `samtools idxstats` for chrM fraction.
+2. Calculate library complexity: run [`scripts/library_complexity.py`](scripts/library_complexity.py) on the duplicate-retained BAM. It counts distinct fragments (paired-end; single-end reads by 5' position) after MAPQ >= 30 and chrM exclusion; see the script docstring for options.
+3. Analyze fragment sizes: `picard CollectInsertSizeMetrics I=filtered.bam O=isize.txt H=isize.pdf M=0.5`, then run [`scripts/atac_qc_metrics.R`](scripts/atac_qc_metrics.R) `<bam> [peaks.narrowPeak|-] [prefix] [TxDb package]` for the periodicity class, ATACseqQC TSSEscore and FRiP. It needs a duplicate-marked paired-end BAM and a TxDb matching the BAM's genome (default hg38).
+4. Calculate TSS enrichment: build the bigWig (below), then run [`scripts/encode_tss_enrichment.py`](scripts/encode_tss_enrichment.py) `<bw> <tss.bed6>`. Score depends on the bigWig recipe; it exits 1 when no TSS is scored.
+5. Aggregate metrics: run [`scripts/aggregate_qc.py`](scripts/aggregate_qc.py) on a metrics JSON to write a sample-wide `*_mqc.tsv` with per-metric and overall grades (missing metrics grade `NA`, overall `INCOMPLETE`).
+6. Compare replicates: use deepTools `multiBamSummary` + `plotCorrelation` for Spearman correlation; `plotFingerprint` for enrichment visualization.
+
+See [`references/usage-guide.md`](references/usage-guide.md) for quick-start prompts and examples.
 
 ## ENCODE 4 ATAC-seq Acceptance Thresholds
 
 | Metric | Definition | Ideal | Acceptable | Reject | Source |
 |--------|-----------|-------|------------|--------|--------|
-| Nuclear reads (after dedup, no chrM) | Mapped, MAPQ >= 30, non-chrM, deduped | >= 50M | 25-50M | < 25M | ENCODE 4 ATAC-seq Standards |
+| Nuclear reads (after dedup, no chrM) | Mapped reads (2 per fragment), MAPQ >= 30, non-chrM, deduped | >= 50M | 25-50M | < 25M | ENCODE 4 minimum: 25M single-end reads, 50M paired-end reads (25M fragments); tiers are this Skill's convention |
 | Alignment rate | Mapped / total reads | >= 95% | 80-95% | < 80% | ENCODE 4 |
-| Mitochondrial fraction | chrM / total mapped | < 5% (Omni-ATAC), < 20% (standard) | 20-50% | > 50% | Corces 2017 (Omni-ATAC) |
-| NRF (Non-Redundant Fraction) | Distinct positions / total reads | >= 0.9 | 0.7-0.9 | < 0.7 | Landt 2012 |
-| PBC1 (PCR Bottlenecking Coefficient 1) | Positions w/ 1 read / Positions w/ >= 1 read | >= 0.9 | 0.7-0.9 | < 0.7 | Landt 2012 |
-| PBC2 | Positions w/ 1 read / Positions w/ 2 reads | >= 3.0 | 1.0-3.0 | < 1.0 | Landt 2012 |
-| TSS enrichment (hg38, GENCODE v29) | Avg signal at TSS / avg flanking | >= 7 | 5-7 | < 5 | ENCODE 4 |
-| FRiP (Fraction Reads in Peaks) | Reads in MACS peaks / total | >= 0.3 | 0.2-0.3 | < 0.2 | ENCODE 4, Landt 2012 |
-| Insert-size periodicity | NFR + mono-nuc + di-nuc peaks visible | Clear 3+ peaks | NFR + mono only | Flat / single peak | Buenrostro 2013 |
+| Mitochondrial fraction | chrM / total mapped | < 5% (Omni-ATAC), < 20% (standard) | 20-50% | > 50% | Working convention (Corces 2017); ENCODE 4 sets no mt threshold |
+| NRF (Non-Redundant Fraction) | Distinct fragments / total fragments (single-end: 5' positions / reads) | >= 0.9 | 0.7-0.9 | < 0.7 | ENCODE 4 ideal > 0.9; other bands are working convention (Landt 2012 defines the metric) |
+| PBC1 (PCR Bottlenecking Coefficient 1) | Fragments seen once / distinct fragments | >= 0.9 | 0.7-0.9 | < 0.7 | ENCODE 4 ideal > 0.9; other bands are working convention |
+| PBC2 | Fragments seen once / fragments seen twice | >= 3.0 | 1.0-3.0 | < 1.0 | ENCODE 4 ideal > 3; other bands are working convention |
+| TSS enrichment (hg38) | Avg signal at TSS / avg flanking | >= 7 | 5-7 | < 5 | ENCODE 4 (cutoffs vary by annotation; ENCODE lists GRCh38 RefSeq) |
+| FRiP (Fraction Reads in Peaks) | Reads in MACS peaks / total | >= 0.3 | 0.2-0.3 | < 0.2 | ENCODE 4 |
+| Insert-size periodicity | NFR + mono-nuc + di-nuc peaks visible | Clear 3+ peaks | NFR + mono only | Flat / single peak | ENCODE 4 requires NFR and mononucleosome peaks; Buenrostro 2013 |
 
 ENCODE thresholds are organism-specific. Mouse (mm10, GENCODE M21) TSS enrichment >= 5 is acceptable; non-model organisms have no published threshold (use cohort percentile rank instead). Methodology evolves; verify against the current ENCODE ATAC-seq Standards before reporting.
 
@@ -49,7 +59,7 @@ The two most common implementations DO NOT produce identical scores.
 
 | Method | Numerator | Denominator | Scaling |
 |--------|-----------|-------------|---------|
-| ENCODE pyTSSe / Kundaje gtsse | Mean signal in 100 bp window centered at TSS | Mean signal in 100 bp window at +/- 1900 to +/- 2000 bp (flanks) | Per-base normalization to flanks; reported as fold-enrichment |
+| ENCODE-style (`encode_tss_enrichment.py`; not validated against pyTSSe-reported values) | Mean signal in 100 bp window centered at TSS | Mean signal in 100 bp window at +/- 1900 to +/- 2000 bp (flanks) | Per-base normalization to flanks; reported as fold-enrichment |
 | ATACseqQC TSSEscore | Sum signal in TSS +/- 100 bp | Sum signal at +/- 1000 bp flanking windows | Different window sizes; ratios are larger |
 | deeptools plotProfile | Visual; numeric ratio not standardized | Reference-point matrix | No standard score; for visualization only |
 
@@ -59,34 +69,19 @@ The two most common implementations DO NOT produce identical scores.
 
 **Symptom:** Reported score 21 vs ENCODE-ideal 7 mismatch. Likely the calculator was ATACseqQC; the equivalent ENCODE score might be 8.
 
-**Fix:** State which implementation was used. For ENCODE comparisons, use `pyTSSe` (Kundaje lab) or implement the ENCODE recipe directly.
+**Fix:** State which implementation and bigWig recipe were used. For ENCODE-style scoring use [`scripts/encode_tss_enrichment.py`](scripts/encode_tss_enrichment.py) (or Kundaje-lab pyTSSe).
 
-```python
-import numpy as np
-import pyBigWig
+**bigWig recipe:** the score is recipe-dependent. On one real slice the same TSS set scored 11.3 with the recipe below, 14.9 with unextended read coverage and 16.0 with `--Offset 1`. Use one recipe for every sample being compared:
 
-def encode_tss_enrichment(bw_path, tss_bed, flank=2000):
-    """ENCODE-style TSS enrichment: signal at TSS center / signal at flanks."""
-    bw = pyBigWig.open(bw_path)
-    profiles = []
-    for line in open(tss_bed):
-        chrom, start, end, *rest = line.strip().split('\t')
-        tss = int(start)
-        strand = rest[2] if len(rest) > 2 else '+'
-        try:
-            vals = bw.values(chrom, tss - flank, tss + flank)
-            if vals is None or len(vals) != 2 * flank: continue
-            if strand == '-': vals = vals[::-1]
-            profiles.append(np.nan_to_num(vals))
-        except RuntimeError:
-            continue
-    avg = np.nanmean(profiles, axis=0)
-    flank_signal = np.mean(np.concatenate([avg[:100], avg[-100:]]))
-    center_signal = np.mean(avg[flank - 50: flank + 50])
-    return center_signal / flank_signal if flank_signal > 0 else 0.0
+```bash
+bamCoverage -b filtered.bam -o sample.bw -bs 1 --extendReads --normalizeUsing None
 ```
 
+The TSS BED must be BED6 with strand in column 6 (1 bp TSS rows are used as given; for gene intervals the TSS is `start` on `+`, `end-1` on `-`), with chromosome names matching the bigWig.
+
 ## Fragment-Size Periodicity Patterns
+
+`scripts/atac_qc_metrics.R` reports only three classes (`3+ peaks`, `NFR+mono`, `flat/single`; smoothed-density heuristic, not ENCODE-defined). The finer patterns below are for reading the plot.
 
 | Pattern | Visual signature | Interpretation | Action |
 |---------|-----------------|----------------|--------|
@@ -99,89 +94,9 @@ def encode_tss_enrichment(bw_path, tss_bed, flank=2000):
 
 The 10.4 bp helical periodicity is a Buenrostro 2013 hallmark: it reflects the helical pitch of B-form DNA, with Tn5 preferring outward-facing minor grooves on nucleosomal DNA. Its presence is a positive QC indicator but not required.
 
-## Per-Metric Failure Modes
+## Per-Metric Failure Modes and Diagnostics
 
-### Mitochondrial fraction > 50%
-
-**Trigger:** Standard ATAC-seq protocol on intact cells (no nuclear isolation), or insufficient detergent in lysis.
-
-**Mechanism:** Mitochondrial DNA is naked (no histones), so Tn5 hyperactively cuts it. Without nuclear-isolation steps (Omni-ATAC pre-spin, OR digitonin lysis with mt removal), chrM dominates the library.
-
-**Symptom:** `samtools idxstats sample.bam | awk '$1=="chrM"'` shows >50% of mapped reads on chrM.
-
-**Fix:** Re-prep with Omni-ATAC (Corces 2017) or fast-ATAC. Re-running QC on chrM-stripped BAM hides the underlying problem; the wasted sequencing remains. If chrM fraction is 30-50%, the library may still be salvageable via chrM removal but yield is reduced.
-
-### NRF / PBC1 / PBC2 below threshold
-
-**Trigger:** Over-amplified library; low input cell count combined with high PCR cycles.
-
-**Mechanism:** Each PCR cycle doubles starting fragments. With low complexity input (<5000 cells) and >12 cycles, distinct fragments saturate and reads pile up at identical positions. NRF measures unique fragments / total; PBC2 specifically detects multi-copy duplication.
-
-**Symptom:** NRF < 0.7; PBC2 < 1.0; massive duplicate-removal loss in `samtools markdup`.
-
-**Fix:** No fix post-hoc. Re-prep with more starting cells and fewer PCR cycles. Note: ATAC has *legitimate* duplicates at hyperaccessible sites (Tn5 cuts identically there), so NRF < 0.9 is not by itself fatal. The combined PBC1 < 0.7 + PBC2 < 1.0 + visual coverage pile-ups confirm true bottlenecking.
-
-### TSS enrichment < 5
-
-**Trigger:** Generic chromatin opening throughout the genome (over-transposition), OR genome build mismatch between TSS BED and BAM, OR strand-flip in TSS file.
-
-**Mechanism:** TSS enrichment requires that signal at TSSs is >> signal in genomic flanks. Over-transposition flattens the signal landscape. Strand-flipped TSSs subtract real signal because TSSs on - strand are calculated from the wrong direction.
-
-**Symptom:** TSS profile is flat or shows a slight dip at TSS center. Genome browser shows accessibility everywhere, not concentrated at promoters.
-
-**Fix:** Verify genome build (mm10 vs mm39 differ in TSS positions); verify GTF strand column; confirm signal track was generated post-deduplication. If TSS profile is genuinely flat, library is over-transposed and not recoverable; lower transposition time / Tn5 concentration in next prep.
-
-### FRiP < 0.2
-
-**Trigger:** Signal too diffuse to call peaks (over-transposition), low TSS enrichment, OR peak set is too narrow / restrictive.
-
-**Mechanism:** FRiP correlates with TSS enrichment because both measure how concentrated the signal is. A diffuse library will have low FRiP regardless of peak count.
-
-**Symptom:** Peak count looks normal but FRiP < 0.15.
-
-**Fix:** Check TSS enrichment first. If TSS is also low, the library is over-transposed. If TSS is OK but FRiP is low, the peak caller may be undercalling -- try `-p 0.01` (looser) and recalculate FRiP.
-
-### Replicate correlation < 0.85
-
-**Trigger:** Batch effect, technical artefact, or cell-state drift between replicate biological collections.
-
-**Mechanism:** Pearson correlation on log-scaled binned counts (deepTools `multiBamSummary bins -bs 10000`) tracks coverage similarity. Below 0.85 indicates non-trivial divergence; ENCODE wants >= 0.9 for biological reps.
-
-**Fix:** Check PCA; if reps cluster apart from condition, drop the outlier or rerun. If the divergence aligns with batch, add batch as a covariate downstream (DiffBind `~Batch + Condition`). Do not silently merge with bad correlation.
-
-## Library Complexity (NRF, PBC1, PBC2)
-
-**Goal:** Detect over-amplification or low-input bottlenecks.
-
-**Approach:** Hash mapped read positions (or fragment 5' coordinates), tally how many positions have 1, 2, or more reads, and compute the three metrics.
-
-```python
-import pysam
-from collections import Counter
-
-def library_complexity(bam):
-    pos_counts = Counter()
-    total = 0
-    with pysam.AlignmentFile(bam, 'rb') as bf:
-        for r in bf.fetch():
-            if r.is_unmapped or r.is_secondary or r.is_supplementary:
-                continue
-            if r.is_duplicate:                          # Mark, not skip; PBC counts pre-dedup
-                pass
-            total += 1
-            key = (r.reference_name, r.reference_start, r.is_reverse)
-            pos_counts[key] += 1
-    distinct = len(pos_counts)
-    histogram = Counter(pos_counts.values())            # {1: N1, 2: N2, ...}
-    n1 = histogram.get(1, 0)
-    n2 = histogram.get(2, 0)
-    nrf = distinct / total if total else 0.0
-    pbc1 = n1 / distinct if distinct else 0.0
-    pbc2 = n1 / n2 if n2 else float('inf')
-    return {'NRF': nrf, 'PBC1': pbc1, 'PBC2': pbc2, 'total': total, 'distinct': distinct}
-```
-
-`r.is_duplicate` is informational only here; ENCODE NRF/PBC are computed pre-deduplication on the raw mapped BAM.
+See [`references/method-reference.md`](references/method-reference.md) for detailed failure mode analysis, mitochondrial fraction issues, library complexity bottlenecking, TSS enrichment troubleshooting, FRiP interpretation, replicate correlation failures, sex-chromosome QC, cell-cycle effects, spike-in normalization, and common error resolution.
 
 ## Cross-Replicate QC
 
@@ -209,87 +124,18 @@ deepTools fingerprint quality metrics report a synthetic JS distance without a r
 
 **Goal:** Predict whether re-sequencing would rescue a low-NRF library, separating "library is bottlenecked" from "we just sequenced too shallow."
 
-**Approach:** Fit preseq's rational-function (Pade) approximation of the Good-Toulmin power-series estimator on observed BAM read positions; extrapolate distinct-fragment yield as a function of additional sequencing depth.
+**Approach:** Fit preseq's rational-function (Pade) approximation of the Good-Toulmin power-series estimator on observed BAM positions; extrapolate distinct-fragment yield as a function of additional sequencing depth. Input must be a coordinate-sorted, duplicate-retained BAM (a deduplicated BAM has no redundancy to extrapolate). Paired-end ATAC needs `-P` (fragments); without it preseq counts mates as independent reads.
 
 ```bash
-# c_curve: observed complexity at current depth
-preseq c_curve -B sample.bam -o sample.ccurve.tsv -s 1e6
+# c_curve: observed complexity at current depth; step -s must be well below the fragment count
+# (a step above depth returns only the "0 0" row), e.g. ~1/10 of it
+preseq c_curve -B -P -s 1e5 -o sample.ccurve.tsv sample.bam
 
-# lc_extrap: predicted complexity at higher depth (extrapolation -e here 200M; preseq default -e is 1e10, step -s default 1M)
-preseq lc_extrap -B sample.bam -o sample.lcextrap.tsv -e 200000000 -s 5000000
+# lc_extrap: predicted complexity at higher depth (-e here 200M; preseq default -e is 1e10, step -s default 1M)
+preseq lc_extrap -B -P -e 200000000 -s 5000000 -o sample.lcextrap.tsv sample.bam
 ```
 
 Interpretation: if `lc_extrap` shows distinct-fragment count flattening before 100M reads, the library is bottlenecked (re-sequencing won't help; re-prep needed). If it continues to climb, re-sequencing will recover more unique reads. Use alongside NRF/PBC1/PBC2 to decide library re-prep vs deeper sequencing.
-
-## Sex-Chromosome QC
-
-**Trigger:** Clinical-grade ATAC; biobank-scale studies; sample-mix-up detection.
-
-**Mechanism:** chrY has minimal coverage in female samples; XIST locus (chrX) is highly accessible only in female cells (X-inactivation). Sample-swap or sex-misassignment detectable from these two loci.
-
-```bash
-# chrY read fraction
-samtools idxstats sample.bam | awk '$1=="chrY"{print $3 / $2}'   # reads per bp
-
-# XIST locus accessibility (chrX:73820651-73852753 in hg38)
-samtools view -c sample.bam chrX:73820651-73852753
-```
-
-Female: chrY reads/bp ~0; XIST count high. Male: chrY reads/bp ~male coverage; XIST count low. Discrepancy with sample metadata flags swap.
-
-## Cell-Cycle Effect on Accessibility
-
-**Trigger:** Proliferating cell lines (K562, HEK293, HeLa); samples with high S/G2M signature.
-
-**Mechanism:** Replication-associated chromatin opening adds 5-15% global accessibility shift in proliferating cells; without correction, condition-specific cell-cycle differences confound differential analysis.
-
-**Detection:** Score cells/samples for S-phase signature (Macosko 2015 cell cycle gene set adapted for chromatin: regulated origin loci, replication-stress-response genes); for bulk ATAC, compute per-sample peak intersection with replication-origin atlas (Repli-seq peaks).
-
-**Fix for differential:** Add S-phase score as covariate in DESeq2 design (`~Sphase + Condition`); for scATAC, regress on TF-IDF residuals analogous to Seurat CellCycleScoring.
-
-## Spike-in QC (Drosophila or E. coli Chromatin)
-
-**Trigger:** Studies where global accessibility shift is biological (HDAC inhibitor, DNMT inhibitor, differentiation).
-
-**Mechanism:** Per-library normalization (RPM, CPM) erases global accessibility shifts because total reads are nominally constant. Exogenous chromatin spike-in (Drosophila S2 or E. coli Tn5-naive chromatin added pre-Tn5) provides an external scaling reference.
-
-**Pipeline:** Align reads to a concatenated human + Drosophila reference; count spike-in reads per sample; normalize by spike-in (not by total reads). Reske 2020 Epigenetics Chromatin shows that normalization-method choice materially changes differential-accessibility results when a global accessibility shift is expected (ARID1A/PIK3CA endometrial-epithelium case study), motivating an external reference such as a chromatin spike-in.
-
-**QC threshold:** spike-in fraction 0.5-5% of total reads is the workable range. Below 0.1% spike-in is unreliable; above 10% suggests too much spike-in (loss of cellular reads).
-
-## Comprehensive QC Aggregation
-
-**Goal:** Produce a per-sample report card with PASS/FAIL flags against ENCODE thresholds.
-
-**Approach:** Compute each metric independently, compare to thresholds, write a tab-delimited report consumable by MultiQC.
-
-```python
-import json, subprocess, sys
-from pathlib import Path
-
-ENCODE_THRESHOLDS = {
-    'nuclear_reads_M': (25, 50),                      # (min acceptable, ideal)
-    'mt_fraction': (0.5, 0.05),                       # (max acceptable, ideal); inverted
-    'NRF': (0.7, 0.9), 'PBC1': (0.7, 0.9), 'PBC2': (1.0, 3.0),
-    'TSS_enrichment': (5.0, 7.0), 'FRiP': (0.2, 0.3),
-}
-
-def grade(value, thr_acceptable, thr_ideal, inverted=False):
-    if inverted:
-        return 'FAIL' if value > thr_acceptable else ('PASS' if value <= thr_ideal else 'WARN')
-    return 'FAIL' if value < thr_acceptable else ('PASS' if value >= thr_ideal else 'WARN')
-
-def report(metrics, out_tsv):
-    rows = []
-    for k, (acc, ideal) in ENCODE_THRESHOLDS.items():
-        if k not in metrics: continue
-        inverted = (k == 'mt_fraction')
-        flag = grade(metrics[k], acc, ideal, inverted=inverted)
-        rows.append((k, metrics[k], acc, ideal, flag))
-    with open(out_tsv, 'w') as f:
-        f.write('metric\tvalue\tacceptable\tideal\tflag\n')
-        for r in rows: f.write('\t'.join(map(str, r)) + '\n')
-```
 
 ## MultiQC Aggregation
 
@@ -304,20 +150,11 @@ multiqc \
     -o multiqc_report
 ```
 
-MultiQC ingests Picard CollectInsertSizeMetrics, samtools flagstat, deepTools plotFingerprint output, and MACS peaks tables. It does NOT compute TSS enrichment or NRF; pipe a custom `_mqc.tsv` for those.
+MultiQC ingests Picard CollectInsertSizeMetrics, samtools flagstat, deepTools plotFingerprint output, and MACS peaks tables. It does NOT compute TSS enrichment or NRF; pipe a custom `_mqc.tsv` for those via [`scripts/aggregate_qc.py`](scripts/aggregate_qc.py).
 
 ## Common Errors
 
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| TSS enrichment off by 3x from expected | Wrong implementation (ENCODE vs ATACseqQC) | State the formula; convert by recomputing |
-| NRF = 1.0 exactly | BAM was already deduplicated -> all positions distinct | Compute NRF on raw mapped BAM (pre-dedup) |
-| PBC2 = inf | No positions with 2 reads | Library is too sparse; PBC2 unreliable below ~5M reads |
-| Mt fraction reported but BAM has no `chrM` | Mitochondrial chromosome named `MT`, `Mt`, or `chromosome:MT` | Match `samtools idxstats` chromosome name to the filter |
-| Insert size distribution flat after Picard | Sample is single-end | Insert size only valid for paired-end; switch to deeptools fragmentSize |
-| Replicates correlate poorly but PCA looks fine | High background dominates correlation | Use `--skipZeros`; or compute correlation on peak counts only |
-| FRiP differs by 2x between identical pipeline runs | Peak set differs (q-value cutoff drift) | Pin caller version + cutoff; FRiP is peak-set-dependent |
-| TSS enrichment lower than expected on Omni-ATAC | Used standard TSS BED on FFPE-prepped sample | FFPE TSSs are degraded; use peak-based metric instead |
+See [`references/method-reference.md`](references/method-reference.md) for error diagnosis table, TSS enrichment scoring mismatches, NRF/PBC computation errors, mitochondrial fraction naming issues, insert-size flatness, and FRiP drift solutions.
 
 ## References
 
@@ -337,3 +174,7 @@ MultiQC ingests Picard CollectInsertSizeMetrics, samtools flagstat, deepTools pl
 - read-qc/quality-reports - upstream FastQC
 - alignment-files/bam-statistics - samtools flagstat / idxstats
 - alignment-files/duplicate-handling - dedup before NRF/PBC computation
+
+## License and provenance
+
+This derived Skill retains GPTomics/bioSkills material from commit `d91ed3d563019e649dc854c56ccd62551359488a`. See [`LICENSE`](LICENSE) for the preserved MIT notice.

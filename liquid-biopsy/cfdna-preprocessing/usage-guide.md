@@ -1,64 +1,59 @@
 # cfDNA Preprocessing - Usage Guide
 
-## Overview
-Preprocess plasma cell-free DNA sequencing data so the diagnostic signal survives: choose a consensus strategy (single-strand UMI vs duplex), run the fgbio align->group->consensus->re-align chain with the correct flags, and avoid the cfDNA dedup trap where naive coordinate dedup collapses nucleosome-coincident independent molecules. The fragment-length distribution is treated as structured biological signal and a pre-analytical QC instrument, not noise.
+Use this skill to choose and execute plasma cfDNA preprocessing without
+destroying fragment-length signal or treating nucleosome-coincident molecules
+as ordinary coordinate duplicates.
 
 ## Prerequisites
+
 ```bash
 conda install -c bioconda fgbio bwa samtools
 pip install pysam numpy
 ```
 
-## Quick Start
-Tell your AI agent what you want to do:
-- "Build UMI consensus reads from my targeted cfDNA panel BAM"
-- "Set up a duplex consensus pipeline for sub-0.1% VAF detection"
-- "Do minimal preprocessing for sWGS tumor-fraction estimation"
-- "Check the insert-size distribution of my cfDNA library for gDNA contamination"
-- "I have no UMIs - how should I dedup this cfDNA quantitatively?"
+The bundled pipeline also needs a reference FASTA and an unmapped, UMI-bearing
+BAM with a known read structure. Confirm versions and live CLI help before
+running a real sample.
 
-## Example Prompts
+## Example requests
 
-### Single-Strand UMI Consensus
-> "Process my targeted panel cfDNA with single-strand UMIs: extract UMIs, align, group by adjacency, call molecular consensus, and filter."
+- "Build UMI consensus reads from my targeted cfDNA panel BAM."
+- "Assess whether duplex consensus improves my validated low-VAF assay."
+- "Explain the correct fgbio read structure for a UMI followed by a stem."
+- "Do minimal preprocessing for sWGS tumor-fraction estimation."
+- "Check whether my insert-size distribution suggests gDNA contamination."
+- "My library has no UMIs; how should I handle duplicates quantitatively?"
+- "Why is my adaptase library mode about 10 bp shorter than 167 bp?"
 
-> "My read structure has a UMI stem - help me write the correct fgbio read structure so the stem does not bleed into the template."
+## Start here
 
-### Duplex Consensus
-> "Set up a duplex consensus pipeline so I can detect variants below 0.1% VAF, using paired grouping and a true-duplex filter."
+1. Read the core workflow in [SKILL.md](SKILL.md).
+2. Choose chemistry and consensus depth with [method selection and fragment
+   QC](references/method-selection-and-fragment-qc.md).
+3. Use the exact [fgbio consensus workflow](references/fgbio-consensus-workflow.md)
+   when assembling CLI commands.
+4. Import [`scripts/preprocess_cfdna.py`](scripts/preprocess_cfdna.py) when a
+   reusable Python wrapper or insert-size summary is appropriate.
+5. Cite the claims using the [scientific references](references/scientific-references.md).
 
-> "Explain why I should call duplex consensus permissively and filter afterward instead of setting min-reads high on the caller."
+The essential gates are: map every molecular UMI segment to a tag, use paired
+grouping for duplex data, call consensus permissively and filter afterward,
+query-group before template-aware filtering, coordinate-sort/index only after
+filtering, never use naive coordinate deduplication as a quantitative no-UMI
+cfDNA strategy, and do not size-select before reporting fragmentomics.
 
-### Minimal Processing
-> "I am running sWGS for tumor fraction - what minimal preprocessing do I need, and should I skip consensus calling?"
+The Python wrapper accepts paths containing spaces and shell metacharacters as
+literal filenames. It rejects missing inputs, unsafe input/output aliasing,
+invalid UMI tag layouts, and thread counts outside 1-256 before launching tools.
 
-### QC and Interpretation
-> "Plot my cfDNA insert-size distribution and tell me whether the ~167 bp peak and sawtooth look healthy or contaminated."
+## Focused regression suite
 
-> "My fragment mode is about 10 bp short of 167 - is that gDNA contamination or a library-prep artifact?"
+Point `CFDNA_FIXTURE_ROOT` at the prepared bounded fixture directory, then run:
 
-## What the Agent Will Do
-1. Establish the library prep (dsDNA vs ssDNA/adaptase) and UMI design to set fragment-size and consensus expectations.
-2. Extract UMIs into the `RX` tag with the correct read structure (including the skip/stem token).
-3. Align with `bwa mem -Y` so tag-bearing short-fragment sequence is preserved.
-4. Group reads by UMI with `adjacency` (simplex) or `paired` (duplex, mandatory).
-5. Call single-strand or duplex consensus permissively, then RE-align the unmapped consensus reads.
-6. Apply the real quality gate with `FilterConsensusReads` using the appropriate `--min-reads` strand specification.
-7. Read the insert-size histogram for the mode, sawtooth, and long-fragment fraction as a QC check.
+```bash
+python -m unittest discover -s tests -v
+```
 
-## Tips
-- **Prep gates everything** - record dsDNA vs ssDNA/adaptase; a fragmentomics pipeline tuned for one will misread the other.
-- **Duplex needs paired grouping** - `--strategy adjacency` cannot reconstruct strand pairing; use `--strategy paired` for any duplex workflow.
-- **Call permissively, filter strictly** - `CallDuplexConsensusReads --min-reads` is a pre-filter; do the real filtering in `FilterConsensusReads`.
-- **Re-align consensus reads** - consensus output is unmapped by design; skipping the second alignment yields garbage coordinates.
-- **Never naive-dedup no-UMI cfDNA** - nucleosome-positioned ends make coordinate dedup delete real independent molecules and deflate VAF.
-- **Mind the singleton tax** - at picogram input, requiring two reads per family discards genuine low-VAF evidence; favor recovery for detection.
-- **Do not size-select then measure fragmentomics** - selection conditions on length and biases every length-derived feature.
-
-## Related Skills
-- analytical-validation - the LoD/molecule-counting framework input quality feeds
-- fragment-analysis - fragmentomics consumes the preprocessed fragment ends
-- ctdna-mutation-detection - consensus reads feed low-VAF calling
-- tumor-fraction-estimation - sWGS minimal-processing path
-- alignment-files/duplicate-handling - general dedup vs the cfDNA UMI caveat
-- read-qc/quality-reports - upstream read QC
+The live suite covers simplex and reciprocal-duplex extraction, ordinary and
+space/metacharacter paths, final coordinate order/indexing, QC flag/boundary
+behavior, empty input, and ten consecutive complete wrapper calls.

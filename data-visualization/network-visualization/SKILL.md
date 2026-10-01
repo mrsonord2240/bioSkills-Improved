@@ -1,320 +1,209 @@
 ---
 name: bio-data-visualization-network-visualization
-description: Visualize biological networks (PPI, gene-regulatory, co-expression, pathway) with layout algorithm choice (ForceAtlas2, Fruchterman-Reingold, Kamada-Kawai, hive plots), edge bundling, community-based coloring, and reproducible seeds using NetworkX, PyVis, igraph, and Cytoscape automation. Use when rendering biological networks for static publication, interactive HTML exploration, or Cytoscape-format export.
+description: Visualize biological networks (PPI, gene-regulatory, co-expression, pathway) with reproducible NetworkX layouts, degree and community encodings, signed directed edges, R hierarchical edge bundling, PyVis HTML, and Cytoscape automation. Use for static publication figures, interactive exploration, or Cytoscape export.
 tool_type: python
 primary_tool: NetworkX
-license: MIT
-author: GPTomics
 ---
-
-## Version Compatibility
-
-Reference examples tested with: networkx 3.2+, igraph 0.10+ (Python and R), pyvis 0.3+, py4cytoscape 1.9+, matplotlib 3.8+, datashader 0.16+ (for large-graph rasterization).
-
-Before using code patterns, verify installed versions match. If versions differ:
-- Python: `pip show <package>` then `help(module.function)` to check signatures
-- R: `packageVersion('<pkg>')` then `?function_name`
-
-If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
 
 # Network Visualization
 
-**"Plot a biological network"** -> Select a layout algorithm (force-directed for general; hive plot for comparative; ForceAtlas2 for scale-free; circular for small dense), encode node attributes (size by degree/centrality, color by community/module), and choose rendering tier (matplotlib for static publication; PyVis for interactive HTML; Cytoscape for journal-grade compositing). The dominant pitfall is treating layout as biology — node positions in force-directed plots are NOT biologically meaningful; only connectivity is.
+Select a layout that matches the network and question, encode node and edge attributes explicitly,
+and treat force-directed positions as drawing artifacts rather than biological coordinates. Use
+NetworkX plus matplotlib for static figures, PyVis for modest interactive networks, ggraph for R
+workflows and hierarchical edge bundling, or Cytoscape for desktop compositing.
 
-- Python: `networkx`, `pyvis.Network`, `py4cytoscape`, `datashader` (large graphs)
-- R: `igraph`, `ggraph` (ggplot2-grammar for networks)
-- Desktop: Cytoscape (Shannon 2003), Gephi (ForceAtlas2 native)
+## Version Compatibility and Prerequisites
 
-## The Single Most Important Modern Insight -- Layout Is an Artifact, Not Biology
+The executable recipes were checked with networkx 3.6.1, matplotlib 3.11.2, pyvis 0.3.2,
+py4cytoscape 1.13.0, Cytoscape 3.10.4, pydot 4.0.1, Graphviz 13.1.2, igraph 2.3.0,
+ggraph 2.2.2, and ggplot2 4.0.3. NetworkX's native ForceAtlas2 layout requires networkx 3.4+.
 
-A force-directed layout (Fruchterman-Reingold, ForceAtlas2, spring) is the result of an optimization that minimizes edge crossing and balances repulsion. The visual position of a node has no biological meaning — it is determined by the layout algorithm + random initialization + iteration count + repulsion parameters.
-
-Two consequences:
-1. **Set `random_state` / `seed` for reproducibility.** Without it, the same network produces different layouts across runs.
-2. **Do not read "cluster A is closer to cluster B than C" as biology.** Inter-community distances in force-directed layouts are not preserved. Only EDGE existence and node DEGREE are biological signals from the visual.
-
-For biology-faithful layouts, use **hive plots** (Krzywinski 2012) which anchor nodes to fixed axes by metadata, OR **circular** layouts which preserve symmetry but don't claim distance meaning.
-
-## Decision Tree by Network Type and Question
-
-| Network | Recommended layout | Reason |
-|---------|--------------------|--------|
-| Generic PPI (<500 nodes) | Fruchterman-Reingold OR Kamada-Kawai | General-purpose; clean separation |
-| Scale-free PPI (>500 nodes, hub-spoke) | ForceAtlas2 (Jacomy 2014) | Designed for scale-free networks |
-| Gene regulatory (directed) | Hierarchical OR ForceAtlas2 with edge direction | Direction matters; hierarchical for cascade |
-| Pathway / signaling | Manual or Cytoscape layout | Curated layouts in WikiPathways/Reactome |
-| Co-expression module visualization | Hive plot anchored by module assignment | Comparative; nodes by category |
-| Many-to-many (>10k edges) | Hierarchical edge bundling (Holten 2006) | Reduces visual clutter |
-| Large network (>50k nodes) | Datashader raster + interactive zoom | matplotlib chokes; raster is the only honest display |
-| Connectivity-only (no positions) | Adjacency matrix heatmap | Network as matrix avoids layout artifact |
-| Comparing two networks | Side-by-side same layout (`pos` reused) | Otherwise layout differences mask biology |
-
-## Layout Algorithms
-
-```python
-import networkx as nx
-
-# Spring / Fruchterman-Reingold (general)
-pos = nx.spring_layout(G, k=1/np.sqrt(len(G)), iterations=100, seed=42)
-
-# Kamada-Kawai (better for small dense)
-pos = nx.kamada_kawai_layout(G)
-
-# Circular
-pos = nx.circular_layout(G)
-
-# Shell (hub at center, periphery outside)
-pos = nx.shell_layout(G, nlist=[hub_nodes, periphery_nodes])
-
-# Spectral (reveals clusters)
-pos = nx.spectral_layout(G)
-
-# Bipartite (two sets)
-pos = nx.bipartite_layout(G, top_nodes)
-
-# Hierarchical (DAG)
-pos = nx.nx_pydot.graphviz_layout(G, prog='dot')   # requires graphviz
+```bash
+pip install "networkx>=3.4" matplotlib numpy pandas pyvis py4cytoscape pydot
 ```
 
-For ForceAtlas2 in Python: `fa2_modified` (newer maintained fork) or use Gephi for the canonical implementation. For ggraph in R:
+Install the Graphviz system executable as well as `pydot` before using the directed `dot` recipe.
+Cytoscape Desktop must be running before the py4cytoscape example starts.
 
 ```r
-library(ggraph)
-ggraph(g, layout = 'fr') +                          # Fruchterman-Reingold
-    geom_edge_link(alpha = 0.3) +
-    geom_node_point()
-
-ggraph(g, layout = 'kk') +                          # Kamada-Kawai
-ggraph(g, layout = 'circle') +
-ggraph(g, layout = 'graphopt') +                    # OpenOrd-style for large
+install.packages(c('igraph', 'ggraph', 'ggplot2'))
 ```
 
-## Hive Plots (Krzywinski 2012) — Biology-Faithful
+If a signature differs, inspect it instead of retrying unchanged: `help(module.function)` in Python,
+or `packageVersion('<pkg>')` and `?function_name` in R.
 
-A hive plot anchors nodes to 2-3 fixed axes by a categorical attribute (e.g., node type, module, chromosome); edges drawn as arcs between axes. Removes the "hairball" effect by replacing free 2D layout with structured 1D axes.
+## The Central Constraint: Layout Is Not Biology
 
-```python
-# HiveNetX or pyveplot for hive layouts
-# Or use d3.js HivePlot for interactive
-# R: HivePlotData via igraph + custom rendering
+A force-directed layout minimizes a drawing objective involving attraction and repulsion. A node's
+position therefore depends on algorithm, initialization, iteration count, and parameters; it is not
+a measured biological coordinate. Set a seed for every stochastic layout and interpret only explicit
+graph properties such as edge existence, degree, direction, sign, or an independently computed module.
+Do not infer that one module is biologically closer to another because the drawing places them nearby.
+
+## Decision Tree
+
+| Network or question | Route | Why |
+| --- | --- | --- |
+| Generic PPI below about 500 nodes | Fruchterman-Reingold or Kamada-Kawai; read `references/python-layouts.md` | General-purpose separation |
+| Scale-free PPI above about 500 nodes | Native NetworkX ForceAtlas2; read `references/python-layouts.md` | Hub-aware force-directed layout |
+| Gene-regulatory network | Graphviz `dot` plus signed arrow styling; read `references/python-layouts.md` | Direction and regulatory sign remain visible |
+| Pathway or manually curated signaling map | Cytoscape; read `references/interactive-and-cytoscape.md` | Desktop layout and compositing |
+| Hierarchical many-to-many relations | ggraph connection bundling; read `references/r-layouts.md` | Routes relations along a known hierarchy |
+| Small dense graph | Circular layout; read `references/python-layouts.md` | Preserves symmetry without implying distance |
+| Connectivity-only question | Adjacency matrix heatmap | Avoids layout artifacts entirely |
+| Two conditions | Compute one union layout and reuse it | Prevents layout changes from masquerading as biology |
+| Too large for a legible node-link view | Filter or aggregate with a stated rule, or use an adjacency summary | A raw hairball is not informative |
+
+## Reference Files
+
+- Read `references/python-layouts.md` for executable static layouts, adaptive visual mappings, signed
+  directed networks, and the moved NetworkX recipes.
+- Read `references/r-layouts.md` only for igraph/ggraph layouts or hierarchical edge bundling.
+- Read `references/interactive-and-cytoscape.md` for PyVis behavior, directed HTML, and Cytoscape
+  styling/export automation.
+
+## Core Workflow
+
+1. Load an edge list, GraphML, SIF, or interaction-database result; retain direction, sign, and weight.
+2. Report node count, edge count, directedness, connected components, and missing attributes.
+3. Choose a route from the decision tree and record the algorithm, seed, and relevant parameters.
+4. Compute degree or centrality and communities independently of the renderer.
+5. Encode node size, node color, edge width, direction, and sign from named attributes.
+6. Label a ranked subset rather than applying a fixed absolute degree cutoff.
+7. Export to an explicit path and inspect the rendered output, not merely the process exit code.
+8. State that positions from stochastic force-directed layouts are not biological measurements.
+
+For the standard PPI demonstration:
+
+```bash
+python examples/network_plots.py --graphml network.graphml --output-dir out/static
 ```
 
-Use hive plots when comparing networks across conditions OR when nodes have a categorical structure (e.g., TFs vs targets, chromosomes for 3D-genome interactions).
+This example uses one discrete color mapping for both nodes and legend swatches, ranks hubs for
+labels in every view, treats missing edge weights as 1, and rescales widths to 0.5-4 points. Repeat
+`--label GENE` to retain prespecified genes of interest in addition to the adaptive ranked set.
 
-## Hierarchical Edge Bundling (Holten 2006)
+## Comparing Conditions
 
-For many-to-many networks within a hierarchical structure (gene hierarchies, taxonomies), edge bundling routes edges along the tree backbone, dramatically reducing clutter.
-
-```r
-library(ggraph)
-ggraph(graph, layout = 'dendrogram', circular = TRUE) +
-    geom_conn_bundle(data = get_con(from = from_idx, to = to_idx),
-                     alpha = 0.4, tension = 0.8, edge_colour = 'grey60') +
-    geom_node_point() +
-    theme_void()
-```
-
-## NetworkX + matplotlib — Standard Static
-
-**Goal:** Render a PPI network with node size proportional to degree, color by community, and edge width by interaction confidence.
-
-**Approach:** Compute layout once with fixed seed; compute attributes (degree, community); render in layers via `nx.draw_networkx_*` functions for fine control.
-
-```python
-import networkx as nx
-import matplotlib.pyplot as plt
-from networkx.algorithms.community import greedy_modularity_communities
-import numpy as np
-
-# Layout with fixed seed for reproducibility
-pos = nx.spring_layout(G, k=1.5, seed=42)
-
-# Compute attributes
-degrees = dict(G.degree())
-communities = list(greedy_modularity_communities(G))
-node_to_community = {n: i for i, c in enumerate(communities) for n in c}
-
-# Sizes scaled to degree
-sizes = [100 + degrees[n] * 50 for n in G.nodes()]
-colors = [node_to_community[n] for n in G.nodes()]
-
-# Render in layers
-fig, ax = plt.subplots(figsize=(10, 8))
-nx.draw_networkx_edges(G, pos, alpha=0.3, edge_color='grey', width=0.5, ax=ax)
-nodes = nx.draw_networkx_nodes(G, pos, node_size=sizes, node_color=colors,
-                                cmap='tab20', edgecolors='black', linewidths=0.5, ax=ax)
-# Label only high-degree (hub) nodes
-hubs = [n for n in G.nodes() if degrees[n] >= 10]
-nx.draw_networkx_labels(G, pos, labels={n: n for n in hubs}, font_size=8, ax=ax)
-ax.axis('off')
-plt.tight_layout()
-plt.savefig('network.pdf', bbox_inches='tight', dpi=300)
-```
-
-## PyVis — Interactive HTML
-
-```python
-from pyvis.network import Network
-
-net = Network(height='700px', width='100%', bgcolor='white', font_color='black')
-net.from_nx(G)
-
-# Per-node styling
-for node in G.nodes():
-    net.get_node(node)['size'] = 10 + degrees[node] * 5
-    net.get_node(node)['color'] = palette[node_to_community[node] % len(palette)]
-    net.get_node(node)['title'] = f'{node}\nDegree: {degrees[node]}'
-
-net.toggle_physics(True)
-net.set_options('{"physics": {"forceAtlas2Based": {"gravitationalConstant": -50}}}')
-net.save_graph('network.html')
-```
-
-PyVis wraps vis.js; produces standalone HTML. Suitable for supplementary HTML; not for static journal figure.
-
-## Cytoscape Automation (py4cytoscape)
-
-```python
-import py4cytoscape as p4c
-# Cytoscape desktop must be running
-
-p4c.create_network_from_networkx(G, title='PPI')
-p4c.layout_network('force-directed')
-
-# Custom style
-style_name = 'DegreeStyle'
-p4c.create_visual_style(style_name)
-p4c.set_node_size_mapping('degree', [1, 5, 20], [30, 60, 120],
-                            mapping_type='c', style_name=style_name)
-p4c.set_node_color_mapping('degree', [1, 10, 20], ['#FFFFCC', '#FD8D3C', '#BD0026'],
-                             mapping_type='c', style_name=style_name)
-p4c.set_visual_style(style_name)
-
-# Export
-p4c.export_image('network.pdf', type='PDF')
-```
-
-Cytoscape is the desktop reference for publication-grade biological networks; py4cytoscape exposes script control from Python or R (via cyREST).
+Construct the union graph, compute `pos` once, and pass that same mapping to both renders. Keep visual
+scales identical. A node absent from one condition may still retain its union coordinate when shown as
+missing or muted. Never run `spring_layout` separately and interpret movement as biological change.
 
 ## Per-Method Failure Modes
 
-### Layout positions interpreted as biology
+### Force-directed positions interpreted as biology
 
-**Trigger:** "Cluster A is between cluster B and C, so it's transitional."
+**Trigger:** A conclusion uses visual distance or an apparent path through empty space.
 
-**Mechanism:** Force-directed positions are optimization artifacts.
+**Mechanism:** Positions minimize a drawing objective and change with initialization.
 
-**Symptom:** Conclusion contradicts orthogonal evidence; not replicable with different seed.
-
-**Fix:** Frame conclusions in terms of edge existence and node degree only. For trajectory claims, use the relevant time-series tool (RNA velocity, pseudotime), not the network layout.
+**Fix:** Base conclusions on edges, graph statistics, or orthogonal biological evidence. Use the same
+seed only for reproducibility, not as evidence that a position is meaningful.
 
 ### Layout differs across runs
 
-**Trigger:** No random seed set.
+**Trigger:** A stochastic layout is called without a seed.
 
-**Mechanism:** Spring / FA2 are stochastic.
+**Symptom:** Re-running the same graph produces a visibly different figure.
 
-**Symptom:** Rerun produces a visibly different figure.
+**Fix:** Use `seed=42` for NetworkX spring/ForceAtlas2 or `set.seed(42)` before R layouts, and report it.
 
-**Fix:** `seed=42` (NetworkX) or `set.seed(42)` (R igraph) before layout.
+### Two conditions use independent layouts
 
-### Comparing two networks with different layouts
+**Trigger:** Each condition calls a layout function separately.
 
-**Trigger:** `spring_layout` run separately for two conditions.
+**Symptom:** Stable nodes appear to move.
 
-**Mechanism:** Layouts differ; visual change conflated with biological change.
+**Fix:** Compute positions on the union graph and reuse them.
 
-**Symptom:** Concludes "this protein moved" when only the layout moved.
+### Labels are absent or overwhelm the graph
 
-**Fix:** Compute layout on the union network OR pass the same `pos` to both renders.
+**Trigger:** A fixed rule such as `degree >= 10` is applied across graphs of different density.
 
-### Hairball — too many edges with poor layout
+**Symptom:** A sparse real network has no labels while a dense synthetic graph has dozens.
 
-**Trigger:** Dense network with default force-directed; >5k edges.
+**Fix:** Rank by degree or the relevant centrality and label a capped top-k set (threshold below), plus
+pre-specified genes of interest.
 
-**Mechanism:** Edge crossings dominate; no structure visible.
+### Edge widths are invisible or crash on unweighted input
 
-**Symptom:** Visual is a uniform dense blob.
+**Trigger:** Direct `G[u][v]['weight']` access or raw sub-point confidence values.
 
-**Fix:** Hierarchical edge bundling (Holten 2006), filter to top-confidence edges, use a hive plot, OR raster with Datashader.
+**Symptom:** `KeyError: 'weight'`, or every edge looks equally thin.
 
-### Hub labels obscure non-hub structure
+**Fix:** Read `data.get('weight', 1.0)` and linearly rescale the observed range to 0.5-4 points. Use a
+single mid-range width when all values are identical.
 
-**Trigger:** Labeling every node in a network with >100 nodes.
+### PyVis changes graph attributes
 
-**Mechanism:** Labels overlap; visual clutter.
+**Trigger:** `net.from_nx(G)` receives the caller's graph.
 
-**Symptom:** Cannot read any labels; figure too busy.
+**Mechanism:** PyVis converts attributes such as `weight` into display fields in place.
 
-**Fix:** Label only hubs (degree > threshold) OR genes of interest. Use ggrepel-style repulsion in matplotlib via adjustText.
+**Fix:** Pass `G.copy()`, or add nodes and edges explicitly. Compute communities before conversion.
 
-### Edge widths uniform when weights are meaningful
+### Direction or regulatory sign disappears
 
-**Trigger:** Default `width=1` for all edges.
+**Trigger:** A directed graph is rendered by an undirected PyVis network or by Cytoscape's default
+style, whose target arrow shape is `NONE`.
 
-**Mechanism:** Edge attribute (correlation, confidence, weight) not encoded.
+**Fix:** Use `Network(directed=True)` for PyVis. For static GRNs, use the signed Graphviz recipe. If
+using Cytoscape, explicitly map the target arrow shape and sign colors. Validate the sign domain
+before drawing so an unknown value cannot silently disappear.
 
-**Symptom:** Reader cannot tell strong from weak interactions.
+### Cytoscape silently keeps default styling
 
-**Fix:** `width = [G[u][v]['weight'] for u, v in G.edges()]` with normalization to visible range.
+**Trigger:** A mapping refers to a missing node column, or a broad exception hides an API error.
 
-### PyVis HTML size explodes for large networks
+**Fix:** Populate mapped attributes before upload, allow the traceback to surface, and read back at
+least one visual property. The shipped example creates `degree` and uses the py4cytoscape 1.13 shape
+signature without a nonexistent `mapping_type` argument.
 
-**Trigger:** `net.from_nx(G)` with 10000+ nodes.
+### Dense hairball
 
-**Mechanism:** Embedded JavaScript file balloons; browser hangs.
+**Trigger:** Thousands of edges are drawn without filtering or a hierarchy.
 
-**Symptom:** HTML file 100+ MB; doesn't render.
-
-**Fix:** For large networks switch to Datashader or Cytoscape with Cytoscape.js for web; PyVis is for <2000 nodes.
-
-## Reconciliation: When Layouts Disagree
-
-| Pattern | Cause | Action |
-|---------|-------|--------|
-| Two layouts of same network look different | Different algorithm or seed | Standardize; report algorithm + seed |
-| Cytoscape and NetworkX disagree | Cytoscape default = grid; NetworkX = spring | Pick one; document |
-| Communities don't separate visually | Layout doesn't preserve community structure | Use spectral layout OR color-code communities; do not rely on positional separation |
-| Same nodes "move" between conditions | Layout re-computed | Reuse layout from union network |
+**Fix:** Apply a declared confidence filter, use hierarchical bundling only when a real hierarchy
+exists, or present an adjacency summary. Bundling is not valid without a backbone hierarchy.
 
 ## Quantitative Thresholds
 
-| Threshold | Value | Source |
-|-----------|-------|--------|
-| Max edges for spring layout legibility | ~2000 | Practical |
-| Max nodes for PyVis HTML | ~2000 | Browser memory |
-| When to bundle edges | >5000 edges or many-to-many | Holten 2006 |
-| When to use Datashader | >50000 nodes or edges | Standard |
-| Min degree for labeling | depends; 5-10 typical | Practical |
-| Random seed | always set (42 is convention) | Reproducibility |
+| Decision | Operational value | Interpretation |
+| --- | --- | --- |
+| Hub labels | top `min(N, max(15, ceil(0.02N)))`, capped at 30 | Adaptive across sparse and dense graphs |
+| Static edge width | 0.5-4 points after normalization | Keeps weak and strong edges visible |
+| PyVis HTML | roughly below 2,000 nodes | Inspect browser responsiveness and file size |
+| Consider hierarchical bundling | above about 5,000 edges, only with a hierarchy | Reduces clutter without inventing structure |
+| Random seed | always record one for stochastic layouts | Reproducibility, not biological meaning |
+
+Treat the numeric size limits as practical starting points, not universal scientific cutoffs.
 
 ## Common Errors
 
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| Layout differs across runs | No seed | Always `seed=42` |
-| "Distance between clusters" interpreted | Layout artifact | Frame conclusions on edges/degree only |
-| Hairball | Dense + force-directed | Bundle / hive / filter / Datashader |
-| Two networks' layouts not comparable | Computed separately | Use union network layout |
-| Edge widths uniform | Default | Encode weight |
-| Label clutter | All nodes labeled | Hubs only |
-| PyVis 100MB HTML | Too large for PyVis | Switch to Cytoscape.js / Datashader |
+| Error or symptom | Cause | Solution |
+| --- | --- | --- |
+| `NameError: np is not defined` | Fragment copied without imports | Run the shipped script rather than a detached fragment |
+| `Node ... has no position` | Positions computed on only one condition | Compute positions on the union graph |
+| `KeyError: 'weight'` | Unweighted input | Use a default and normalize |
+| PyVis edge weights disappear | `from_nx` mutated the graph | Pass a copy |
+| GRN has no arrows | Renderer created as undirected or Cytoscape default | Enable direction explicitly |
+| Cytoscape export already exists | Overwrite not enabled | Use `overwrite_file=True` and an absolute path |
+| Graphviz layout fails | `pydot` or the `dot` executable is absent | Install both prerequisites |
+| HTML stalls | Interactive graph exceeds browser capacity | Filter, aggregate, or use a non-node-link summary |
 
 ## References
 
-- Csardi G, Nepusz T. 2006. The igraph software package for complex network research. *InterJournal Complex Systems* 1695.
-- Fruchterman TMJ, Reingold EM. 1991. Graph drawing by force-directed placement. *Softw Pract Exp* 21(11):1129-1164.
-- Hagberg A, Schult D, Swart P. 2008. Exploring network structure, dynamics, and function using NetworkX. *Proc 7th Python in Science Conference (SciPy 2008)*.
-- Holten D. 2006. Hierarchical edge bundles: visualization of adjacency relations in hierarchical data. *IEEE TVCG* 12(5):741-748.
-- Jacomy M, Venturini T, Heymann S, Bastian M. 2014. ForceAtlas2, a continuous graph layout algorithm for handy network visualization designed for the Gephi software. *PLoS ONE* 9(6):e98679.
-- Krzywinski M, Birol I, Jones SJM, Marra MA. 2012. Hive plots—rational approach to visualizing networks. *Brief Bioinform* 13(5):627-644.
-- Pedersen T. 2024. ggraph (CRAN). https://ggraph.data-imaginist.com
-- Shannon P, et al. 2003. Cytoscape: a software environment for integrated models of biomolecular interaction networks. *Genome Res* 13(11):2498-2504.
+- Csardi G, Nepusz T. 2006. The igraph software package for complex network research.
+- Fruchterman TMJ, Reingold EM. 1991. Graph drawing by force-directed placement.
+- Hagberg A, Schult D, Swart P. 2008. Exploring network structure, dynamics, and function using NetworkX.
+- Holten D. 2006. Hierarchical edge bundles: visualization of adjacency relations in hierarchical data.
+- Jacomy M, et al. 2014. ForceAtlas2, a continuous graph layout algorithm for handy network visualization.
+- Shannon P, et al. 2003. Cytoscape: a software environment for integrated models of biomolecular interaction networks.
 
 ## Related Skills
 
 - gene-regulatory-networks/coexpression-networks - Build the network to visualize
 - database-access/interaction-databases - Fetch PPI data
 - data-visualization/multipanel-figures - Combine network with other plots
-- data-visualization/color-palettes - Community / module color schemes
-- single-cell/cell-communication - Cell-cell interaction networks
+- data-visualization/color-palettes - Choose accessible community colors
+- single-cell/cell-communication - Visualize cell-cell interaction networks

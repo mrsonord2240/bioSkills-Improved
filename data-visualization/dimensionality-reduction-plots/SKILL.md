@@ -3,8 +3,6 @@ name: bio-data-visualization-dimensionality-reduction-plots
 description: Produce and interpret PCA, t-SNE, UMAP, and PHATE plots for high-dimensional omics data with rigor about which method preserves what (variance, local structure, manifold, transitions), hyperparameter sensitivity, and the well-documented limits of 2D embeddings. Covers PCA biplot/scree/loadings, t-SNE PCA initialization (Kobak-Berens 2019), UMAP n_neighbors/min_dist trade-offs, and the Chari-Pachter 2023 critique. Use when visualizing high-dimensional data — bulk PCA, single-cell embeddings, multi-omics integration projections.
 tool_type: mixed
 primary_tool: scanpy
-license: MIT
-author: GPTomics
 ---
 
 ## Version Compatibility
@@ -26,7 +24,7 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 
 ## The Single Most Important Modern Insight -- 2D Embeddings Distort
 
-Chari & Pachter 2023 *PLOS Comp Biol* 19:e1011288 demonstrated that 2D embeddings of single-cell data lose >95% of the high-dimensional geometry — local neighborhoods are preserved by construction, but distances between distant cells, density estimates, and global topology are NOT preserved. The "specious art" of single-cell genomics is the practice of reading 2D layout as biology.
+Chari & Pachter 2023 *PLOS Comp Biol* 19:e1011288 demonstrated that 2D embeddings of single-cell data lose >95% of the high-dimensional geometry. Local neighborhoods are only partly preserved (often well under half of the 15 nearest neighbors), while distances between distant cells, density estimates, and global topology are not preserved. The "specious art" of single-cell genomics is the practice of reading 2D layout as biology.
 
 Practical consequence: a UMAP plot communicates "these cells are similar locally" and nothing more. Distance between clusters is meaningless. Density of points within a cluster is dominated by the embedding's repulsion parameter, not the underlying biology. A trajectory inferred from "the gap" between two clusters in UMAP space is an artifact unless validated against the high-dimensional data (RNA velocity, diffusion pseudotime, PHATE).
 
@@ -36,7 +34,7 @@ A second foundational paper is Kobak & Berens 2019 *Nat Commun* 10:5416 on t-SNE
 
 | Method | Preserves | Hyperparameters | Strength | Fails when |
 |--------|-----------|-----------------|----------|------------|
-| PCA | Linear variance (orthogonal, ordered) | n_components, scaling | Interpretable via loadings; deterministic; variance % per axis | Non-linear manifolds; high-dim data with few effective dims |
+| PCA | Linear variance (orthogonal, ordered) | n_components, scaling, solver/seed | Interpretable via loadings; reproducible with a fixed solver or seed; variance % per axis | Non-linear manifolds; high-dim data with few effective dims |
 | t-SNE (van der Maaten 2008) | Local neighborhoods (Student-t similarity) | perplexity (typ. 30-50), learning_rate, n_iter, init | Crisp cluster separation | Global distances meaningless; cluster sizes deceptive; non-deterministic |
 | UMAP (McInnes 2018, Becht 2018) | Manifold local + partial global | n_neighbors (typ. 15-50), min_dist (typ. 0.1-0.5), spread | Faster than t-SNE; better global preservation than default t-SNE; deterministic given seed | Still distorts; n_neighbors small -> shattered; large -> homogenized |
 | PHATE (Moon 2019) | Continuous transitions, branching trajectories | k (knn), t (diffusion power) | Best for developmental trajectories; preserves transition geometry | Slower; less canonical for clustering display |
@@ -56,128 +54,22 @@ A second foundational paper is Kobak & Berens 2019 *Nat Commun* 10:5416 on t-SNE
 | Multi-omics integration projection | MOFA factors + PCA, or UMAP of joint embedding | Per-omics projection often misleading |
 | Spatial transcriptomics with histology | UMAP for transcriptional axis; SEPARATE spatial scatter | UMAP collapses physical space |
 | Identify which genes drive variation | PCA biplot with loadings as arrows | Loadings are interpretable; UMAP/t-SNE has no loadings |
-| Demonstrating batch confound | PCA color by batch -- if PC1/PC2 separates batches, batch is the dominant variance | UMAP can hide batch effect via local neighborhood preservation |
+| Demonstrating batch confound | PCA colored by batch; quantify batch association across PC1-PC5 | UMAP is a display, not a batch-effect statistic; use PC-wise R2 or kNN batch mixing |
 | Visualizing 50 conditions | UMAP/t-SNE for nuance; faceted PCA for interpretability | Method choice depends on question |
 
-## PCA -- The Underused Workhorse
+## Reference Files
 
-PCA is interpretable, deterministic, and the loadings explain WHY samples cluster — UMAP/t-SNE cannot do this. For bulk RNA-seq sample QC, PCA is the right answer 90% of the time.
+- [Method recipes](references/method-recipes.md): read when implementing PCA/loadings, t-SNE, UMAP, Scanpy saving, or PHATE. The decision-tree rows above map directly to those recipes.
+- [Neighborhood validation](references/neighborhood-validation.md): read before claiming that an embedding preserved neighborhoods, batch mixing, or global structure.
+- [`examples/embedding_phd.py`](examples/embedding_phd.py): runnable Scanpy comparison with raw-count HVG selection, categorical legends, PCA loading arrows, five saved figures, fixed seeds, and a neighborhood-retention measurement.
 
-**Goal:** Project samples into a low-dim space whose axes are linear combinations of features ordered by variance explained, then visualize PC1 vs PC2 colored by metadata.
+## Method Rules
 
-**Approach:** Variance-stabilize counts (DESeq2 `vst()` / `rlog()`); run PCA on transposed expression matrix; annotate axes with variance-explained percentages; layer screeplot and loadings plot to support interpretation.
-
-```r
-library(DESeq2)
-library(PCAtools)
-library(ggplot2)
-vsd <- vst(dds, blind = FALSE)
-p <- pca(assay(vsd), metadata = as.data.frame(colData(dds)))
-biplot(p, colby = 'condition', shape = 'batch', lab = NULL,
-       hline = 0, vline = 0,
-       legendPosition = 'right',
-       title = paste0('PCA: PC1 (', round(p$variance[1], 1), '%) vs PC2 (', round(p$variance[2], 1), '%)'))
-screeplot(p, components = 1:10)
-loadings_plot <- plotloadings(p, components = 1, rangeRetain = 0.05)
-```
-
-```python
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
-
-pca = PCA(n_components=10)
-X_pca = pca.fit_transform(X)
-var = pca.explained_variance_ratio_
-
-fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-axes[0].scatter(X_pca[:, 0], X_pca[:, 1], c=labels, alpha=0.7)
-axes[0].set_xlabel(f'PC1 ({var[0]*100:.1f}%)')
-axes[0].set_ylabel(f'PC2 ({var[1]*100:.1f}%)')
-axes[1].plot(range(1, 11), var, 'o-')
-axes[1].set_xlabel('PC')
-axes[1].set_ylabel('Variance explained')
-```
-
-**Always label axes with variance explained.** A PCA plot without `PC1 (45%)` annotation is unreadable. If PC1 = 5% and PC2 = 4%, apparent "clusters" may be noise.
-
-## t-SNE -- Kobak-Berens Modern Defaults
-
-Default t-SNE (Maaten 2008) loses global structure. Kobak-Berens 2019 demonstrated that three changes recover it:
-
-1. **Initialize with PCA**, not random — `init='pca'` (openTSNE) or pre-compute PCA scores as init
-2. **High learning rate** — `learning_rate = n/12` (n = number of points), not the default 200
-3. **Early exaggeration** — `exaggeration=12, early_exaggeration_iter=250` for large data
-
-```python
-import openTSNE
-import numpy as np
-
-# Kobak-Berens defaults
-embedding = openTSNE.TSNE(
-    perplexity=30,                          # 30-50 typical
-    n_iter=750,
-    initialization='pca',                   # NOT random
-    learning_rate=X.shape[0] / 12,          # scales with n
-    n_jobs=-1,
-    random_state=42).fit(X)
-```
-
-```r
-library(Rtsne)
-set.seed(42)
-ts <- Rtsne(X, perplexity = 30, theta = 0.5, pca_scale = TRUE,
-            initial_dims = 50, max_iter = 750)
-# Rtsne does not natively support PCA initialization; use external init via Y_init=
-```
-
-**Perplexity is the local-vs-global trade-off.** Low (5) -> local; high (100) -> global. 30-50 is standard for >1000 points.
-
-## UMAP -- Modern Defaults and the Random-Seed Trap
-
-```python
-import umap
-reducer = umap.UMAP(
-    n_neighbors=30,        # local-global balance; 15-50 typical
-    min_dist=0.3,          # tightness of clusters; 0.1-0.5 typical
-    n_components=2,
-    metric='euclidean',
-    random_state=42)       # reproducibility
-embedding = reducer.fit_transform(X)
-```
-
-```r
-library(uwot)
-set.seed(42)
-um <- umap(X, n_neighbors = 30, min_dist = 0.3, metric = 'euclidean')
-```
-
-```python
-# scanpy convention -- after sc.tl.pca, sc.pp.neighbors
-sc.pp.neighbors(adata, n_neighbors=30, n_pcs=50)
-sc.tl.umap(adata, min_dist=0.3, random_state=42)
-sc.pl.umap(adata, color='leiden', palette='tab20', frameon=False,
-           legend_loc='on data', legend_fontsize=7,
-           save='_clusters.pdf')
-```
-
-**`min_dist` controls tightness, NOT separation.** Smaller min_dist = tighter clusters. Does not change which cells cluster together — only how dense the rendering is.
-
-**`n_neighbors` controls local-vs-global.** Small n_neighbors = local fragmentation; large n_neighbors = clusters merge.
-
-**Random seed matters.** UMAP is deterministic given seed; without setting seed, results vary across runs. Always set `random_state` (umap-learn) or `seed=` (uwot).
-
-**scanpy.pl.umap save trap:** `save='_x.pdf'` writes to `sc.settings.figdir` (default `./figures/`) with prefix `umap`, producing `figures/umap_x.pdf` — not the path specified. Default `dpi_save = 150` is below journal requirements.
-
-## PHATE -- For Continuous Trajectories
-
-```python
-import phate
-phate_op = phate.PHATE(knn=10, decay=40, t='auto', n_jobs=-1, random_state=42)
-emb = phate_op.fit_transform(X)
-plt.scatter(emb[:, 0], emb[:, 1], c=pseudotime, cmap='viridis', s=5)
-```
-
-PHATE preserves transition geometry — for embryonic development, differentiation trajectories, or any continuous-state biology, PHATE is more faithful than UMAP. For discrete cell types, UMAP is fine.
+- **PCA:** normalize library size before log/scale (or use `vst`/`rlog`), use a fixed full solver or seed, label axes with variance explained, and inspect loadings. A low PC1/PC2 percentage is a warning for bulk sample QC; it is normal in sparse single-cell data and is not evidence of noise by itself.
+- **t-SNE:** use PCA initialization and a learning rate scaled to sample count. In openTSNE 1.0 these are already the `initialization='pca'` and `learning_rate='auto'` defaults; spell them out for provenance, not because openTSNE defaults to random/200. Rtsne has no `seed` argument: call `set.seed(42)` before `Rtsne()`.
+- **UMAP:** `min_dist` controls rendered tightness and `n_neighbors` controls the local/global trade-off. Set `random_state` for umap-learn or `seed` for uwot; Scanpy already defaults `random_state=0`, but pass it explicitly for recorded provenance.
+- **Scanpy output:** call `sc.pl.umap(..., show=False)` and save the returned axis's figure with `fig.savefig(path, dpi=300)` for exact path control. The older `save=` convention prefixes filenames under `sc.settings.figdir` and is deprecated in Scanpy 1.12.
+- **PHATE:** use for continuous or branching trajectories, then validate the inferred ordering against pseudotime, velocity, or known markers.
 
 ## Per-Method Failure Modes
 
@@ -185,7 +77,7 @@ PHATE preserves transition geometry — for embryonic development, differentiati
 
 **Trigger:** Reading "cluster A is closer to cluster B than to C" as biological similarity.
 
-**Mechanism:** UMAP preserves local neighborhoods; global distances are NOT preserved (Chari-Pachter 2023).
+**Mechanism:** UMAP optimizes a local-neighborhood objective but preserves only part of the original neighbor set; global distances are not preserved (Chari-Pachter 2023).
 
 **Symptom:** Conclusion contradicts hierarchical clustering / RNA velocity / known biology.
 
@@ -195,17 +87,17 @@ PHATE preserves transition geometry — for embryonic development, differentiati
 
 **Trigger:** Reproducibility request; figure differs between runs.
 
-**Mechanism:** Both methods use stochastic optimization; default seed varies.
+**Mechanism:** umap-learn, uwot, openTSNE, and Rtsne use stochastic optimization. Scanpy currently supplies a deterministic default (`random_state=0`), but explicit seeds make provenance portable across implementations.
 
 **Symptom:** Re-running the script produces visibly different layouts.
 
-**Fix:** Set `random_state=42` (umap-learn, sklearn) or `seed=42` (R uwot/Rtsne).
+**Fix:** Set `random_state=42` (umap-learn/openTSNE), `seed=42` (uwot), or call `set.seed(42)` immediately before `Rtsne()`; Rtsne silently ignores `seed=` through `...`.
 
-### Perplexity too low for the data
+### Perplexity too high for sample size
 
 **Trigger:** Default t-SNE perplexity (30) on small dataset (<500 points).
 
-**Mechanism:** Perplexity > n/3 fails; cells artificially fragment.
+**Mechanism:** Perplexity >= n/3 is invalid. Rtsne errors; openTSNE clamps it with a warning.
 
 **Symptom:** Plot shows "shattered" small clusters that don't correspond to biology.
 
@@ -219,7 +111,7 @@ PHATE preserves transition geometry — for embryonic development, differentiati
 
 **Symptom:** PC1 perfectly correlates with library size or with total expression.
 
-**Fix:** Use `vst()` / `rlog()` (DESeq2) or log + scale (`prcomp(X, scale.=TRUE)`). For single-cell, normalize then `sc.pp.scale_data`.
+**Fix:** Normalize for library size before log + scale, or use `vst()` / `rlog()` for bulk counts. Scaling alone does not remove a library-size component. For single-cell, normalize totals, log-transform, then scale.
 
 ### UMAP cluster shapes "interpreted" as biological signal
 
@@ -266,7 +158,7 @@ PHATE preserves transition geometry — for embryonic development, differentiati
 | Pattern | Likely cause | Action |
 |---------|--------------|--------|
 | t-SNE shows distinct clusters; UMAP merges them | t-SNE over-emphasizes local structure; UMAP n_neighbors too large | Both views valid; check Leiden cluster assignments rather than embedding |
-| PCA shows batch on PC1; UMAP hides it | UMAP preserves local neighborhood within each batch | Run UMAP only after batch correction; PCA is the canonical batch-effect diagnostic |
+| A top PC is associated with batch; UMAP looks mixed or separated | Embedding appearance does not quantify batch | Screen PC1-PC5 (or more) by batch R2 and measure kNN batch mixing; correct upstream before biological interpretation |
 | PHATE shows continuous trajectory; UMAP shows discrete clusters | PHATE preserves transitions; UMAP "blobifies" continuous data | Use PHATE for trajectory display; UMAP for discrete cell-type display |
 | Reproducibility breaks across re-runs | Random seed not set | Set seed; document version of umap-learn/openTSNE |
 | Cluster boundaries differ between Seurat/scanpy UMAP | Different defaults for n_neighbors, min_dist, init | Standardize hyperparameters; report explicitly |
@@ -280,7 +172,7 @@ PHATE preserves transition geometry — for embryonic development, differentiati
 | t-SNE perplexity | 30-50 for n>1000; max(5, n/30) for n<500 | Maaten 2008; Kobak-Berens 2019 |
 | UMAP n_neighbors | 15-50 default range | umap-learn docs; Becht 2018 |
 | UMAP min_dist | 0.1-0.5 | Tighter for crisp clusters, looser for continua |
-| t-SNE learning rate | n / 12 (Kobak-Berens) | Default 200 over-shrinks large data |
+| t-SNE learning rate | n / 12 (Kobak-Berens; openTSNE `auto`) | Set explicitly outside openTSNE when defaults differ |
 | PCA n_components for downstream UMAP | 30-50 | Standard scanpy workflow |
 | Single-cell n_neighbors for sc.pp.neighbors | 15-30 | Wolf 2018 Scanpy paper |
 | Save DPI for publication | 300+ | Nature/Cell figure guidelines |
@@ -290,8 +182,8 @@ PHATE preserves transition geometry — for embryonic development, differentiati
 
 | Error / symptom | Cause | Solution |
 |-----------------|-------|----------|
-| Plot differs between runs | Random seed not set | `random_state=42` always |
-| PC1 = library size | No scaling/normalization | `vst()` or `log + scale` before PCA |
+| Plot differs between runs | Random seed not fixed in the chosen implementation | Record an explicit supported seed; use `set.seed()` for Rtsne |
+| PC1 = library size | No library-size normalization | Normalize totals before log + scale, or use `vst()`/`rlog()` |
 | Cluster shapes "interpreted" biologically | UMAP artifact | Do not interpret shape; report membership |
 | scanpy save writes to wrong path | figdir + prefix concatenation | Set figdir explicitly OR use matplotlib.savefig |
 | t-SNE fragments small dataset | Perplexity too high for n | Use perplexity = max(5, n/30) |
