@@ -115,10 +115,18 @@ Choose AMULET only at sufficient depth (see the doublet section of the core Skil
 micromamba create -n amulet python=3.10 "numpy<1.24" pandas scipy statsmodels openjdk=17
 # github.com/UcarLab/AMULET releases: AMULET-v1.1.zip (AMULET.sh, jar, human_autosomes.txt) and
 # RestrictionRepeatLists.zip (restrictionlist_repeats_segdups_rmsk_hg38.bed / _hg19.bed)
-# Fragment input (singlecell.csv needs columns 'barcode' and 'is__cell_barcode'):
+# Fragment input (the csv must have columns named 'barcode' and 'is__cell_barcode'; the --*idx flags are ignored):
 AMULET.sh fragments.tsv.gz singlecell.csv human_autosomes.txt restrictionlist_repeats_segdups_rmsk_hg38.bed outdir /path/to/AMULET
-# BAM input (cell barcode in the CB tag; UNTESTED here, no CB-tagged BAM was available):
+# BAM input (cell barcode in the CB tag; --forcesorted is required by the jar even for a coordinate-sorted BAM):
 AMULET.sh --forcesorted possorted_bam.bam singlecell.csv human_autosomes.txt restrictionlist_repeats_segdups_rmsk_hg38.bed outdir /path/to/AMULET
 ```
+
+The BAM route reads the csv by column index (defaults `--bcidx 0 --cellidx 0 --iscellidx 9`), so the flags must match the csv layout; the wrong index fails late (`IndexError` in `AMULET.py`) or silently gives 0 overlaps:
+
+| Input | Barcode in the data | Flags |
+|-------|--------------------|-------|
+| ATAC 1.x / 2.x `singlecell.csv` (`is__cell_barcode` is column 9) | `CB` tag or fragments barcode = `barcode` | defaults |
+| ARC `per_barcode_metrics.csv` (columns `barcode`=GEX, `gex_barcode`, `atac_barcode`, `is_cell`) BAM | `CB` tag = GEX barcode (column 0) | `--forcesorted --bcidx 0 --cellidx 0 --iscellidx 3` |
+| ARC `atac_fragments.tsv.gz` (barcode = `barcode` column) | fragments barcode = `barcode` | fragment mode reads columns by name: write a two-column csv `barcode,is__cell_barcode` from `barcode` and `is_cell` |
 
 Multiplet calls (q < 0.01) are in `outdir/MultipletBarcodes_01.txt`, per-barcode probabilities in `MultipletProbabilities.txt`. `--forcesorted` applies to BAM input only.

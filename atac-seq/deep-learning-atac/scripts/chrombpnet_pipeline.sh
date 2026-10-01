@@ -1,7 +1,7 @@
 #!/bin/bash
 # chromBPNet 1.0.1 (env `chrombpnet`, see SKILL.md): splits -> nonpeaks -> bias model -> accessibility model -> QC -> optional variant scoring.
 # CPU-only (TF 2.8). Uses `bias train` / `train`, which stop after training, so the slow DeepSHAP interpret tail of
-# `bias pipeline` / `pipeline` is skipped; run interpretation separately (SKILL.md step 5).
+# `bias pipeline` / `pipeline` is skipped; run interpretation separately (SKILL.md step 6).
 #
 # usage: chrombpnet_pipeline.sh [BAM] [PEAKS] [GENOME] [SIZES] [OUTDIR] [ATAC|DNASE] [BIAS_THRESH]
 #   PEAKS      10-column narrowPeak (summit in column 10)
@@ -28,7 +28,9 @@ skip() { [ "$RESUME" = 1 ] && [ -s "$1" ]; }
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # 0. Fail fast on missing inputs, before any long step
-command -v chrombpnet >/dev/null || { echo "chrombpnet not on PATH (activate the chrombpnet env)" >&2; exit 1; }
+for t in chrombpnet bedtools bedGraphToBigWig; do
+    command -v "$t" >/dev/null || { echo "$t not on PATH (activate the chrombpnet env)" >&2; exit 1; }
+done
 for f in "$BAM" "$PEAKS" "$GENOME" "$SIZES"; do
     [ -s "$f" ] || { echo "missing input: $f" >&2; exit 1; }
 done

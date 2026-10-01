@@ -72,7 +72,7 @@ Tell your AI agent what you want to do:
 | 1 sample, no replicates | MACS3 callpeak `-q 0.05` (no IDR) |
 | Want NFR + flanking nucleosomes | MACS3 hmmratac |
 | Joint multi-rep with built-in chrM/blacklist | Genrich `-j -e chrM -E blacklist` |
-| Broad super-enhancer regions | MACS3 `--broad --broad-cutoff 0.1` |
+| Broad accessible domains | MACS3 `--broad --broad-cutoff 0.1` |
 | FFPE / degraded chromatin | MACS3 callpeak (avoid HMM) |
 | scATAC pseudobulk | MACS3 per cluster, see single-cell-atac |
 | Plant / non-model | MACS3 with empirically computed `-g` |
@@ -105,7 +105,7 @@ macs3 hmmratac -i rep1.filt.dedup.bam -f BAMPE -n rep1_hmm --outdir hmm/
 - The ENCODE-style pipeline uses `-p 0.01` (loose, for IDR), not `-q 0.05`. Use `-q 0.05` only if NOT running IDR.
 - `-f BAMPE` silently ignores `--shift/--extsize`. To use shift modeling, use `-f BAM` and treat ends as single reads.
 - `--keep-dup all` is mandatory for ATAC: Tn5 generates legitimate duplicate cuts at hyperaccessible sites.
-- Always remove chrM before peak calling; chrM accumulates ATAC reads at >50% of total in poor preps. Do not `grep -v chrM` on SAM text: it also drops the header line and any read whose mate maps to chrM. Select contigs instead: `samtools idxstats in.bam | cut -f1 | grep -v -e '^chrM$' -e '^\*$' | xargs samtools view -b -o noM.bam in.bam`.
+- Always remove chrM before peak calling; chrM accumulates ATAC reads at >50% of total in poor preps. Do not `grep -v chrM` on SAM text: it also drops the header line and any read whose mate maps to chrM. Select contigs instead: `samtools idxstats in.bam | cut -f1 | grep -v -e '^chrM$' -e '^\*$' | xargs samtools view -b -o noM.bam in.bam`. This keeps reads whose mate maps to chrM as orphans; before `-f BAMPE` or `macs3 hmmratac`, keep proper pairs only (`samtools view -b -f 2`).
 - For broad accessibility regions (super-enhancers, MYOD1 regulons), narrow mode fragments them; use `--broad --broad-cutoff 0.1`. But do not run IDR on broad peaks.
 - Re-center peaks on summits +/- 250 bp (Corces 2018 Science fixed-width convention) for differential analysis to avoid width-driven count differences.
 - IDR ranking column matters: use `--rank p.value` (column 8 of narrowPeak); `--rank signal.value` is unreliable when MACS pileup scaling differs.

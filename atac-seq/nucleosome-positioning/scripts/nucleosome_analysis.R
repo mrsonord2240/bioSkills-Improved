@@ -74,7 +74,8 @@ analyze_nucleosomes <- function(bam_file, output_prefix='nucleosome', tss_bed=NU
     rtracklayer::export(objs$mononucleosome,
                         sprintf('%s_mono.bam', output_prefix))
 
-    # Summary
+    # Summary. Counts use unshifted fragment widths; the exported NFR/mono BAMs are split from the
+    # Tn5-shifted fragments (9 bp shorter), so their read counts differ from these.
     summary <- data.frame(
         sample = output_prefix,
         total_pairs = length(gal),

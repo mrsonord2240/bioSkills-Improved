@@ -16,10 +16,26 @@ run_signac <- function(h5_file='outs/filtered_peak_bc_matrix.h5',
 
     stopifnot(requireNamespace('leidenbase', quietly=TRUE))  # FindClusters(algorithm=4)
     counts <- Read10X_h5(h5_file)
+    if (is.list(counts)) counts <- counts[['Peaks']]  # cellranger-arc matrix holds 'Gene Expression' and 'Peaks'
     metadata <- read.csv(metadata_file, header=TRUE, row.names=1)
-    need <- c('passed_filters', 'peak_region_fragments', 'blacklist_region_fragments')
-    if (!all(need %in% colnames(metadata)))  # e.g. cellranger-arc per_barcode_metrics.csv names differ
-        stop('metadata file lacks columns: ', paste(setdiff(need, colnames(metadata)), collapse=', '))
+    arc <- 'atac_fragments' %in% colnames(metadata)    # cellranger-arc per_barcode_metrics.csv
+    if (arc) {
+        # ARC: first column = GEX barcode = barcode used by the matrix and by atac_fragments.tsv.gz
+        need <- c('atac_fragments', 'atac_peak_region_fragments')
+        if (!all(need %in% colnames(metadata))) stop('ARC metadata lacks columns: ', paste(setdiff(need, colnames(metadata)), collapse=', '))
+        metadata <- metadata[colnames(counts), , drop=FALSE]
+        if (anyNA(rownames(metadata))) stop('matrix barcodes are missing from the ARC metadata (wrong sample pairing?)')
+        metadata$passed_filters <- metadata$atac_fragments
+        metadata$peak_region_fragments <- metadata$atac_peak_region_fragments
+        if (all(c('atac_mitochondrial_reads', 'atac_raw_reads') %in% colnames(metadata))) {
+            metadata$mitochondrial <- metadata$atac_mitochondrial_reads; metadata$total <- metadata$atac_raw_reads
+        }
+        cat('Metadata mode: cellranger-arc (blacklist ratio from the peak matrix; mito = mito reads / raw reads)\n')
+    } else {
+        need <- c('passed_filters', 'peak_region_fragments', 'blacklist_region_fragments')
+        if (!all(need %in% colnames(metadata)))
+            stop('metadata file lacks columns: ', paste(setdiff(need, colnames(metadata)), collapse=', '))
+    }
 
     # EnsDb is Ensembl-style (1, 2, X) with no genome; the object is hg38/UCSC (chr1)
     ann <- GetGRangesFromEnsDb(EnsDb.Hsapiens.v86)
@@ -38,7 +54,8 @@ run_signac <- function(h5_file='outs/filtered_peak_bc_matrix.h5',
     obj <- NucleosomeSignal(obj)
     obj <- TSSEnrichment(obj, fast=FALSE)
     obj$pct_reads_in_peaks <- obj$peak_region_fragments / obj$passed_filters * 100
-    obj$blacklist_ratio <- obj$blacklist_region_fragments / obj$peak_region_fragments
+    obj$blacklist_ratio <- if (arc) FractionCountsInRegion(obj, assay='ATAC', regions=blacklist_hg38_unified)
+                           else obj$blacklist_region_fragments / obj$peak_region_fragments
     if ('mitochondrial' %in% colnames(metadata)) obj$mito_fraction <- obj$mitochondrial / obj$total
 
     # QC plots

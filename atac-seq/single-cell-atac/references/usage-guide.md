@@ -27,7 +27,7 @@ BiocManager::install('scDblFinder')
 Inputs (from 10X Cell Ranger ATAC or Multiome):
 - `outs/fragments.tsv.gz` (and `.tbi` index)
 - `outs/filtered_peak_bc_matrix.h5` (Signac path)
-- `outs/singlecell.csv` (per-barcode metadata)
+- `outs/singlecell.csv` (ATAC 1.x/2.x) or `per_barcode_metrics.csv` (ARC) (per-barcode metadata)
 
 ## Example requests
 

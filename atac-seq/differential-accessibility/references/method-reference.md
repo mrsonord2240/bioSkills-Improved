@@ -146,7 +146,7 @@ abs(log2FC) >= 1 is *not* universal. ATAC effects in primary cells (immune subse
 
 **Goal:** Recover differential accessibility signal when unknown batch effects swamp the contrast.
 
-**Approach:** Estimate surrogate variables via svaseq, append them to the design, refit, and extract the contrast. `scripts/diff_accessibility.R --sva=N` does this inside DiffBind; the block below is the standalone DESeq2 recipe. `n.sv` must not exceed `n_samples - ncol(mod) - 1` (4 samples: 1), or svaseq returns NaN.
+**Approach:** Estimate surrogate variables via svaseq, append them to the design, refit, and extract the contrast. `scripts/diff_accessibility.R --sva=N` does this in DESeq2 directly on the DiffBind counts (limits: SKILL.md step 5); the block below is the standalone DESeq2 recipe. `n.sv` must not exceed `n_samples - ncol(mod) - 1` (4 samples: 1), or svaseq returns NaN.
 
 ```r
 library(DESeq2); library(sva)

@@ -4,6 +4,8 @@ description: ATAC-seq library quality control -- TSS enrichment, FRiP, fragment-
 tool_type: mixed
 primary_tool: deeptools
 license: MIT
+category: Data Analysis
+author: GPTomics
 ---
 
 ## Version Compatibility

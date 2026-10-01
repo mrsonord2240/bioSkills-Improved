@@ -2,6 +2,8 @@
 name: bio-atac-seq-motif-deviation
 description: Analyze TF motif accessibility variability across samples or single cells using chromVAR. Use when identifying TF motifs whose accessibility correlates with conditions, computing per-sample motif z-scores after matched background correction, comparing to ArchR / Signac equivalents, or distinguishing motif-accessibility signal from per-site footprinting.
 license: MIT
+category: Data Analysis
+author: GPTomics
 ---
 
 # Motif Deviation (chromVAR)
@@ -19,7 +21,7 @@ chromVAR asks whether peaks containing a motif are systematically more or less a
 For each (motif, sample) pair:
 - **Raw deviation**: (observed - expected) / expected, where observed is the count summed over motif-containing peaks and expected is that motif's share of the population-average peak proportions times the sample's depth.
 - **Bias-corrected deviation**: raw deviation minus the mean raw deviation of matched-background peak sets (matched on GC content and mean accessibility).
-- **Z-score**: bias-corrected deviation divided by the SD of the background raw deviations; the principal output. Positive means the motif is more accessible in this sample than the population average, negative means less. Magnitude depends on the contrast: between GM12878 and K562 the top motifs exceeded 9 in absolute value.
+- **Z-score**: bias-corrected deviation divided by the SD of the background raw deviations; the principal output. Positive means the motif is more accessible in this sample than the population average, negative means less. Magnitude depends on the contrast: between GM12878 and K562 the top motifs reached |z| of about 7 per sample.
 
 ## Choose a workflow
 

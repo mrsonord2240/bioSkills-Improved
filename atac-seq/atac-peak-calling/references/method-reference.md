@@ -116,18 +116,9 @@ Wrong size shifts every q-value but rarely changes peak ranks. Use `unique-kmers
 
 To reproduce a published ENCODE 3 dataset, pin the original pipeline and threshold exactly. ENCODE 4 results are not directly numerically comparable to ENCODE 3 even on the same input BAM.
 
-## Super-Enhancer Detection
+## Super-Enhancers
 
-For active super-enhancer (SE) annotation alongside narrow-peak workflow, ROSE (Whyte 2013) and LILY (Boeva 2017) stitch ATAC or H3K27ac peaks separated by < 12.5 kb and rank by signal:
-
-```bash
-# Illustrative, not executed in this Skill's tests (ROSE not installed). ROSE reads a GFF, not narrowPeak:
-awk 'BEGIN{OFS="\t"} {print $1, $4, "", $2+1, $3, "", ".", "", $4}' atac_peaks.narrowPeak > atac_peaks.gff
-# ROSE expects H3K27ac BAM but works on ATAC peaks with care; needs R and samtools
-ROSE_main.py -g hg38 -i atac_peaks.gff -r atac.bam -o rose_out/ -t 2500
-```
-
-ROSE-style stitching is complementary to MACS3 narrow peaks: narrow peaks for differential analysis; SE annotation for biology interpretation. SE calls require H3K27ac input for definitive annotation; ATAC alone produces "stretch enhancers" that overlap but are not identical to H3K27ac SE.
+Super-enhancer calling (ROSE; Whyte 2013) is defined on H3K27ac, MED1 or BRD4 ChIP-seq signal, not on ATAC-seq. ROSE-style stitching of ATAC peaks can be applied when no ChIP data exist, but it is not a standard ATAC-seq analysis, and its calls are not comparable to published super-enhancer sets. For the full workflow (stitching and TSS-exclusion parameters, signal ranking and inflection, marker choice, hg38 implementation caveats), use the `bio-chipseq-super-enhancers` Skill.
 
 ## ENCODE-Style ATAC-seq Pipeline (Reference Implementation)
 
@@ -195,7 +186,7 @@ idr --samples psr1_peaks.narrowPeak psr2_peaks.narrowPeak \
 | Bulk ATAC, 1 sample (no rep) | MACS3 callpeak with `-q 0.05`; do not run IDR | IDR is meaningless without reps; tighter q-value substitutes |
 | Bulk ATAC, deep library, want NFR + flanking nuc structure | MACS3 hmmratac | HMM separates NFR from nucleosome flanks |
 | Multi-replicate joint analysis where rep weighting is symmetric | Genrich `-j` ATAC mode | Joint p-value across reps; built-in chrM and blacklist |
-| Cell type with broad super-enhancer accessibility | MACS3 `--broad --broad-cutoff 0.1` for SE; narrow for differential | Domain-level inference vs site-level |
+| Cell type with broad accessible domains | MACS3 `--broad --broad-cutoff 0.1` for domains; narrow for differential | Domain-level inference vs site-level; super-enhancer calling is a separate ChIP-based workflow (see Super-Enhancers) |
 | FFPE / degraded chromatin (flat fragment dist) | MACS3 callpeak with stringent `-q 0.01`; never HMMRATAC | HMM needs fragment periodicity |
 | scATAC pseudobulk per cluster | MACS3 callpeak per cluster + iterative overlap | See atac-seq/single-cell-atac |
 | Want fixed-width consensus peaks for differential | Call broadly, then re-center to summits +/- 250 bp | See atac-seq/consensus-peakset |

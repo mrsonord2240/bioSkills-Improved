@@ -4,6 +4,8 @@ description: Identify differentially accessible chromatin regions across conditi
 tool_type: r
 primary_tool: DiffBind
 license: MIT
+category: Data Analysis
+author: GPTomics
 ---
 
 # Differential Accessibility
@@ -19,7 +21,7 @@ Find chromatin regions that change accessibility between conditions. Build a sam
    - Direct DESeq2/edgeR on existing peak-count matrix: for existing featureCounts output
 3. Select normalization approach: full-library (script default, preserves global shifts), reads-in-peaks or `native` RLE/TMM (when background varies independently of biology), or spike-in (when global compaction is biological; recipe only).
 4. Add batch/donor/time covariates to the design when applicable.
-5. Apply SVA or RUVseq for hidden batch effects when empirical surrogates are needed.
+5. Apply SVA or RUVseq for hidden batch effects when empirical surrogates are needed. The script's `--sva` mode fits DESeq2 directly: it ignores `--method` and `--design`, skips the blacklist filter and heatmap, and applies `lfc_thr` as a hard post-filter, whereas the default path passes it to DiffBind as an lfcThreshold test (stricter), so hit counts are not comparable across modes. With few samples `n.sv` is capped (4 samples allow 1) and surrogates can absorb real signal.
 6. Report results at FDR threshold and effect-size cutoff; annotate differential peaks to genes.
 7. Document the consensus peakset strategy, normalization choice, tool versions, and software environment.
 

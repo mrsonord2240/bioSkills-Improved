@@ -1,10 +1,11 @@
 #!/bin/bash
 # Tested with TOBIAS 0.17.5, samtools 1.19, bedtools 2.31 | Verify flags against `TOBIAS <tool> --help` if the version differs
 # TOBIAS three-step ATAC-seq footprinting: bias correction, footprint scoring, differential bound/unbound calls,
-# a CTCF positive-control plot per condition, and a ranked differential summary.
+# a CTCF positive control per condition (aggregate plot plus a bias-correction check), and a ranked differential summary.
 #
 # Usage: run_tobias.sh cond1.bam cond2.bam peaks.bed genome.fa blacklist.bed motifs.pfm [outdir] [cores]
 # Environment: ALLOW_NO_CTCF=1  continue (exit 0) when the motif file yields no CTCF motif; default is to exit 3
+#              BIAS_R_MAX=0.2   exit 4 when the corrected all-site CTCF aggregate correlates with the bias-only expectation above this
 #              PMAX=0.05        p-value ceiling for the differential summary
 
 set -euo pipefail
@@ -72,10 +73,19 @@ TOBIAS BINDetect \
 RESULTS="$OUTDIR/bindetect/bindetect_results.txt"
 [ -s "$RESULTS" ] || { echo "ERROR: BINDetect wrote no $RESULTS" >&2; exit 1; }
 
-# Positive control: CTCF aggregate at all, bound and unbound sites, uncorrected vs corrected signal, per condition.
-# Each condition is plotted at its own bound sites. Motif directory names follow the JASPAR name (CTCF_<ID>).
+# Positive control: CTCF aggregate at all, bound and unbound sites of uncorrected, bias-only expected and corrected signal,
+# per condition. Each condition is plotted at its own bound sites. Motif directory names follow the JASPAR name (CTCF_<ID>).
+# Bias check: over ALL CTCF sites (not selected by footprint score) the uncorrected aggregate follows ATACorrect's bias-only
+# expectation (_expected.bw); after real correction it no longer does. Pearson r(corrected, expected) > BIAS_R_MAX fails.
+BIAS_R_MAX=${BIAS_R_MAX:-0.2}
+pearson_vs_expected() {   # $1 aggregate txt, $2 signal label -> Pearson r with "expected" across the all-site profile
+    awk -F'\t' -v s="$2" '$2=="all" && ($1==s || $1=="expected") {n=split($3, v, ","); for (i=1; i<=n; i++) x[$1, i]=v[i]}
+        END {for (i=1; i<=n; i++) {a=x[s, i]; b=x["expected", i]; sa+=a; sb+=b; saa+=a*a; sbb+=b*b; sab+=a*b}
+             d=sqrt((n*saa-sa*sa)*(n*sbb-sb*sb)); if (n<3 || d==0) print "nan"; else printf "%.3f\n", (n*sab-sa*sb)/d}' "$1"
+}
 CTCF_ALL=( "$OUTDIR"/bindetect/CTCF_*/beds/CTCF_*_all.bed )
 NO_CTCF=0
+BIAS_FAIL=0
 if [ ! -f "${CTCF_ALL[0]}" ]; then
     NO_CTCF=1
     echo "WARNING: no CTCF motif in $MOTIFS produced beds; the positive-control plot was NOT made." >&2
@@ -84,20 +94,29 @@ else
     CTCF_DIR=$(dirname "$(dirname "${CTCF_ALL[0]}")")
     CTCF_ID=$(basename "$CTCF_DIR")               # first CTCF variant in sort order (MA0139.2 in JASPAR 2024)
     for cond in cond1 cond2; do
+        TXT="$OUTDIR/validation/ctcf_${cond}_aggregate.txt"
         TOBIAS PlotAggregate \
             --TFBS "$CTCF_DIR/beds/${CTCF_ID}_all.bed" \
                    "$CTCF_DIR/beds/${CTCF_ID}_${cond}_bound.bed" \
                    "$CTCF_DIR/beds/${CTCF_ID}_${cond}_unbound.bed" \
             --TFBS-labels all bound unbound \
-            --signals "$(one_match "$OUTDIR/$cond" "*_uncorrected.bw")" "$(one_match "$OUTDIR/$cond" "*_corrected.bw")" \
-            --signal-labels uncorrected corrected \
+            --signals "$(one_match "$OUTDIR/$cond" "*_uncorrected.bw")" "$(one_match "$OUTDIR/$cond" "*_expected.bw")" \
+                      "$(one_match "$OUTDIR/$cond" "*_corrected.bw")" \
+            --signal-labels uncorrected expected corrected \
             --output "$OUTDIR/validation/ctcf_${cond}_aggregate.pdf" \
-            --output-txt "$OUTDIR/validation/ctcf_${cond}_aggregate.txt" \
+            --output-txt "$TXT" \
             --share-y both --plot-boundaries
         echo "Validation plot: $OUTDIR/validation/ctcf_${cond}_aggregate.pdf ($CTCF_ID)"
+        R_UNC=$(pearson_vs_expected "$TXT" uncorrected)
+        R_COR=$(pearson_vs_expected "$TXT" corrected)
+        echo "Bias check $cond (all CTCF sites): r(uncorrected, expected) = $R_UNC, r(corrected, expected) = $R_COR (fail above $BIAS_R_MAX)"
+        if ! awk -v r="$R_COR" -v m="$BIAS_R_MAX" 'BEGIN {exit !(r != "nan" && r+0 <= m+0)}'; then
+            BIAS_FAIL=1
+            echo "WARNING: $cond corrected CTCF aggregate still follows the Tn5 bias expectation; bias correction looks absent or failed." >&2
+        fi
     done
     echo "Expect a central dip with flanking peaks at bound sites and a flatter profile at unbound sites."
-    echo "A dip at bound sites alone does not prove the bias correction worked; compare the uncorrected panel."
+    echo "A dip at bound sites alone does not prove the bias correction worked; the bias check above tests that."
 fi
 
 # Top differential motifs: |change| descending among p <= PMAX. Motif variants (for example three CTCF IDs) are separate rows.
@@ -113,4 +132,8 @@ awk -F'\t' -v pmax="$PMAX" 'BEGIN {OFS="\t"}
 if [ "$NO_CTCF" = 1 ] && [ "${ALLOW_NO_CTCF:-0}" != 1 ]; then
     echo "ERROR: no CTCF positive control (set ALLOW_NO_CTCF=1 to accept this)." >&2
     exit 3
+fi
+if [ "$BIAS_FAIL" = 1 ]; then
+    echo "ERROR: CTCF bias check failed; inspect ATACorrect output before trusting footprints or differentials." >&2
+    exit 4
 fi

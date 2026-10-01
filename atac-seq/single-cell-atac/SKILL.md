@@ -1,9 +1,11 @@
 ---
 name: bio-atac-seq-single-cell-atac
+category: Data Analysis
 description: Process and analyze single-cell ATAC-seq data with Signac, ArchR, SnapATAC2, or Cell Ranger ATAC. Use when handling 10X scATAC or 10X Multiome (paired RNA+ATAC) data, performing per-cell QC, choosing between ArchR/Signac/SnapATAC2 ecosystems, building per-cluster consensus peaksets, integrating with paired scRNA-seq, doublet detection (AMULET vs ArchR vs scDblFinder), or running pseudobulk differential accessibility per cluster.
-license: MIT
 tool_type: mixed
 primary_tool: Signac
+license: MIT
+author: GPTomics
 ---
 
 # Single-Cell ATAC-seq
@@ -17,7 +19,7 @@ Build a per-cell fragment matrix, compute per-cell QC, reduce dimensionality (TF
 
 ## Version compatibility
 
-Reference examples were written against: Cell Ranger ATAC 2.1+, Signac 1.13+, Seurat 5.0+, ArchR 1.0.2+, SnapATAC2 2.8+, AMULET 1.1+, scDblFinder 1.16+, scater 1.30+, scvi-tools 1.1+, GenomicRanges 1.54+, JASPAR2024 0.99+, BSgenome.Hsapiens.UCSC.hg38 1.4+, EnsDb.Hsapiens.v86 2.99+, MACS3 3.0+. SnapATAC2 2.8+ uses `pp.import_fragments`; 2.5-2.7 used `pp.import_data` (renamed/removed in 2.9). Executed 2026-09-30 with Signac 1.17.1, Seurat 5.5.1, ArchR 1.0.3, SnapATAC2 2.10.0 (`import_data` no longer exists), scvi-tools 1.5.1, scDblFinder 1.23.4, MACS3 3.0.4, AMULET 1.1; Cell Ranger ATAC/ARC were not run.
+Reference examples were written against: Cell Ranger ATAC 2.1+, Signac 1.13+, Seurat 5.0+, ArchR 1.0.2+, SnapATAC2 2.8+, AMULET 1.1+, scDblFinder 1.16+, scater 1.30+, scvi-tools 1.1+, GenomicRanges 1.54+, JASPAR2024 0.99+, BSgenome.Hsapiens.UCSC.hg38 1.4+, EnsDb.Hsapiens.v86 2.99+, MACS3 3.0+. SnapATAC2 2.8+ uses `pp.import_fragments`; 2.5-2.7 used `pp.import_data` (2.8.0 ships both; 2.9.0 and 2.10.0 have only `import_fragments`). Executed 2026-09-30 with Signac 1.17.1, Seurat 5.5.1, ArchR 1.0.3, SnapATAC2 2.10.0, scvi-tools 1.5.1, scDblFinder 1.23.4, MACS3 3.0.4, AMULET 1.1; Cell Ranger ATAC/ARC were not run; their outputs were read from 10x public datasets (ATAC 1.0.1, ATAC 2.1.0, ARC 2.0.0).
 
 Before use, check installed versions and signatures: `pip show <package>` and `help(module.function)` (Python), `packageVersion('<pkg>')` and `?function_name` (R), `<tool> --version` and `--help` (CLI). If code errors unexpectedly, introspect the installed package and adapt rather than retrying.
 
@@ -79,7 +81,7 @@ Choose the primary tool by depth: measure median valid read pairs per cell first
 
 ## Workflows
 
-- Signac (standard R pipeline): run [`scripts/signac_workflow.R`](scripts/signac_workflow.R) (`Rscript scripts/signac_workflow.R <h5> <fragments.tsv.gz> <singlecell.csv>`). It loads 10X output, computes per-cell QC, filters, runs TF-IDF + SVD, UMAP and Leiden clustering with LSI component 1 skipped (`dims=2:30`, because component 1 tracks sequencing depth), and builds a gene-activity assay. Optional args 4 and 5 set the TSS and fragment minimums (defaults 4 and 1000). It assumes hg38 with `EnsDb.Hsapiens.v86` and converts that annotation to UCSC style (`seqlevelsStyle(ann) <- 'UCSC'`, `genome(ann) <- 'hg38'`) because `CreateChromatinAssay` rejects Ensembl-style annotation on an hg38/UCSC object; apply the same conversion to any assay you build from `GetGRangesFromEnsDb`. Edit the genome and annotation for other assemblies. It reads Cell Ranger ATAC 1.x `singlecell.csv` columns and stops with a clear message if they are missing (cellranger-arc column names were not tested).
+- Signac (standard R pipeline): run [`scripts/signac_workflow.R`](scripts/signac_workflow.R) (`Rscript scripts/signac_workflow.R <h5> <fragments.tsv.gz> <singlecell.csv | per_barcode_metrics.csv>`). It loads 10X output, computes per-cell QC, filters, runs TF-IDF + SVD, UMAP and Leiden clustering with LSI component 1 skipped (`dims=2:30`, because component 1 tracks sequencing depth), and builds a gene-activity assay. Optional args 4 and 5 set the TSS and fragment minimums (defaults 4 and 1000). It assumes hg38 with `EnsDb.Hsapiens.v86` and converts that annotation to UCSC style (`seqlevelsStyle(ann) <- 'UCSC'`, `genome(ann) <- 'hg38'`) because `CreateChromatinAssay` rejects Ensembl-style annotation on an hg38/UCSC object; apply the same conversion to any assay you build from `GetGRangesFromEnsDb`. Edit the genome and annotation for other assemblies. Metadata is auto-detected: ATAC 1.x/2.x `singlecell.csv` (`passed_filters`, `peak_region_fragments`, `blacklist_region_fragments`) or cellranger-arc `per_barcode_metrics.csv` (has `atac_fragments`). For ARC it reads the `Peaks` matrix from the combined h5 (matrix, fragments and first csv column all use the GEX-style `barcode`), takes `atac_fragments` and `atac_peak_region_fragments` as the fragment and peak counts, takes the blacklist ratio from the peak matrix (`FractionCountsInRegion` on `blacklist_hg38_unified`, since ARC has no blacklist column; few ARC peaks overlap the blacklist, so this ratio stays near 0 (max 0.004 on PBMC 3k, versus up to 0.18 from the ATAC `singlecell.csv` column) and the 0.05 cut removes no cells) and mitochondrial fraction as `atac_mitochondrial_reads / atac_raw_reads`. It stops with a clear message if required columns are missing.
 - ArchR, SnapATAC2, per-cluster pseudobulk peak calling (MACS3), and Multiome WNN: see [`references/ecosystem-workflows.md`](references/ecosystem-workflows.md).
 
 Per-cluster pseudobulk peaks need enough reads: peak calls from small clusters are unreliable (rule of thumb, not a tested cutoff: aggregate clusters under ~200 cells into a "rare" group or drop them), and use the union of larger-cluster peaks for rare-cell analysis. Build the across-cluster consensus with `atac-seq/consensus-peakset`. Run chromVAR / AddMotifs only after the peakset is final.

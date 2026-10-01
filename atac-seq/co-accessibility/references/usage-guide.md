@@ -27,7 +27,7 @@ Inputs: scATAC peak-cell matrix (from Signac, ArchR, or SnapATAC2 preprocessing)
 Tell your AI agent what you want to do:
 - "Run Cicero on a Signac scATAC-seq object to get peak-pair co-accessibility"
 - "Use ArchR getCoAccessibility for an ArchR project; connection cutoff 0.5"
-- "Find enhancer-gene candidates by overlapping connections with promoters in `tssRegion=c(-2000, 500)`"
+- "Find enhancer-gene candidates by overlapping connections with promoters (TSS +/- 2 kb)"
 - "Compare Cicero connections against published Hi-C loops to estimate concordance"
 - "Run SCENIC+ on Multiome data to infer TF -> enhancer -> gene networks"
 

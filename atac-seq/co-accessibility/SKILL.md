@@ -4,6 +4,8 @@ description: Infer cis-regulatory connections (peak-to-peak co-accessibility) fr
 tool_type: r
 primary_tool: cicero
 license: MIT
+category: Data Analysis
+author: GPTomics
 ---
 
 # Co-accessibility (cis-Regulatory Linkage)

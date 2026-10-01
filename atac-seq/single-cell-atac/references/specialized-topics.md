@@ -11,7 +11,7 @@
 
 **Mechanism:** The two produce different output structures. cellranger-arc fragments carry barcodes paired with the RNA matrix; cellranger-atac fragments are ATAC-only with their own barcode universe.
 
-**Fix:** Verify the chemistry on the cellranger summary (look for "Multiome" in the run config). Use `Read10X_h5` for cellranger-arc Multiome RNA output and `CreateChromatinAssay` with the matched fragments for the ATAC. Mixing barcodes across pipelines fails silently.
+**Fix:** Verify the chemistry on the cellranger summary (look for "Multiome" in the run config). Use `Read10X_h5` for cellranger-arc Multiome RNA output and `CreateChromatinAssay` with the matched fragments for the ATAC. In `per_barcode_metrics.csv` the first column `barcode` equals `gex_barcode` and is the barcode used by the matrix, the BAM `CB` tag and `atac_fragments.tsv.gz`; `atac_barcode` is the raw ATAC barcode and matches none of them. Mixing barcodes across pipelines fails silently.
 
 ## Cell-cycle correction
 
@@ -21,7 +21,7 @@
 
 **Detection:** In Multiome data, score S phase from the paired RNA with Seurat `CellCycleScoring` (`cc.genes.updated.2019`). ATAC-only data needs a chromatin proxy (for example a Repli-seq peak overlap score); none is validated here.
 
-**Fix:** `ScaleData(obj, vars.to.regress=...)` cannot change the LSI: `RunSVD` reads the TF-IDF `data` layer, not `scale.data` (and the audit saw `ScaleData` error on the full peak set). Regress the score out of the LSI embedding instead (component 1 is depth and is skipped anyway; on 10x Multiome PBMC data this took max |cor(LSI dim, S score)| from 0.26 to 0):
+**Fix:** `ScaleData(obj, vars.to.regress=...)` cannot change the LSI: `RunSVD` reads the TF-IDF `data` layer, not `scale.data`. Regress the score out of the LSI embedding instead (component 1 is depth and is skipped anyway; on 10x Multiome PBMC data this took max |cor(LSI dim, S score)| from 0.26 to 0):
 
 ```r
 lsi <- Embeddings(obj, 'lsi')
