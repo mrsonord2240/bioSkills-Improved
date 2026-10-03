@@ -14,8 +14,8 @@ No API keys required for the listed resources (as of 2026). Rate limits: Ensembl
 
 ## Quick Start
 
-- "Get the mouse ortholog of human BRCA1 from Ensembl Compara, with confidence score"
-- "Pull orthologs of TP53 across all vertebrate species in OrthoDB"
+- "Get the mouse ortholog of human BRCA1 from Ensembl Compara, with ortholog type and identity"
+- "Pull orthologs of TP53 across all vertebrate species in OrthoDB (verify the group: /search is full text)"
 - "Compare Compara, OMA, and OrthoDB calls for the same gene and flag disagreements"
 - "Batch-fetch mouse orthologs for 500 human genes, respecting Compara's 15-req/sec limit"
 - "Resolve the human/yeast ortholog of MARCHF1 -- remember the symbol was MARCH1 before 2020"
@@ -24,7 +24,7 @@ No API keys required for the listed resources (as of 2026). Rate limits: Ensembl
 
 ### Single-gene cross-species lookup
 
-> "Get the high-confidence 1:1 ortholog of human BRCA1 in mouse via Ensembl Compara REST. Filter type='ortholog_one2one' and confidence=1. Return the Ensembl Mouse Gene ID plus identity percentages."
+> "Get the 1:1 ortholog of human BRCA1 in mouse via Ensembl Compara REST. Filter type='ortholog_one2one' (current Compara records have no confidence field). Return the Ensembl Mouse Gene ID plus identity percentages."
 
 ### Cross-resource consensus
 
@@ -55,7 +55,7 @@ No API keys required for the listed resources (as of 2026). Rate limits: Ensembl
    - Functional groups: eggNOG
    - Pathway-centric: KEGG Orthology
 2. Resolve gene symbols to canonical IDs before symbol-based lookups (HGNC symbols are unstable).
-3. Use the right confidence field per resource; don't compare confidence across resources.
+3. Use the right quality signal per resource (Compara type and identity, OMA rel_type, OrthoDB group); don't compare across resources.
 4. For batches >100, throttle to per-resource rate limits; respect Retry-After.
 5. For batches >5000, use BioMart bulk export instead of REST loops.
 6. When resources disagree, intersect; surface disagreement as a signal not an error.
@@ -65,13 +65,13 @@ No API keys required for the listed resources (as of 2026). Rate limits: Ensembl
 ## Tips
 
 - Ensembl REST has a 15 req/sec rate limit (55K/hour). Sleep 0.07s between calls; check `Retry-After` on 429.
-- HomoloGene is frozen at 2014 -- use only for legacy comparisons; switch live workflows to Compara or OrthoDB.
+- HomoloGene is frozen at 2014 and no longer served by NCBI E-utilities -- treat as retired; use Compara or OrthoDB.
 - For thousands of genes, BioMart bulk export beats REST loops by 100x -- see `biomart-queries`.
 - HGNC gene-symbol renames break symbol-based queries. The big ones: MARCH1->MARCHF1, SEPT1->SEPTIN1 (Excel autocorrect drove the renaming in 2020). Always resolve to Ensembl Gene IDs first.
 - KEGG license is academic-free, commercial-paid. eggNOG and OrthoDB licenses are more permissive for commercial use.
 - Resource disagreement is informative. If Ensembl says 1:1 but OMA gives no call, the gene tree is probably ambiguous -- flag this for review.
 - The orthology conjecture (orthologs share function) is supported but weakly (Studer & Robinson-Rechavi 2009). For drug-target or clinical questions, cross-validate orthology with shared catalytic residues or expression conservation.
-- eggNOG-mapper (Cantalapiedra 2021) is the right tool for batch annotation; the eggNOG REST API is for ad hoc lookup only.
+- eggNOG-mapper (Cantalapiedra 2021) is the right tool for batch annotation; the eggNOG web API is for ad hoc lookup only (on 2026-10-03 eggnogdb.org/api returned 403 to scripts and eggnog6.embl.de failed TLS verification).
 - KEGG returns text TSV by default (not JSON) -- parse with `line.split('\t')`.
 
 ## Related Skills

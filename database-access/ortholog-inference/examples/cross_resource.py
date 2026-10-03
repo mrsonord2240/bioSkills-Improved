@@ -1,64 +1,63 @@
 '''Cross-resource ortholog consensus: query Ensembl Compara, OMA REST, and OrthoDB; surface disagreement.'''
 # Reference: requests 2.31+ | Verify API if version differs
-import requests
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
 import time
 
-ENSEMBL = 'https://rest.ensembl.org'
-OMA = 'https://omabrowser.org/api'
-ORTHODB = 'https://data.orthodb.org/v12'
+from ortholog_clients import (compara_orthologs, oma_orthologs, orthodb_group_has_gene,
+                              orthodb_orthologs, orthodb_search)
+
 SLEEP = 0.1
+SYMBOL, UNIPROT = 'TP53', 'P04637'   # OMA has no orthologs for BRCA1 P38398 (200 with [])
 
 
-def ensembl_orthologs(symbol, source='human', target='mouse'):
-    r = requests.get(f'{ENSEMBL}/homology/symbol/{source}/{symbol}',
-                     params={'type': 'orthologues', 'target_species': target},
-                     headers={'Accept': 'application/json'})
-    r.raise_for_status()
-    data = r.json()['data']
-    if not data:
-        return []
-    return [h['target']['id'] for h in data[0]['homologies'] if h['type'].startswith('ortholog')]
+def run(label, fn):
+    """Isolate each resource: report unavailable (raised) separately from empty (no call)."""
+    try:
+        out = fn()
+    except Exception as e:  # network, 5xx after retries, schema surprise
+        print(f'  UNAVAILABLE ({type(e).__name__}): {e}')
+        return None
+    if not out:
+        print('  empty: the resource returned no call')
+    return out
 
 
-def oma_orthologs(uniprot_acc):
-    r = requests.get(f'{OMA}/protein/{uniprot_acc}/orthologs/')
-    if r.status_code == 404:
-        return []
-    r.raise_for_status()
-    return [o.get('canonicalid') or o.get('omaid') for o in r.json()]
-
-
-def orthodb_groups(symbol, species_taxid=9606):
-    r = requests.get(f'{ORTHODB}/search', params={'query': symbol, 'species': species_taxid})
-    r.raise_for_status()
-    return r.json().get('data', [])
-
-
-def orthodb_orthologs(og_id, species_taxid=10090):
-    '''Members of an OG at a target species level (10090 = mouse).'''
-    r = requests.get(f'{ORTHODB}/orthologs', params={'id': og_id, 'species': species_taxid})
-    if r.status_code != 200:
-        return []
-    return [m.get('gene_id', {}).get('id') for m in r.json().get('data', [])]
-
-
-print('=== Compara: BRCA1 human -> mouse ===')
-ensembl_hits = ensembl_orthologs('BRCA1', 'human', 'mouse')
-print(f'  {len(ensembl_hits)} hits: {ensembl_hits}')
+print(f'=== Compara: {SYMBOL} human -> mouse ===')
+hits = run('compara', lambda: [o['target_id'] for o in compara_orthologs('human', SYMBOL, 'mouse')
+                               if o['type'].startswith('ortholog')])
+if hits:
+    print(f'  {len(hits)} hits: {hits}')
 time.sleep(SLEEP)
 
-print('\n=== OMA: BRCA1 (UniProt P38398) human -> mouse ===')
-oma_hits = oma_orthologs('P38398')
-mouse_oma = [o for o in oma_hits if o and 'MOUSE' in str(o)]
-print(f'  Total OMA orthologs: {len(oma_hits)}; mouse subset: {mouse_oma[:5]}')
+print(f'\n=== OMA: {SYMBOL} (UniProt {UNIPROT}) human -> mouse, 1:1 ===')
+oma = run('oma', lambda: oma_orthologs(UNIPROT, rel_type='1:1'))
+if oma:
+    mouse = [o.get('canonicalid') or o.get('omaid') for o in oma if o.get('species', {}).get('code') == 'MOUSE']
+    print(f'  OMA 1:1 orthologs: {len(oma)}; mouse: {mouse}')
 time.sleep(SLEEP)
 
-print('\n=== OrthoDB: BRCA1 at human level, mouse members ===')
-groups = orthodb_groups('BRCA1', species_taxid=9606)
-print(f'  OrthoDB groups containing BRCA1: {groups[:3]}')
-if groups:
-    mouse_members = orthodb_orthologs(groups[0], species_taxid=10090)
-    print(f'  Group {groups[0]} mouse members: {mouse_members[:5]}')
+print(f'\n=== OrthoDB: {SYMBOL} (full-text search, group verified by human member) ===')
+
+
+def orthodb_leg():
+    # /search is full text: TP53 returns TIGAR/TP53-target groups first. Search by protein
+    # name, keep groups named exactly that, then keep one that contains the human gene.
+    for g in orthodb_search('tumor protein p53', species_taxid=9606):
+        if g['name'].lower() != 'tumor protein p53':
+            continue
+        time.sleep(SLEEP)
+        if orthodb_group_has_gene(g['id'], SYMBOL, 9606):
+            return g, sorted(set(orthodb_orthologs(g['id'], 10090)))
+    return None
+
+
+found = run('orthodb', orthodb_leg)
+if found:
+    g, mouse_members = found
+    print(f'  Verified group {g["id"]} ({g["name"]}, {g["level_name"]}); mouse members: {mouse_members[:5]}')
 
 print('\n=== Interpretation ===')
 print('Disagreement across resources is informative -- not error.')

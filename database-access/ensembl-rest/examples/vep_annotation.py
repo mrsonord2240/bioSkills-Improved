@@ -1,38 +1,11 @@
 '''VEP via Ensembl REST: ad hoc variant annotation; for bulk (>1K) use local VEP.'''
-# Reference: requests 2.31+, Ensembl REST release 110+ | Verify API if version differs
-import requests
+# Reference: requests 2.31+, Ensembl REST release 116 | Verify API if version differs
+import os
+import sys
 import time
 
-BASE = 'https://rest.ensembl.org'
-HEADERS = {'Accept': 'application/json'}
-SLEEP = 0.07
-
-
-def get_with_retry(url, params=None, max_retries=3):
-    for attempt in range(max_retries):
-        r = requests.get(url, params=params, headers=HEADERS)
-        if r.status_code == 429:
-            time.sleep(int(r.headers.get('Retry-After', '5')))
-            continue
-        r.raise_for_status()
-        return r
-    raise RuntimeError(f'{max_retries} retries exhausted')
-
-
-def vep_region(species, region, allele):
-    '''region format: chr:start-end:strand; allele is the alt base(s).'''
-    r = get_with_retry(f'{BASE}/vep/{species}/region/{region}/{allele}')
-    return r.json()
-
-
-def vep_hgvs(species, hgvs):
-    r = get_with_retry(f'{BASE}/vep/{species}/hgvs/{hgvs}')
-    return r.json()
-
-
-def vep_id(species, variant_id):
-    r = get_with_retry(f'{BASE}/vep/{species}/id/{variant_id}')
-    return r.json()
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
+from ensembl_client import SLEEP, vep_hgvs, vep_id, vep_region
 
 
 def summarize_consequences(vep_result):
@@ -62,8 +35,8 @@ summarize_consequences(res)
 time.sleep(SLEEP)
 
 print('\n=== VEP by HGVS notation ===')
-# HGVS coding format: <RefSeq or Ensembl tx>:c.<position><ref>><alt>
-res = vep_hgvs('human', 'ENST00000366667:c.803G>A')
+# HGVS coding format: <RefSeq or Ensembl tx>:c.<position><ref>><alt>; the ref base must match the transcript (rs699 = AGT c.803C>T)
+res = vep_hgvs('human', 'ENST00000366667:c.803C>T')
 summarize_consequences(res)
 time.sleep(SLEEP)
 

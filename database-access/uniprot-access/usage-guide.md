@@ -36,7 +36,7 @@ No API key required. Rate limit generous (~200 req/sec). ID-mapping has its own 
 
 ### ID mapping async pattern
 
-> "Convert 100 Ensembl Gene IDs to UniProt accessions. Use POST /idmapping/run with from=Ensembl, to=UniProtKB. Poll /idmapping/status/{jobId} every 3 seconds with a 600-second timeout (jobs can hang). Retrieve via /idmapping/results/{jobId}."
+> "Convert 100 Ensembl Gene IDs to UniProt accessions. Use POST /idmapping/run with from=Ensembl, to=UniProtKB. Poll /idmapping/status/{jobId} every 3 seconds with a 600-second timeout (jobs can hang). Retrieve via /idmapping/stream/{jobId} (results/ is paginated; use to=UniProtKB-Swiss-Prot for reviewed only)."
 
 ### Isoform handling
 
@@ -53,7 +53,7 @@ No API key required. Rate limit generous (~200 req/sec). ID-mapping has its own 
 3. For any bulk pull, specify `fields=` explicitly to control payload.
 4. For >500 results, use `/stream` not `/search`.
 5. For ID mapping, follow the async pattern: submit, poll with timeout, retrieve.
-6. Filter `reviewed:true` for reference-quality analyses (avoids 250M TrEMBL).
+6. Filter `reviewed:true` for reference-quality analyses (avoids ~149M TrEMBL).
 7. Combine queries with `organism_id:9606` to scope by species.
 8. Navigate nested JSON with `.get()` chains and defensive defaults.
 9. For isoforms, fetch the `-N` suffixed accession separately; canonical is the default.
@@ -62,14 +62,14 @@ No API key required. Rate limit generous (~200 req/sec). ID-mapping has its own 
 
 - The 2022 endpoint migration is the biggest gotcha for legacy code. Old `https://www.uniprot.org/uniprot/...` URLs may redirect but the JSON schema is the new one -- old field paths break.
 - `?fields=` is essential for bulk; without it each entry is 20-30 KB JSON.
-- Swiss-Prot (`reviewed:true`) is ~570K entries; TrEMBL (auto-annotated) is ~250M. Always filter for reference work.
+- Swiss-Prot (`reviewed:true`) is ~576K entries; TrEMBL (auto-annotated) is ~149M (release 2026_03). Always filter for reference work.
 - The /stream endpoint has no 500-result cap and is the right call for any bulk pull.
 - ID mapping is async: submit, poll, retrieve. Set a poll timeout -- the API doesn't fail-soft.
 - Isoforms have `-N` suffix; the bare accession is the canonical sequence only.
 - Gene symbol `gene:TP53` matches across species; combine with `organism_id:9606` for specificity.
 - `gene_exact:` avoids wildcard matches that `gene:` allows.
-- For reproducible analyses, pin a UniProt release in the citation (e.g. UniProt 2024_06).
-- Reference proteomes (one per species) are at `/proteomes/{upid}.fasta.gz` -- e.g. UP000005640 is human.
+- For reproducible analyses, pin a UniProt release in the citation (e.g. UniProt 2026_03).
+- Reference proteomes (one per species) download via `/uniprotkb/stream?query=proteome:{upid}&format=fasta&compressed=true` -- e.g. UP000005640 is human (`download_proteome`).
 
 ## Related Skills
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Query protein-protein and gene interaction databases (STRING, BioGRID, IntAct, SIGNOR, Reactome, HuRI, HuMAP, OmniPath). Encodes the decision matrix (which resource for which question), STRING v12 channel semantics and confidence tiers, SIGNOR as the only major signed/directed signaling resource, OmniPath as the modern meta-database, BioGRID's HT-vs-LT distinction, per-resource license constraints (commercial restrictions on ConsensusPathDB and PhosphoSitePlus), and the STRING version-pinning trap (v11.5 deprecated 2023).
+Query protein-protein and gene interaction databases (STRING, BioGRID, IntAct, SIGNOR, Reactome, HuRI, HuMAP, OmniPath). Encodes the decision matrix (which resource for which question), STRING v12 channel semantics and confidence tiers, SIGNOR as the only major signed/directed signaling resource, OmniPath as the modern meta-database, BioGRID's HT-vs-LT distinction, per-resource license constraints (commercial restrictions on ConsensusPathDB and PhosphoSitePlus), and the STRING version-pinning trap (older versioned hosts such as v11.5 still answer but serve stale data).
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ BioGRID requires a free API key from `https://webservice.thebiogrid.org/`. All o
 - "Filter BioGRID interactions to physical, low-throughput only (HT screens have higher FP rates)"
 - "Get signed signaling interactions from SIGNOR for MAPK pathway -- with direction and mechanism"
 - "Aggregate STRING + OmniPath + BioGRID into one network; track per-edge provenance"
-- "Use OmniPath with license=commercial to restrict to permissive-license sources"
+- "Use OmniPath with license='commercial' (client-side source screen) and review the remaining sources"
 
 ## Example Prompts
 
@@ -43,7 +43,7 @@ BioGRID requires a free API key from `https://webservice.thebiogrid.org/`. All o
 
 ### License-aware OmniPath
 
-> "I'm building a commercial product. Query OmniPath with license=commercial to filter to commercially-permissive sources only. Audit each source's license before adding to the pipeline."
+> "I'm building a commercial product. Query OmniPath with license='commercial', which screens out sources not marked commercial by OmniPath's resource metadata (the server's own license parameter does not filter). Audit each remaining source's license before adding to the pipeline."
 
 ### Symbol disambiguation
 
@@ -52,7 +52,7 @@ BioGRID requires a free API key from `https://webservice.thebiogrid.org/`. All o
 ## What the Agent Will Do
 
 1. Pick the right resource based on the question (physical/functional, signed/unsigned, HT/LT, species).
-2. For STRING, set `caller_identity` and pin to v12 URL; pick confidence threshold from the use case (700+ for publication).
+2. For STRING, set `caller_identity` and pin to the current versioned URL; pick confidence threshold from the use case (700+ for publication).
 3. For BioGRID, filter `THROUGHPUT='Low Throughput'` and physical experimental systems for high-quality calls.
 4. For SIGNOR, preserve direction and mechanism; use DiGraph not Graph.
 5. For OmniPath, preserve `sources` and `references` per edge for provenance.
@@ -62,15 +62,15 @@ BioGRID requires a free API key from `https://webservice.thebiogrid.org/`. All o
 
 ## Tips
 
-- STRING URL is version-pinned: `version-12-0.string-db.org/api` as of 2024. Older `version-11-5` URLs were deprecated 2023.
+- STRING URL is version-pinned: `version-12-5.string-db.org/api` (current release 12.5 as of 2026-10-02). Older `version-11-5` hosts still answer but serve stale data.
 - STRING `caller_identity` is requested for usage attribution and rate-limit allocation; non-compliant clients get throttled first.
-- STRING combines 7 channels into a single score by default. Treating combined score as "physical interaction" is the most common misuse. Filter to `escore` (experiments channel) for physical-only.
+- STRING combines 7 channels into a single score by default. Treating combined score as "physical interaction" is the most common misuse. Use `network_type=physical` for physical-only (`escore` mixes physical and functional experiments).
 - BioGRID's `THROUGHPUT` flag is the most important quality filter -- LT (low-throughput) is curated and high-confidence; HT (high-throughput screens) has higher FP rates.
 - SIGNOR is **the only major curated database with signed and mechanism-typed interactions**. For any signaling pathway model, SIGNOR is essential.
 - OmniPath (Türei 2021) aggregates 100+ sources with provenance -- the modern one-stop for "give me everything available for X".
 - Reactome is gold-standard for human pathway curation; species coverage outside human is limited.
 - HuRI (binary Y2H interactome) and HuMAP (AP-MS complexes) are reference human-specific resources.
-- For commercial use: stick to STRING + BioGRID + IntAct + SIGNOR + Reactome + HuRI/HuMAP + OmniPath; ConsensusPathDB is academic-only; PhosphoSitePlus requires paid commercial license.
+- For commercial use: stick to STRING + BioGRID + IntAct + SIGNOR + Reactome + HuRI/HuMAP, plus OmniPath after the commercial screen and source review; ConsensusPathDB is academic-only; PhosphoSitePlus requires paid commercial license.
 - For directional resources (SIGNOR, OmniPath), use `nx.DiGraph` not `nx.Graph` to preserve direction.
 
 ## Related Skills

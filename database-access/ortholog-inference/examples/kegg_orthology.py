@@ -1,31 +1,14 @@
 '''KEGG Orthology (KO) lookup: gene -> KO -> all orthologous genes across species.'''
 # Reference: requests 2.31+ | Verify API if version differs
-import requests
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
 import time
 
-BASE = 'https://rest.kegg.jp'
+from ortholog_clients import genes_for_ko, ko_for_gene, ko_info
+
 SLEEP = 0.3  # KEGG: be polite; no strict published limit
-
-
-def ko_for_gene(species, gene):
-    '''species: KEGG code (hsa=human, mmu=mouse, dme=fly). gene: NCBI Gene ID or KEGG locus.'''
-    r = requests.get(f'{BASE}/link/ko/{species}:{gene}')
-    r.raise_for_status()
-    return [line.split('\t')[1].replace('ko:', '') for line in r.text.strip().split('\n') if line]
-
-
-def genes_for_ko(ko_id):
-    '''All KEGG genes annotated with this KO.'''
-    r = requests.get(f'{BASE}/link/genes/{ko_id}')
-    r.raise_for_status()
-    return [line.split('\t')[1] for line in r.text.strip().split('\n') if line]
-
-
-def ko_info(ko_id):
-    '''Description + pathway list for a KO.'''
-    r = requests.get(f'{BASE}/get/{ko_id}')
-    r.raise_for_status()
-    return r.text
 
 
 print('=== Human TP53 (Gene ID 7157) -> KEGG Orthology ===')

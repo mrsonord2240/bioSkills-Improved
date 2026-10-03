@@ -2,7 +2,7 @@
 
 ## Overview
 
-Query Ensembl's REST API for gene/transcript/protein lookup, sequence retrieval, Compara orthologs, VEP variant annotation, regulatory features, and LD. Encodes: the 15 req/sec rate limit (55K/hour); version-pinned archive endpoints (`https://e110.rest.ensembl.org`) for reproducibility; symbol-vs-Ensembl-ID stability (resolve symbol to ID once, then query by ID); Ensembl divisions (vertebrates main host vs Ensembl Genomes for plants/fungi/metazoa/bacteria); and the defection rules (BioMart for >5K queries; local VEP for bulk variant annotation).
+Query Ensembl's REST API for gene/transcript/protein lookup, sequence retrieval, Compara orthologs, VEP variant annotation, regulatory features, and LD. Encodes: the 15 req/sec rate limit (55K/hour); version-pinned archive endpoints (`https://e110.rest.ensembl.org`) for reproducibility; symbol-vs-Ensembl-ID stability (resolve symbol to ID once, then query by ID); Ensembl divisions (all served by the main host; select non-vertebrates by species name from `/info/species?division=...`); and the defection rules (BioMart for >5K queries; local VEP for bulk variant annotation).
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ No API key required. Respect `Retry-After` on 429.
 ## Quick Start
 
 - "Resolve gene symbol BRCA1 to its Ensembl Gene ID; use the ID for all downstream queries"
-- "Get protein sequence for ENSG00000139618 (BRCA2)"
+- "Get the protein sequence for translation ENSP00000269305 (TP53); a gene ID such as ENSG00000139618 needs multiple_sequences=1 and returns one record per transcript"
 - "What genes are in chr17:43000000-43200000? Use the overlap endpoint"
 - "VEP annotate a single missense variant by region/allele notation"
 - "Pin queries to release 110 archive (https://e110.rest.ensembl.org) for reproducibility"
@@ -32,7 +32,7 @@ No API key required. Respect `Retry-After` on 429.
 
 ### VEP for ad hoc variants
 
-> "Annotate this single variant (chr17:41276135 T>G) with VEP. Use /vep/human/region/17:41276135-41276135:1/G. For bulk (>1K variants), download VEP and run locally -- REST rate limit makes bulk infeasible."
+> "Annotate this single variant (chr17:43044295 T>A, GRCh38) with VEP. Use /vep/human/region/17:43044295-43044295:1/A. For GRCh37 coordinates such as 17:41276135, use https://grch37.rest.ensembl.org instead. For bulk (>1K variants), download VEP and run locally -- REST rate limit makes bulk infeasible."
 
 ### Compara orthologs
 
@@ -44,7 +44,7 @@ No API key required. Respect `Retry-After` on 429.
 
 ### Non-vertebrate
 
-> "For Arabidopsis or fungi, switch to rest.ensemblgenomes.org -- the main rest.ensembl.org host is vertebrates only."
+> "For Arabidopsis or fungi, stay on rest.ensembl.org and use the species name from /info/species?division=EnsemblPlants (or EnsemblFungi). The old rest.ensemblgenomes.org host no longer resolves."
 
 ## What the Agent Will Do
 
@@ -53,7 +53,7 @@ No API key required. Respect `Retry-After` on 429.
 3. Respect 15 req/sec rate limit; sleep 0.07s between calls; handle 429 with Retry-After.
 4. For >5,000 queries, recommend BioMart bulk export (separate skill).
 5. For >1,000 variant annotations, recommend local VEP install.
-6. For non-vertebrates, switch to `rest.ensemblgenomes.org` host.
+6. For non-vertebrates, look up the species name via `/info/species?division=...` on the same host.
 7. Use ID-based endpoints over symbol-based for any persistent code.
 8. Document the pinned release in pipeline metadata.
 
@@ -65,7 +65,7 @@ No API key required. Respect `Retry-After` on 429.
 - For >5,000 lookups, the BioMart bulk export beats REST loops by 100x; see `biomart-queries`.
 - VEP via REST is for ad hoc work; for production variant annotation, install VEP locally.
 - The species name accepted is the Ensembl species name (`homo_sapiens` or `human`); see `/info/species` to enumerate.
-- For HGNC-renamed genes (MARCH1, SEPT*), Ensembl mirrors the rename. Symbol lookup for the old name returns 404; use the new symbol or pre-resolve.
+- For HGNC-renamed genes (MARCH1, SEPT*), Ensembl mirrors the rename. Symbol lookup for the old name returns HTTP 400 ('No valid lookup found'); use the new symbol or pre-resolve.
 - Some endpoints accept multiple IDs in POST body (e.g. `/lookup/id` POST with `{"ids": [...]}`); use POST for batches of <500 IDs to reduce request count.
 - For older assembly versions (GRCh37), use `https://grch37.rest.ensembl.org`.
 

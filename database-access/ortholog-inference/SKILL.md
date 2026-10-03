@@ -1,5 +1,6 @@
 ---
 name: bio-ortholog-inference
+category: Data Analysis
 description: Pull pre-computed ortholog calls from public databases (OrthoDB, Ensembl Compara, OMA browser, eggNOG, PANTHER, KEGG Orthology, HomoloGene) via their REST APIs. Use when orthologs are already curated upstream, when the question is "what is the X ortholog of Y" rather than "how to infer orthology de novo", when batch-mapping gene IDs across species, or when comparing the resources for consensus calls. Encodes confidence-level semantics, 1:1 vs 1:many vs many:many, HomoloGene deprecation, and when to defect to de novo computation.
 tool_type: python
 primary_tool: requests
@@ -9,7 +10,7 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: requests 2.31+, pandas 2.2+; OrthoDB v12 API, Ensembl REST (Ensembl release 112+), OMA REST API, eggNOG 6.0+, PANTHER v18+
+Reference code needs requests 2.31+ and pandas 2.2+ (checked with 2.34.2 and 2.3.3). Resource versions: OrthoDB v12 API, Ensembl REST (release 116 live on 2026-10-02), OMA REST API, eggNOG 6.0+, PANTHER v18+.
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show requests pandas`
@@ -21,42 +22,49 @@ If endpoints return 404 or unexpected JSON, check release notes for the resource
 
 **"What is the X ortholog of gene Y?"** -> Many ortholog resources have already done the inference at scale. Pulling their answers is faster and often more reliable than re-computing. This skill is the **database-access** view: how to query the major orthology resources programmatically, what their confidence semantics mean, and when their disagreements matter.
 
-For **de novo orthology inference** (running OrthoFinder, SonicParanoid, OMA standalone on local proteomes), see `comparative-genomics/ortholog-inference` — that's a much deeper treatment of the computational side.
+For **de novo orthology inference** (OrthoFinder, SonicParanoid, OMA standalone on local proteomes) see `comparative-genomics/ortholog-inference`.
 
-This skill is about pulling answers from:
-- **OrthoDB v12** — broadest coverage (1700+ species), levels from species-specific to deep
-- **Ensembl Compara** — vertebrate-focused, tree-reconciled, confidence scores
-- **OMA browser** — high precision, HOG (Hierarchical Orthologous Group) framework
-- **eggNOG 6.0** — pre-computed functional groups, deepest functional annotation
-- **PANTHER** — protein family + ortholog calls with experimentally validated curation
-- **KEGG Orthology (KO)** — pathway-centric orthologous functional units
-- **HomoloGene** — deprecated since 2014, but data still queryable for legacy comparison
+Resources covered:
+- **OrthoDB v12** -- broadest coverage (1700+ species), levels from species-specific to deep
+- **Ensembl Compara** -- vertebrate-focused, tree-reconciled, one2one/one2many/many2many types with identity percentages
+- **OMA browser** -- high precision, HOG (Hierarchical Orthologous Group) framework
+- **eggNOG 6.0** -- pre-computed functional groups, deepest functional annotation
+- **PANTHER** -- protein family + ortholog calls with experimentally validated curation
+- **KEGG Orthology (KO)** -- pathway-centric orthologous functional units
+- **HomoloGene** -- retired (see below)
 
-- Python: `requests.get()` against REST endpoints; `pandas` for parsing
-- CLI: `curl` against the same endpoints; OrthoDB also has bulk downloads
+No API keys are required for any of these (as of 2026), but rate limits apply.
 
-## Required Setup
+## Client and examples
+
+`scripts/ortholog_clients.py` is the single authoritative client (`sys.path.insert(0, 'scripts')`): `get_with_retry` (timeout; retries 429, 5xx and connection errors; used by every helper), `resolve_symbol`, `compara_orthologs`, `compara_one2one`, `batch_compara`, `orthodb_search`, `orthodb_groups`, `orthodb_orthologs`, `orthodb_group_has_gene`, `oma_orthologs`, `oma_hog_for_protein`, `oma_hog_members`, `ko_for_gene`, `genes_for_ko`, `ko_info`.
+
+| Task | Example |
+|---|---|
+| Compara single gene + batch, symbol-rename check | `examples/compara_orthologs.py` |
+| Compara vs OMA vs OrthoDB side by side for TP53 (per-resource error isolation, OrthoDB group verified) | `examples/cross_resource.py` |
+| Gene -> KO -> members across species | `examples/kegg_orthology.py` |
 
 ```python
-import requests
-import pandas as pd
-import time
-```
+from ortholog_clients import compara_one2one, batch_compara
 
-No API keys required for any of these resources (as of 2026), but rate limits apply — see per-resource notes below.
+print(compara_one2one('Brca1', source='mouse', target='human'))   # dict or None; the Compara record has no confidence field
+df = batch_compara(['BRCA1', 'TP53', 'MYC'], source='human', target='mouse')
+print(df[df['type'] == 'ortholog_one2one'][['symbol', 'target_id', 'taxonomy_level', 'target_pid']])
+```
 
 ## Decision matrix: which resource for which question?
 
 | Question | Resource | Why |
 |---|---|---|
-| Ortholog of human gene X in mouse | Ensembl Compara | Best-curated for vertebrates; confidence score per call |
+| Ortholog of human gene X in mouse | Ensembl Compara | Best-curated for vertebrates; ortholog type and identity per call |
 | Ortholog of gene X across all 1700+ species | OrthoDB | Broadest taxonomic coverage |
 | Single-copy orthologs for phylogenomics | OrthoDB at species-tree level | Pre-computed; large taxonomic groups |
-| Functional annotation transfer | eggNOG-mapper or eggNOG API | OG-based functional categories |
-| Pathway-centric orthology (KEGG pathways) | KEGG Orthology (KO) | KO IDs link directly to pathway maps |
+| Functional annotation transfer | eggNOG-mapper | OG-based functional categories |
+| Pathway-centric orthology | KEGG Orthology (KO) | KO IDs link directly to pathway maps |
 | Curated function-aware orthologs | PANTHER | Smaller scope; manually curated; experiment-supported |
 | Compare resource consensus | All of them + intersect | Disagreement is itself a signal |
-| Plant orthology (Ensembl Plants) | Ensembl Compara (plant division) | Better than Ensembl vertebrate for plants |
+| Plant orthology | Ensembl Compara (plants division) | Better than the vertebrate set for plants |
 | Bacterial orthology | OrthoDB or eggNOG bactNOG | Ensembl Bacteria has limited Compara coverage |
 | Custom proteomes not in any database | **De novo computation** | See `comparative-genomics/ortholog-inference` |
 
@@ -64,281 +72,84 @@ No API keys required for any of these resources (as of 2026), but rate limits ap
 
 ### OrthoDB v12
 
-Base URL: `https://data.orthodb.org/v12/`
+Base `https://data.orthodb.org/v12/`, GET, JSON:
+- `/search?query=<text>&species=<NCBI_taxid>` -- **full-text** search over group descriptions, not a gene-symbol lookup. Returns `{'data': [og_id, ...], 'bigdata': [{id, name, level_name, gene_count, ...}]}` in relevance order; `TP53` ranks phosphoglycerate mutase (TIGAR) and TP53-target groups first and `BRCA1` ranks Ubiquitin first, while `tumor protein p53` reaches the p53 group 4289813at2759. Verify a group (name, or `orthodb_group_has_gene`) before use.
+- `/orthologs?id=<og_id>&species=<taxid>` -- `data` is a list of groups, each with `genes[].gene_id.id` (symbol); `data` is `null` when the group has no member at that level
+- `/group?id=<og_id>` -- full group info (name, level, InterPro domains)
+- `/tab?id=<og_id>` -- tab-separated member table (the parameter is `id`; `query=` returns 404)
 
-Key endpoints (all GET, JSON returned):
-- `/search?query=<symbol>&species=<NCBI_taxid>` — find ortholog groups by gene symbol
-- `/orthologs?id=<og_id>&species=<taxid>` — get orthologs of a group at a specific level
-- `/group?id=<og_id>` — full group info (sequences, evidence)
-- `/tab?query=<og_id>` — tab-separated bulk dump
-
-Levels are NCBI taxonomy IDs (e.g. 9606 = human, 40674 = Mammalia, 7742 = Vertebrata).
-
-```python
-def orthodb_search(symbol, species_taxid=9606):
-    r = requests.get('https://data.orthodb.org/v12/search',
-                     params={'query': symbol, 'species': species_taxid})
-    r.raise_for_status()
-    return r.json()['data']  # list of orthogroup IDs
-```
+Levels are NCBI taxonomy IDs (9606 human, 40674 Mammalia, 7742 Vertebrata). Bulk downloads are available.
 
 ### Ensembl Compara (via Ensembl REST)
 
-Base URL: `https://rest.ensembl.org/`. JSON: `Accept: application/json`. Rate limit: 15 req/sec, 55,000 req/hour. Respect `Retry-After` on 429.
+Base `https://rest.ensembl.org/`, `Accept: application/json`, 15 req/sec and 55,000 req/hour, `Retry-After` on 429.
+- `/homology/symbol/<species>/<symbol>` or `/homology/id/<species>/<ensembl_gene_id>`
+- `/lookup/symbol/<species>/<symbol>` -- resolve symbol to Ensembl ID first
+- `?type=orthologues` drops paralogs; `?target_species=<species>` restricts to one target
+- Types: `ortholog_one2one`, `ortholog_one2many`, `ortholog_many2many`, `within_species_paralog`
 
-Key endpoints:
-- `/homology/symbol/<species>/<symbol>` — orthologs of a gene by symbol
-- `/homology/id/<ensembl_gene_id>` — orthologs of a gene by Ensembl ID
-- `/lookup/symbol/<species>/<symbol>` — resolve symbol to Ensembl ID first
-- Add `?type=orthologues` to filter to orthologs only (drop paralogs)
-- Add `?target_species=<species>` to filter to one target species
-
-```python
-def ensembl_orthologs(symbol, species='human', target=None):
-    url = f'https://rest.ensembl.org/homology/symbol/{species}/{symbol}'
-    params = {'type': 'orthologues'}
-    if target:
-        params['target_species'] = target
-    r = requests.get(url, params=params, headers={'Accept': 'application/json'})
-    r.raise_for_status()
-    homologies = r.json()['data'][0]['homologies']
-    return [{
-        'target_species': h['target']['species'],
-        'target_id': h['target']['id'],
-        'type': h['type'],  # ortholog_one2one / one2many / many2many / within_species_paralog
-        'confidence': h.get('confidence'),  # 0/1; some calls lack this field
-        'identity_target': h['target'].get('perc_id'),
-        'identity_query': h['source'].get('perc_id'),
-    } for h in homologies]
-```
+For broader Ensembl workflows see `ensembl-rest`.
 
 ### OMA REST API
 
-Base URL: `https://omabrowser.org/api/`. JSON returned. No rate-limit doc but be polite.
+Base `https://omabrowser.org/api/`, JSON, no published rate limit (be polite):
+- `/protein/<id>/orthologs/` -- orthologs of a protein (UniProt or OMA ID); add `?rel_type=1:1` to filter server-side (the most reliable call; unfiltered calls 502 intermittently). Items carry `omaid`, `canonicalid`, `species.code`, `species.taxon_id`. A 200 with `[]` means OMA has no orthologs (BRCA1 P38398), not an outage; TP53 `P04637` returns `P53_MOUSE`
+- `/protein/<id>/` -- protein record including `oma_hog_id`
+- `/hog/<hog_id>/` -- Hierarchical Orthologous Group info
+- `/genome/<species_code>/` -- genomes; species codes are 5-letter (HUMAN, MOUSE)
 
-Key endpoints:
-- `/protein/<id>/orthologs/` — orthologs of a protein (UniProt or OMA ID)
-- `/hog/<hog_id>/` — Hierarchical Orthologous Group info
-- `/genome/<species_code>/` — list all genomes; species codes are 5-letter (e.g. HUMAN, MOUSE)
+### eggNOG 6.0
 
-```python
-def oma_orthologs(uniprot_acc):
-    r = requests.get(f'https://omabrowser.org/api/protein/{uniprot_acc}/orthologs/')
-    r.raise_for_status()
-    return r.json()  # list of ortholog dicts with omaid, canonicalid, taxonId
-```
-
-### eggNOG (5/6)
-
-Base URL: `http://eggnog6.embl.de/api/` (web API; lighter than running eggNOG-mapper). Most heavy lifting still uses **eggNOG-mapper** locally (Cantalapiedra et al. 2021 *Mol Biol Evol* 38:5825) — for batch protein-set annotation, mapper > API.
-
-For ad hoc lookup: search the eggNOG web interface for an orthogroup ID, then download the member set.
+The eggNOG web API was not usable on 2026-10-03: `eggnogdb.org/api` returned 403 to a scripted client and `eggnog6.embl.de` failed TLS verification; treat it as unverified. For batch protein-set annotation use **eggNOG-mapper** locally (Cantalapiedra et al. 2021 *Mol Biol Evol* 38:5825); for ad hoc lookup search the eggNOG web interface for an orthogroup ID, then download the member set.
 
 ### KEGG Orthology (KO)
 
-Base URL: `https://rest.kegg.jp/`. Returns plain text TSV by default (NOT JSON).
-
-```python
-def kegg_ko_for_gene(species_code, gene):
-    '''KEGG species codes: hsa=human, mmu=mouse, dme=fly, etc.'''
-    r = requests.get(f'https://rest.kegg.jp/link/ko/{species_code}:{gene}')
-    r.raise_for_status()
-    return [line.split('\t')[1].replace('ko:', '') for line in r.text.strip().split('\n') if line]
-
-
-def kegg_orthologs(ko_id):
-    r = requests.get(f'https://rest.kegg.jp/link/genes/{ko_id}')
-    return [line.split('\t')[1] for line in r.text.strip().split('\n') if line]
-```
-
-KEGG license: commercial use requires a paid license; academic use is free for web/API.
+Base `https://rest.kegg.jp/`; returns plain-text TSV, **not** JSON (an HTML reply means a wrong endpoint). `ko_for_gene('hsa', '7157')` maps human TP53 to its KO; `genes_for_ko` lists all member genes across KEGG species. KEGG license: free for academic web/API use, paid for commercial use.
 
 ### PANTHER
 
-Base URL: `http://pantherdb.org/services/oai/pantherdb/` (note the unusual base). Has a curated, smaller scope than OrthoDB but with experimental evidence.
+Base `https://pantherdb.org/services/oai/pantherdb/` (the `http://` form redirects to https). Smaller curated scope than OrthoDB. The client does not wrap PANTHER. Verified route: `GET ortholog/matchortho?geneInputList=P04637&organism=9606&targetOrganism=10090&orthologType=LDO` returns the target gene (mouse Tp53, UniProtKB P02340) and an ortholog type code (`LDO`, least-diverged ortholog); the response carries no evidence-code field (checked 2026-10-03, PANTHER v19).
 
-### HomoloGene (deprecated)
+### HomoloGene (retired)
 
-`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=homologene&id=<id>&rettype=xml` — still works; data frozen since 2014. Useful only for backward-compatibility with old pipelines.
+Frozen since 2014, and NCBI E-utilities no longer serve it: `efetch.fcgi?db=homologene` returned "Database ... not supported" on 2026-10-02. Treat as legacy, do not build live workflows on it, and verify any historical HomoloGene call against Compara or OrthoDB.
 
 ## Confidence-level semantics
 
-Each resource defines "confidence" differently. They are NOT directly comparable.
+Each resource defines "confidence" differently; do not average or compare across resources. Use within-resource cutoffs and intersect call sets for cross-resource comparison.
 
 | Resource | Confidence field | Semantics |
 |---|---|---|
-| Ensembl Compara | `confidence` 0/1 | Binary; 1 = high confidence based on gene-tree topology |
-| OrthoDB | `evolutionary_rate` (not a confidence per se) | Inverse proxy; lower = more conserved |
-| OMA | Internal QC; not exposed as a per-call score | All calls passed precision filter |
+| Ensembl Compara | none in live records (verified 2026-10-03) | Use `type`, `taxonomy_level`, `perc_id` of source and target; `compara_orthologs` still returns `confidence` as None |
+| OrthoDB | `evolutionary_rate` (not a confidence) | Inverse proxy; lower = more conserved |
+| OMA | Internal QC; not exposed per call | All calls passed a precision filter |
 | eggNOG | Tax-level coverage | Member counts per taxonomic level |
-| PANTHER | `evidence` codes | Experimentally validated vs predicted |
-
-**Don't average or compare confidence across resources.** Use within-resource cutoffs; for cross-resource comparison, intersect call sets.
+| PANTHER | ortholog type (e.g. `LDO`) | Least-diverged vs other ortholog; no per-call evidence field in the response |
 
 ## The orthology conjecture (and why resources disagree)
 
-The orthology conjecture (Tatusov 1997; rigorously evaluated by Studer & Robinson-Rechavi 2009 *Trends Genet* 25:210; Altenhoff et al. 2012 *PLoS Comput Biol* 8:e1002514) — orthologs are more likely than paralogs to share function — is supported but weakly. Sub- and neo-functionalization mean a paralog can become the functional equivalent.
+Orthologs are more likely than paralogs to share function (Tatusov 1997), but only weakly (Studer & Robinson-Rechavi 2009 *Trends Genet* 25:210; Altenhoff et al. 2012 *PLoS Comput Biol* 8:e1002514); sub- and neo-functionalization let a paralog become the functional equivalent. Resources disagree because their algorithms weigh evidence differently:
+- **OMA** is strict (RBH + verification + HOG inference): higher precision, lower recall.
+- **Ensembl Compara** is tree-reconciled: best for vertebrates.
+- **OrthoDB** uses broad hierarchical clustering: wider coverage, more ambiguous calls.
+- **eggNOG** uses pre-computed orthogroups at fixed taxonomic levels: fast but coarser.
 
-This is also why resources disagree. Different algorithms emphasize different evidence:
-- **OMA** is strict (RBH + verification + HOG inference) — higher precision, lower recall.
-- **Ensembl Compara** is tree-reconciled — best for vertebrates with deep Compara curation.
-- **OrthoDB** uses broader hierarchical clustering — broader coverage, more ambiguous calls.
-- **eggNOG** uses pre-computed orthogroups at fixed taxonomic levels — fast but coarser.
+For high-stakes calls (publication, drug-target choice) **intersect at least two resources** after normalizing IDs to a common namespace (UniProt or NCBI Gene; see `uniprot-access`) and inspect the disagreements.
 
-For high-stakes calls (publication, drug target choice), **intersect at least two resources** and inspect disagreements.
+## Scale
 
-## Code patterns
-
-### Get the human ortholog of a mouse gene (Ensembl Compara, 1:1 only)
-
-**Goal:** Pull Compara's high-confidence 1:1 ortholog of a single mouse gene in human.
-
-**Approach:** REST query with type filter; assert 1:1; record confidence.
-
-**Reference (Ensembl REST, release 112+):**
-```python
-import requests
-import time
-
-
-def compara_one2one(symbol, source='mouse', target='human'):
-    url = f'https://rest.ensembl.org/homology/symbol/{source}/{symbol}'
-    r = requests.get(url, params={'type': 'orthologues', 'target_species': target},
-                     headers={'Accept': 'application/json'})
-    if r.status_code == 429:
-        time.sleep(int(r.headers.get('Retry-After', '5')))
-        return compara_one2one(symbol, source, target)
-    r.raise_for_status()
-    hits = r.json()['data'][0]['homologies']
-    one2one = [h for h in hits if h['type'] == 'ortholog_one2one']
-    if not one2one:
-        return None
-    h = one2one[0]
-    return {
-        'source_id': h['source']['id'],
-        'target_id': h['target']['id'],
-        'confidence': h.get('confidence'),
-        'pid_target': h['target'].get('perc_id'),
-    }
-```
-
-### Cross-resource agreement (Ensembl + OMA + OrthoDB)
-
-**Goal:** Find orthologs agreed on by multiple resources to flag high-confidence calls.
-
-**Approach:** Query each resource; intersect target IDs after normalizing to a common namespace (UniProt or NCBI Gene).
-
-```python
-def cross_resource_orthologs(symbol):
-    '''Return target-species ortholog calls from multiple resources for cross-validation.'''
-    ensembl = ensembl_orthologs(symbol, species='human')
-    # (OMA/OrthoDB lookups omitted for brevity -- need namespace conversion via UniProt ID Mapping)
-    return {'ensembl': ensembl}
-```
-
-### Batch ortholog table for >100 genes
-
-**Goal:** Build a wide table of orthologs across N species for a gene list.
-
-**Approach:** Loop with rate limit; cache responses; respect `Retry-After`.
-
-**Reference (requests 2.31+):**
-```python
-def batch_ensembl_orthologs(symbols, source='human', target_species=None, sleep=0.07):
-    '''sleep=0.07 keeps under the 15-req/sec ceiling with margin.'''
-    rows = []
-    for sym in symbols:
-        try:
-            orthologs = ensembl_orthologs(sym, species=source, target=target_species)
-            for o in orthologs:
-                rows.append({'source_symbol': sym, **o})
-        except requests.HTTPError as e:
-            if e.response.status_code == 429:
-                wait = int(e.response.headers.get('Retry-After', '10'))
-                time.sleep(wait)
-            else:
-                rows.append({'source_symbol': sym, 'error': str(e)})
-        time.sleep(sleep)
-    return pd.DataFrame(rows)
-
-
-df = batch_ensembl_orthologs(['BRCA1', 'TP53', 'MYC'], target_species='mouse')
-print(df[df['type'] == 'ortholog_one2one'][['source_symbol', 'target_id', 'confidence']])
-```
-
-### Pull all human-mouse 1:1 orthologs as a bulk table
-
-For thousands of genes, prefer Ensembl BioMart bulk export — see `biomart-queries`. The REST API is fine for hundreds; BioMart wins at thousands.
-
-### OMA HOG navigation
-
-```python
-def oma_hog_for_protein(oma_or_uniprot_id):
-    r = requests.get(f'https://omabrowser.org/api/protein/{oma_or_uniprot_id}/')
-    r.raise_for_status()
-    return r.json().get('oma_hog_id')
-
-
-def oma_hog_members(hog_id, level=None):
-    url = f'https://omabrowser.org/api/hog/{hog_id}/'
-    params = {'level': level} if level else {}
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-    return r.json()
-```
-
-### KEGG ortholog lookup
-
-```python
-ko_ids = kegg_ko_for_gene('hsa', '7157')  # human TP53
-for ko in ko_ids:
-    orthologs = kegg_orthologs(ko)
-    print(f'{ko}: {len(orthologs)} orthologs across all KEGG species')
-```
+REST loops are fine for hundreds of genes (`batch_compara`, 0.07 s sleep); above ~5,000 genes use Ensembl BioMart bulk export (`biomart-queries`).
 
 ## Failure modes
 
-### Resource disagreement on 1:1
-- **Trigger:** Ensembl Compara says 1:1; OrthoDB says 1:many; OMA says no call.
-- **Mechanism:** Different algorithmic emphases; different species coverage.
-- **Symptom:** Inconsistent ortholog tables across pipeline stages.
-- **Fix:** Define the authoritative resource per project; or take intersection; document the choice.
-
-### Stale resource snapshot
-- **Trigger:** Using a 2-year-old OrthoDB download or HomoloGene (frozen 2014).
-- **Mechanism:** Species coverage and algorithms have improved; gene model updates.
-- **Symptom:** Missing orthologs that the live database has; calling defunct ortholog IDs.
-- **Fix:** Pin to a release version with date; refresh annually; for HomoloGene, treat as legacy and verify against a current resource.
-
-### Symbol-based lookup ambiguity
-- **Trigger:** `compara_one2one('MARCH1', 'human', 'mouse')` -- but MARCH1 was renamed to MARCHF1 in 2020.
-- **Mechanism:** HGNC symbol renames break symbol-based lookups; APIs may return empty or wrong gene.
-- **Symptom:** No orthologs found; or orthologs of the wrong gene.
-- **Fix:** Resolve symbol to canonical Ensembl/HGNC ID first; use the ID-based endpoint.
-
-### Compara confidence missing
-- **Trigger:** Some Compara calls lack `confidence` (older calls; certain species pairs).
-- **Mechanism:** Field is not populated for all calls.
-- **Symptom:** `KeyError`; or filter drops calls that should pass.
-- **Fix:** Use `.get('confidence', None)` and treat missing as unknown (not as low-confidence).
-
-### Rate-limit cascade on bulk queries
-- **Trigger:** Loop of 5000 Ensembl REST calls.
-- **Mechanism:** 15 req/sec ceiling, 55K/hour; hit gives 429 with Retry-After.
-- **Symptom:** Cascading retries; pipeline stalls.
-- **Fix:** Sleep 0.07s between calls; check Retry-After on 429; for >5K queries use BioMart bulk export instead.
-
-### Custom proteome not in any DB
-- **Trigger:** Querying a newly sequenced species absent from all resources.
-- **Mechanism:** All ortholog databases require the species to be in their pre-computed set.
-- **Symptom:** No ortholog calls.
-- **Fix:** Run de novo (OrthoFinder or SonicParanoid) -- see `comparative-genomics/ortholog-inference`.
-
-### KEGG license confusion
-- **Trigger:** Building a commercial product on KEGG REST.
-- **Mechanism:** KEGG academic-free, commercial-paid.
-- **Symptom:** License violation in a commercial pipeline.
-- **Fix:** Confirm license for the use case; eggNOG and OrthoDB have more permissive licenses.
+- **Resource disagreement on 1:1** -- Compara 1:1, OrthoDB 1:many, OMA no call. Define the authoritative resource per project or take the intersection; document the choice.
+- **Stale snapshot** -- a 2-year-old OrthoDB download or HomoloGene misses current orthologs and can cite defunct IDs. Pin a dated release; refresh annually.
+- **Symbol ambiguity** -- `MARCH1` was renamed `MARCHF1` in 2020; lookups return empty or the wrong gene. Resolve to the Ensembl/HGNC ID first.
+- **No Compara `confidence`** -- do not filter on it; filter on `type` (`ortholog_one2one`) and identity.
+- **OrthoDB first hit is not the gene** -- `/search` is full text; verify the group before reading its members.
+- **Rate-limit cascade** -- 5000 Ensembl calls without sleep give 429 stalls; sleep and honor Retry-After.
+- **Custom proteome not in any DB** -- no calls are returned; run OrthoFinder/SonicParanoid (see `comparative-genomics/ortholog-inference`).
+- **KEGG license confusion** -- commercial use needs a paid license; eggNOG and OrthoDB are more permissive.
 
 ## Common errors
 
@@ -346,9 +157,10 @@ for ko in ko_ids:
 |---|---|---|
 | `HTTPError 429` (Ensembl) | Rate limit | Sleep per Retry-After; cap at 15 req/sec |
 | Empty homologies | Symbol misspelled or stale | Resolve to Ensembl ID first |
-| Missing confidence field | Older calls | `.get()` with default |
-| OMA `404` | Wrong namespace (used UniProt where OMA needed OMA ID) | Use the protein lookup endpoint to resolve first |
-| KEGG returns HTML | Endpoint wrong (use `rest.kegg.jp`) | Check URL; KEGG is text TSV not JSON |
+| Compara `confidence` always None | Field absent from current Ensembl records | Use type, taxonomy level and identity |
+| OMA `404` | Wrong namespace (UniProt where OMA ID needed) | Use the protein lookup endpoint to resolve first |
+| OMA `502` | Transient gateway failure | The client retries with backoff; prefer `rel_type=1:1`; if it persists the helper raises, report the leg as unavailable |
+| KEGG returns HTML | Wrong endpoint | Use `rest.kegg.jp`; output is TSV not JSON |
 | Resource disagreement | Different algorithms / coverage | Intersect; document choice |
 
 ## References
@@ -368,5 +180,5 @@ for ko in ko_ids:
 - comparative-genomics/ortholog-inference - De novo orthology computation (OrthoFinder, OMA standalone, SonicParanoid)
 - ensembl-rest - Broader Ensembl REST workflows beyond Compara
 - biomart-queries - Bulk ortholog table export via Ensembl BioMart
-- uniprot-access - Resolve UniProt accessions used by OMA
+- uniprot-access - Resolve UniProt accessions used by OMA orthology queries
 - pathway-analysis/kegg-pathways - KEGG Orthology and pathway mapping

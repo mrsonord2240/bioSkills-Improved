@@ -1,43 +1,12 @@
 '''Ensembl REST lookup, sequence, overlap; demonstrates symbol -> ID resolution and archive pinning.'''
-# Reference: requests 2.31+, Ensembl REST release 110+ | Verify API if version differs
-import requests
+# Reference: requests 2.31+, Ensembl REST release 116 | Verify API if version differs
+import os
+import sys
 import time
 
-BASE = 'https://rest.ensembl.org'
-ARCHIVE = 'https://e110.rest.ensembl.org'   # pin for reproducibility
-HEADERS = {'Accept': 'application/json'}
-SLEEP = 0.07
-
-
-def get_with_retry(url, params=None, max_retries=3):
-    for attempt in range(max_retries):
-        r = requests.get(url, params=params, headers=HEADERS)
-        if r.status_code == 429:
-            time.sleep(int(r.headers.get('Retry-After', '5')))
-            continue
-        r.raise_for_status()
-        return r
-    raise RuntimeError(f'{max_retries} retries exhausted')
-
-
-def symbol_to_id(species, symbol, base=BASE):
-    r = get_with_retry(f'{base}/lookup/symbol/{species}/{symbol}')
-    return r.json()
-
-
-def gene_info(ensembl_id, base=BASE):
-    r = get_with_retry(f'{base}/lookup/id/{ensembl_id}', params={'expand': 1})
-    return r.json()
-
-
-def sequence_for_id(ensembl_id, seq_type='protein', base=BASE):
-    r = get_with_retry(f'{base}/sequence/id/{ensembl_id}', params={'type': seq_type})
-    return r.json()
-
-
-def genes_in_region(species, region, base=BASE):
-    r = get_with_retry(f'{base}/overlap/region/{species}/{region}', params={'feature': 'gene'})
-    return r.json()
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
+from ensembl_client import (ARCHIVE_E110 as ARCHIVE, SLEEP, gene_info, genes_in_region,
+                            sequence_for_id, symbol_to_id)
 
 
 print('=== Symbol resolution (live release) ===')
@@ -62,8 +31,8 @@ for tx in detail.get('Transcript', [])[:3]:
 time.sleep(SLEEP)
 
 print('\n=== Protein sequence ===')
-prot = sequence_for_id('ENSG00000139618', seq_type='protein')
-print(f'  BRCA2 protein: {len(prot["seq"])} aa  (first 60: {prot["seq"][:60]}...)')
+prot = sequence_for_id('ENSP00000269305', seq_type='protein')  # translation ID; a gene ID needs multiple_sequences=True
+print(f'  TP53 protein {prot["id"]}: {len(prot["seq"])} aa  (first 60: {prot["seq"][:60]}...)')
 time.sleep(SLEEP)
 
 print('\n=== Genes in interval chr17:43000000-43200000 ===')
