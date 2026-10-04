@@ -1,16 +1,20 @@
 '''Boruta all-relevant selection keeps the whole correlated module (unlike LASSO).
 
 Runs end-to-end on synthetic data. Five co-expressed genes (g0-g4) all carry the
-signal. An all-relevant selector (Boruta) confirms the redundant module members,
-whereas a minimal-optimal selector would keep only one -- the distinction that
-decides whether absence from a list means "irrelevant" or merely "redundant".
+signal. An all-relevant selector (Boruta) is compared with a cross-validated L1
+(minimal-optimal) fit on the same data; the script prints how many module members
+each keeps, because L1 may drop redundant members and absence from its list then
+means "redundant", not "irrelevant".
 '''
-# Reference: numpy 1.26+, pandas 2.2+, scikit-learn 1.4+, boruta 0.4+ | Verify API if version differs
+# Reference: numpy 2.5, pandas 3.0, scikit-learn 1.9, boruta 0.4.3 | Verify API if version differs
 
 import numpy as np
 import pandas as pd
 from boruta import BorutaPy
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegressionCV
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 rng = np.random.default_rng(0)
 n, p = 200, 60
@@ -29,6 +33,14 @@ confirmed = list(X.columns[boruta.support_])
 tentative = list(X.columns[boruta.support_weak_])
 print(f'Confirmed all-relevant ({len(confirmed)}): {confirmed}')
 print(f'Tentative ({len(tentative)}): {tentative}')
-module_recovered = sum(g in confirmed for g in ['g0', 'g1', 'g2', 'g3', 'g4'])
-print(f'\nModule members g0-g4 confirmed: {module_recovered}/5 '
-      f'(all-relevant keeps the redundant module; a minimal-optimal selector would keep ~1)')
+module = ['g0', 'g1', 'g2', 'g3', 'g4']
+module_recovered = sum(g in confirmed for g in module)
+print(f'\nBoruta (all-relevant) module members g0-g4 confirmed: {module_recovered}/5')
+
+# Minimal-optimal comparison: L1 logistic, strength chosen by 5-fold CV on AUC, scaled inside the pipeline.
+l1 = make_pipeline(StandardScaler(),
+                   LogisticRegressionCV(l1_ratios=[1], solver='liblinear', Cs=10, cv=5,
+                                        scoring='roc_auc', use_legacy_attributes=False)).fit(X, y)
+kept = list(X.columns[l1[-1].coef_[0] != 0])
+print(f'L1 (minimal-optimal) kept {len(kept)} genes, module members g0-g4: '
+      f'{sum(g in kept for g in module)}/5')

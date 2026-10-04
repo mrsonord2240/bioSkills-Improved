@@ -34,7 +34,7 @@ Tell your AI agent what you want to do:
 
 ### Reproducibility
 
-> "Run subsampling stability selection, keep features selected in more than 60% of runs, and report the Nogueira stability index next to the accuracy."
+> "Run subsampling stability selection, keep features selected in more than 60% of runs, and report the Nogueira stability index next to the accuracy and the stable-feature count under permuted labels."
 
 > "My signature barely overlaps a published one. Is that a problem?"
 
@@ -48,7 +48,7 @@ Tell your AI agent what you want to do:
 2. For single-cell, pseudobulk to the donor level
 3. Run selection inside a `Pipeline` so held-out folds never inform feature choice
 4. Estimate performance by nested CV; report discrimination with an interval
-5. Quantify stability across subsamples (selection frequency + a chance-corrected index)
+5. Quantify stability across subsamples (selection frequency + a chance-corrected index) and report the permuted-label null count next to the real one
 6. Benchmark against a random-signature null and recommend independent-cohort validation
 
 ## Tips

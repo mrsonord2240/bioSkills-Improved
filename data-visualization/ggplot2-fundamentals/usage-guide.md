@@ -2,12 +2,12 @@
 
 ## Overview
 
-ggplot2 is the R reference for publication-quality static graphics, based on Wilkinson's grammar of graphics. A figure is composed as data + aesthetic mappings + one or more geometries + scales + facets + theme. The modern defaults for publication are theme_classic + panel.grid.off + Okabe-Ito categorical palette + cairo_pdf TrueType-embedded export.
+ggplot2 is the R reference for publication-quality static graphics, based on Wilkinson's grammar of graphics. A figure is composed as data + aesthetic mappings + one or more geometries + scales + facets + theme. The modern defaults for publication are theme_classic + blank panel grid + Okabe-Ito categorical palette + cairo_pdf TrueType-embedded export.
 
 ## Prerequisites
 
 ```r
-install.packages(c('ggplot2', 'scales', 'ggrepel', 'ggtext', 'viridis', 'scico', 'ggrastr'))
+install.packages(c('ggplot2', 'scales', 'ggrepel', 'ggtext', 'viridis', 'scico', 'ggrastr', 'patchwork', 'dplyr'))
 ```
 
 ## Quick Start
@@ -53,9 +53,7 @@ Tell your AI agent what you want to do:
 
 ## Tips
 
-- **Use `theme_classic` + `panel.grid = element_blank()`** as publication baseline. Remove top/right axis lines if Nature style: `theme(axis.line = element_line())`.
-
-- **`device = cairo_pdf` for TrueType embedding.** Default ggsave can produce non-embedded fonts; journals reject.
+- **Use `theme_publication()`** (theme_classic baseline, in `scripts/publication_figures.R`). theme_classic already has no grid and no top/right axis lines.
 
 - **`linewidth` replaces `size` for lines** in ggplot2 3.4+. `size` still works for points.
 

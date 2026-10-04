@@ -6,7 +6,7 @@ Quantify alternative splicing events from RNA-seq data as PSI (percent spliced i
 ## Prerequisites
 ```bash
 # Python tools
-pip install suppa pandas
+pip install suppa pandas 'statsmodels<0.15'
 
 # rMATS-turbo + regtools (CLI via bioconda; rMATS-turbo is not on PyPI)
 conda install -c bioconda rmats regtools
@@ -14,8 +14,9 @@ conda install -c bioconda rmats regtools
 # leafcutter R package (GitHub, not Bioconductor)
 # devtools::install_github('davidaknowles/leafcutter/leafcutter')
 
-# MAJIQ V3 (academic license at majiq.biociphers.org)
-# VAST-TOOLS (perl-based; conda install -c bioconda vast-tools)
+# MAJIQ V3 (academic license at majiq.biociphers.org; not executed in this Skill)
+# VAST-TOOLS (perl-based; conda install -c bioconda vast-tools; not executed in this Skill)
+# IRFinder 1.3.1 (conda install -c bioconda irfinder)
 ```
 
 ## Quick Start
@@ -57,7 +58,8 @@ Tell your AI agent what you want to do:
 ## Tips
 - Run two complementary tools (rMATS + leafcutter) and reconcile rather than relying on one
 - Use rRNA-depleted libraries for IR analysis; poly(A) selection biases against pre-mRNA
-- STAR 2-pass alignment is essential - 1-pass loses ~14% of novel junctions
+- STAR 2-pass alignment is essential for novel junctions (see SKILL.md Common Pitfalls)
+- Leafcutter needs XS-tagged BAMs (`STAR --outSAMstrandField intronMotif`)
 - For SF3B1-mutant cancer samples, expect cryptic 3'ss ~10-30nt upstream of canonical (Darman 2015)
 - For TDP-43-loss ALS/FTD samples, use annotation-free leafcutter or MAJIQ denovo for cryptic exons
 - JC vs JCEC: prefer JC for clean cassette analysis; JCEC adds power for short alternative exons
@@ -65,10 +67,8 @@ Tell your AI agent what you want to do:
 
 ## Related Skills
 
-- differential-splicing - Test PSI differences between conditions
-- isoform-switching - DTU framework with functional consequences
-- splicing-qc - Sequencing depth, library, alignment QC
-- splice-variant-prediction - SpliceAI/Pangolin for variant impact
-- long-read-splicing - Full-isoform PSI without anchor-length limits
-- read-alignment/star-alignment - STAR 2-pass setup
-- rna-quantification/alignment-free-quant - Salmon/kallisto for SUPPA2
+- bio-differential-splicing - Test PSI differences between conditions
+- bio-isoform-switching - DTU framework with functional consequences
+- bio-splicing-qc - Sequencing depth, library, alignment QC
+- bio-splice-variant-prediction - SpliceAI/Pangolin for variant impact
+- bio-long-read-splicing - Full-isoform PSI without anchor-length limits

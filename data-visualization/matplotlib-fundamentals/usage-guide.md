@@ -2,7 +2,7 @@
 
 ## Overview
 
-matplotlib is the foundational Python plotting library. For publication-quality figures, use the **object-oriented Figure/Axes API** (not pyplot state-machine), `constrained_layout` for axis alignment, `pdf.fonttype=42` for TrueType font embedding (mandatory for Nature/IEEE/ACM), and CVD-safe palettes. seaborn integrates by sharing the same Figure/Axes objects.
+matplotlib is the foundational Python plotting library. For publication-quality figures, use the **object-oriented Figure/Axes API** (not pyplot state-machine), constrained layout for axis alignment, `pdf.fonttype=42` for TrueType font embedding (mandatory for Nature/IEEE/ACM), and CVD-safe palettes. seaborn integrates by sharing the same Figure/Axes objects.
 
 ## Prerequisites
 
@@ -46,12 +46,12 @@ Tell your AI agent what you want to do:
 ## What the Agent Will Do
 
 1. Set rcParams at the top of the script for `pdf.fonttype=42`, font sizes (Nature 5-7pt), spine widths.
-2. Build figures via `fig, ax = plt.subplots(figsize=(mm/25.4, mm/25.4), constrained_layout=True)`.
+2. Build figures via `fig, ax = plt.subplots(figsize=(mm/25.4, mm/25.4), layout='constrained')`.
 3. Render via Axes methods: `ax.scatter`, `ax.plot`, `ax.bar`, `ax.imshow`.
 4. Add `rasterized=True` to scatter / imshow for >1000 elements.
 5. Apply CVD-safe palettes from Okabe-Ito (categorical) or Crameri / viridis (continuous).
 6. Set explicit limits, ticks, spines; remove top/right by default.
-7. Save with `fig.savefig('out.pdf', dpi=300, bbox_inches='tight')`.
+7. Save with `fig.savefig('out.pdf')` (no `bbox_inches='tight'`: it changes the page size from the stated mm).
 
 ## Tips
 
@@ -59,21 +59,21 @@ Tell your AI agent what you want to do:
 
 - **`pdf.fonttype=42` is mandatory** for many journals. Type-3 fonts (default) are not searchable and rejected at submission.
 
-- **`constrained_layout=True` instead of tight_layout** in matplotlib 3.6+. Handles colorbars and shared axes correctly.
+- **`layout='constrained'` instead of tight_layout** in matplotlib 3.6+. Handles colorbars and shared axes correctly.
 
 - **`rasterized=True` for >1000 points** in scatter / imshow. Keep axes and text vector.
 
-- **figsize in inches.** For Nature 89mm: `figsize=(89/25.4, 70/25.4)`. For double-column 183mm: `figsize=(183/25.4, height/25.4)`.
+- **figsize in inches.** For Nature 89mm: `figsize=(89/25.4, 70/25.4)`. For double-column 180mm: `figsize=(180/25.4, height/25.4)`.
 
 - **Top/right spines off** is the modern convention: `ax.spines[['top','right']].set_visible(False)`.
 
 - **seaborn returns FacetGrid for figure-level functions** (`displot`, `catplot`, `relplot`). Use `.set_axis_labels()` not `.set_xlabel()`. Axes-level functions return Axes (use `ax=` argument).
 
-- **Colorbar control**: `plt.colorbar(im, ax=ax, shrink=0.6, aspect=20)` to avoid colorbar dominating subplot.
+- **Colorbar control**: `fig.colorbar(im, ax=ax, shrink=0.6, aspect=20)` to avoid colorbar dominating subplot.
 
 - **Okabe-Ito for categorical** (CVD-safe 8 colors). Crameri batlow / viridis for sequential. RdBu_r or vik for diverging.
 
-- **Save format**: PDF for vector axes + raster scatter (best journal compromise); PNG at 300 DPI for raster only; SVG for editable.
+- **Save format**: PDF for vector axes + raster scatter (best journal compromise); PNG at 300 DPI for raster only; SVG for editable (set `svg.fonttype='none'` so text stays text).
 
 ## Related Skills
 

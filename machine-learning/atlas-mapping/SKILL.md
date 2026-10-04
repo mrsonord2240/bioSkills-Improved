@@ -1,6 +1,7 @@
 ---
 name: bio-machine-learning-atlas-mapping
-description: Maps query single-cell data onto reference atlases and transfers cell-type labels using scArches surgery (scVI/scANVI), Symphony, Azimuth, CellTypist, scPoli, popV, and foundation models, with explicit out-of-distribution and label-transfer uncertainty. Use when annotating new single-cell datasets against a pre-trained reference, deciding which mapping method fits, or judging whether transferred labels are trustworthy. For de novo clustering and manual annotation see single-cell/cell-annotation; for batch integration without a reference see single-cell/batch-integration.
+category: Data Analysis
+description: Use when projecting a new single-cell dataset into an existing reference atlas embedding without retraining the reference, choosing a reference-mapping method, or judging whether labels transferred from the atlas are trustworthy.
 tool_type: python
 primary_tool: scvi-tools
 license: MIT
@@ -9,7 +10,9 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: anndata 0.10+, scanpy 1.10+, scvi-tools 1.1+, scikit-learn 1.3+, celltypist 1.6+.
+Reference examples tested with: anndata 0.13, scanpy 1.12, scvi-tools 1.5, scikit-learn 1.9, celltypist 1.7 (scArches surgery calls checked against scvi-tools 1.5.1).
+
+Executed and checked in this Skill's tests: scArches surgery (scVI/SCANVI), the kNN gate, `scripts/`. Described from the literature and NOT executed or bundled here: Symphony, Azimuth/Seurat, scPoli, popV, treeArches/scHPL, scGPT/Geneformer (CellTypist was used only to make reference labels).
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
@@ -25,7 +28,7 @@ scvi-tools 1.x has had API churn around minified/registered models and the semi-
 
 ## The Single Most Important Modern Insight -- Mapping Is a Projection, Not an Annotation Oracle
 
-Reference mapping indicates *where in a fixed reference manifold a query cell lands*; it does not establish whether that location is biologically meaningful for the query. The projection always succeeds geometrically: every query cell is assigned its nearest reference label whether or not that label is true. A softmax over reference classes is normalized to sum to 1 and therefore *cannot* express "I have never seen this cell" -- a hepatocyte handed to an immune reference gets confidently called a T cell. Every failure mode below is a corollary of confusing projection with annotation.
+Reference mapping indicates *where in a fixed reference manifold a query cell lands*; it does not establish whether that location is biologically meaningful for the query. The projection always succeeds geometrically: every query cell is assigned its nearest reference label whether or not that label is true. A softmax over reference classes is normalized to sum to 1 and therefore *cannot* express "I have never seen this cell" -- a hepatocyte handed to an immune reference gets confidently called a T cell. A latent-space gate (below) helps only when the missing type is far from reference types. Every failure mode below is a corollary of confusing projection with annotation.
 
 The operational consequence: a transferred label is untrustworthy until paired with an out-of-distribution / label-transfer-uncertainty signal that measures *whether the cell belongs to the reference at all*, which is a different quantity from the prediction probability that measures *which reference label*. Conflating these two is the field's most common error.
 
@@ -49,7 +52,7 @@ Cross-cutting: linear methods (Symphony, Azimuth-sPCA) give a *fixed, reproducib
 
 | Scenario | Recommended approach | Why |
 |----------|---------------------|-----|
-| Same tissue as a published scVI/scANVI atlas; want one embedding + labels | scArches surgery onto the scANVI model; then gate labels on kNN uncertainty | Built for this; reuses the learned manifold; only query fine-tuned |
+| Same tissue as a published scVI/scANVI atlas; want one embedding + labels | scArches surgery onto the scANVI model; then gate labels on kNN uncertainty and run the marker-agreement check | Built for this; reuses the learned manifold; only query fine-tuned |
 | Seconds-scale, deterministic, CPU-only, must re-run identically (clinical) | Symphony (or Azimuth if curated) | Fixed reference embedding, no fine-tuning drift, built-in Mahalanobis OOD |
 | Query likely contains cell types/states NOT in the reference (disease, new niche) | treeArches/scHPL rejection, or scArches + explicit OOD distance | Default kNN/softmax confidently mislabels novel cells |
 | High-stakes annotation; distrust any single method | popV ensemble | Cross-method disagreement is a more honest uncertainty than any softmax |
@@ -89,7 +92,11 @@ adata_query.obsm['X_scVI'] = query_model.get_latent_representation()
 **Approach:** Build a semi-supervised scANVI head on the reference, map the query by surgery, then read hard labels and per-class probabilities -- treating the probability as "which label," not "does it belong."
 
 ```python
-# Reference side (once): scANVI from a trained scVI model. unlabeled_category is REQUIRED.
+# Reference side (once). adata_ref: counts in layers['counts'], obs['cell_type'], obs['batch'].
+scvi.model.SCVI.setup_anndata(adata_ref, layer='counts', batch_key='batch')
+ref_vae = scvi.model.SCVI(adata_ref, n_latent=30, n_layers=2)
+ref_vae.train(max_epochs=100, early_stopping=True)
+# scANVI from the trained scVI model. unlabeled_category is REQUIRED.
 ref_scanvi = scvi.model.SCANVI.from_scvi_model(ref_vae, unlabeled_category='Unknown', labels_key='cell_type')
 ref_scanvi.train(max_epochs=20, n_samples_per_label=100)
 ref_scanvi.save('ref_scanvi/', save_anndata=True)
@@ -101,14 +108,14 @@ query_scanvi.train(max_epochs=100, plan_kwargs={'weight_decay': 0.0})
 
 adata_query.obs['predicted_label'] = query_scanvi.predict()          # hard labels
 adata_query.obsm['X_scANVI'] = query_scanvi.get_latent_representation()
-proba = query_scanvi.predict(soft=True)                             # per-class probabilities (which label)
+proba = query_scanvi.predict(soft=True)   # pandas DataFrame (cells x labels); proba.max(axis=1) / proba.idxmax(axis=1). Which label, not whether it belongs
 ```
 
-## Out-of-Distribution Gating (the step that makes labels trustworthy)
+## Out-of-Distribution Gating
 
 **Goal:** Decide *whether* each query cell belongs to the reference, separately from which label it would get.
 
-**Approach:** Compute a distance/entropy signal on the shared latent. The canonical scArches/HLCA approach is a weighted-kNN label-transfer uncertainty (neighbor disagreement in the reference latent), thresholded at 0.2 to set cells to "Unknown." A portable kNN-entropy version is shown; the softmax `proba` is NOT this signal.
+**Approach:** Compute a distance/entropy signal on the shared latent. The canonical scArches/HLCA approach is a weighted-kNN label-transfer uncertainty (neighbor disagreement in the reference latent), thresholded at 0.2 to set cells to "Unknown." A portable kNN version is shown; the softmax `proba` is NOT this signal. Needs `adata_ref` (the reference AnnData from the previous snippet).
 
 ```python
 import numpy as np
@@ -126,70 +133,42 @@ adata_query.obs.loc[uncertainty > 0.2, 'predicted_label'] = 'Unknown'   # gate, 
 print(f'Flagged Unknown: {(uncertainty > 0.2).mean():.1%}')
 ```
 
-## Per-Method Failure Modes
+### What the gate does NOT catch (measured, PBMC reference/query pair)
 
-### scANVI / kNN -- forcing the query onto reference labels
-- **Trigger:** Query contains a population absent from the reference (novel type, disease state, perturbed program).
-- **Mechanism:** The classifier/kNN assigns every query cell to its nearest reference label; there is no "none of the above" unless added.
-- **Symptom:** A coherent novel cluster split across 2-3 reference labels, each with *high* probability; the UMAP looks "well integrated."
-- **Fix:** Always gate on transfer uncertainty / OOD distance (above). Inspect query-only clusters for marker genes independent of transferred labels.
+The gate catches cell types far from every reference type. It does **not** reliably catch a missing type that sits next to a reference type: that type is confidently mislabelled as its neighbour. Removing one type from a 1,222-cell PBMC reference and mapping 2,638 PBMC3k query cells (seed 0):
 
-### Softmax overconfidence vs label-transfer uncertainty conflated
-- **Trigger:** Reporting "confidence" as the `predict(soft=True)` max.
-- **Mechanism:** The softmax measures *which* reference label conditional on belonging; it is normalized away from distance and cannot say "far from everything." A cell can be 0.99 "T cell" and be a hepatocyte.
-- **Symptom:** Pipeline filters on softmax >= 0.5 and still passes OOD cells.
-- **Fix:** Threshold the weighted-kNN uncertainty (HLCA 0.2) or a Mahalanobis/ensemble OOD signal for the "Unknown" decision; use the softmax only to disambiguate among in-distribution labels.
+| Reference without | Query cells of that type | Gated Unknown (kNN > 0.2) | Flagged by a distance gate (> 99th percentile of reference self-distances) | Confidently labelled as |
+|---|---|---|---|---|
+| nothing (baseline) | all 2,638 | 1.7% (false Unknown on present types) | 0.0% | n/a |
+| Monocytes | 630 | 1.6% | 0.0% | DC 95.9% |
+| B cells | 342 | 76.3% | 0.0% | Unknown 76.3%, DC 19.9% |
 
-### scANVI -- semi-supervised label leakage / latent carving
-- **Trigger:** scANVI reference where labels strongly drive latent geometry; trajectory or novel-state query.
-- **Mechanism:** The classifier head back-propagates label structure into the latent, carving it to separate reference types; query cells are pulled toward that structure even when their biology lies between/outside it.
-- **Symptom:** A query continuum (differentiation trajectory) collapses onto discrete reference clusters; intermediate states vanish.
-- **Fix:** For trajectory/novel-state queries prefer *unsupervised* scVI surgery, annotate the query independently, and cross-check against the scVI latent.
+Never report gated labels as validated. A near-neighbour label with passing kNN uncertainty is still unverified. The distance gate stays limited: loosening it to the 95th percentile flags 25% of monocytes and 99% of B cells but also 7.7% and 14.3% of all query cells in the two hold-outs.
 
-### Reference composition / missing-biology bias
-- **Trigger:** Reference from healthy/limited donors; query from disease, different age, ancestry, or tissue region.
-- **Mechanism:** The reference manifold is the entire hypothesis space; off-manifold cells are projected onto the nearest on-manifold point and rare reference populations act as attractors.
-- **Symptom:** Disease-specific states labeled as the closest healthy type; ancestry/age effects read as "batch."
-- **Fix:** Audit reference composition before mapping; prefer references covering the query's expected biology; treat mapping as hypothesis generation and validate query findings de novo; consider extending the reference (treeArches).
+### Mandatory downstream check: per-label marker agreement
 
-### Query QC artifacts laundered into confident labels
-- **Trigger:** Query not QC'd to the reference's standard (empty droplets, ambient RNA, doublets, high-MT).
-- **Mechanism:** A doublet sits between two reference types and maps to a spurious "intermediate"; ambient RNA shifts profiles toward the dominant type.
-- **Symptom:** Artifactual "transitional" populations; doublet clusters labeled as rare real types.
-- **Fix:** Run full query QC *before* mapping (single-cell/doublet-detection, ambient correction, MT/count filters matched to the reference). Mapping does not clean data.
+Run `python scripts/label_marker_check.py --markers markers.json` on `query_annotated.h5ad`. `--markers` is required (`{label: [genes]}` from prior knowledge; example `references/pbmc-markers.json`, restricted to genes present in the 1604-gene PBMC set, so adapt it to your own gene set). There is deliberately no reference-derived mode: in a reference without monocytes the DC-vs-rest markers are generic myeloid genes, and that mode printed "Flagged labels: none" (a false all-clear) on the Monocytes hold-out. For each predicted label the script reports the fraction of that label's marker-gene detection (relative to reference cells of that label) that the called cells retain, and flags labels below 0.6.
 
-### Feature-space / gene-set mismatch
-- **Trigger:** Query missing reference HVGs; different gene annotation/version; `prepare_query_anndata` skipped.
-- **Mechanism:** The encoder expects the exact reference gene order; missing genes are zero-padded and reordering silently corrupts the input.
-- **Symptom:** Garbage latent, everything maps to one blob, or a silent accuracy cliff (no error raised).
-- **Fix:** Always `prepare_query_anndata(query, reference_model)`; verify the shared-gene fraction; too few shared HVGs is a hard stop.
+| Case | Curated markers: flagged labels |
+|---|---|
+| Baseline | none (T cells 0.703) |
+| Monocytes removed | DC (retained 0.160) |
+| B cells removed | DC (0.525) |
 
-### Good integration metrics, wrong labels
-- **Trigger:** Judging mapping by scIB integration scores alone.
-- **Mechanism:** Integration metrics reward query/reference mixing; mixing OOD cells into the wrong neighborhood *raises* the batch-removal score, and bio-conservation uses reference labels (circular for the query).
-- **Symptom:** Top scIB total score with biologically wrong annotation.
-- **Fix:** Integration metrics validate the *embedding*, not labels. Evaluate transfer on held-out labeled query cells (per-type F1, especially rare types), OOD detection on spiked-in unseen types, and marker-gene sanity checks.
+Treat a flagged label as untrustworthy. A label with no marker verdict (printed under NOT CHECKED, with the cell count on the UNVERIFIED line; e.g. markers absent from the gene set, or fewer than 20 cells) is unverified, never a pass: report it as unverified with that count. Report per-label marker agreement alongside any transferred labels. This is a group-level check on a small set of genes (a label group mixing true and mislabelled cells can pass); inspect query-only clusters for markers too.
 
-### Zero-shot foundation-model embedding as a mapper
-- **Trigger:** Using scGPT/Geneformer zero-shot embeddings for clustering/transfer expecting SOTA.
-- **Mechanism:** The masked-gene pretraining objective does not guarantee a label- or batch-aware embedding; zero-shot embeddings are not batch-corrected.
-- **Symptom:** Worse AvgBio/integration than scVI or even HVG-PCA + Harmony.
-- **Fix:** Fine-tune with task labels, or use an established mapper; reserve foundation models for cross-modality/species/data-scarce cases (Kedzierska 2025).
+`python scripts/ood_gating_demo.py` is a synthetic demonstration of the easy case (a population far from everything). `scripts/scarches_annotation.py` is the end-to-end real-data template (reference scVI/scANVI training, surgery, gating); it reads `reference_labeled.h5ad` and `query.h5ad` (raw counts in `layers['counts']`, `obs['cell_type']` and `obs['batch']` in the reference, `obs['batch']` in the query) from the working directory, seeds `scvi.settings.seed = 0`, and writes `query_annotated.h5ad`.
 
-## Reconciliation: When Methods Disagree
+## Failure Modes
 
-| Pattern | Likely cause | Action |
-|---------|--------------|--------|
-| scANVI label confident but kNN uncertainty high | OOD cell forced onto nearest label | Trust the uncertainty; set Unknown and inspect markers |
-| Symphony Mahalanobis flags OOD but scANVI does not | scANVI latent carved to absorb the cell | Prefer the distance-based flag; novel biology likely |
-| popV members disagree | Genuine ambiguity or granularity mismatch | Route to manual review; report the disagreement, do not force a leaf |
-| High scIB score, poor per-type F1 on held-out labels | Embedding mixes well but labels wrong | Believe the F1; integration score is not a label metric |
+Read [`references/failure-modes.md`](references/failure-modes.md) when a mapped label looks wrong or too confident, methods disagree, or a mapping result needs diagnosing.
 
 ## Quantitative Thresholds
 
 | Threshold | Source | Rationale |
 |-----------|--------|-----------|
-| Transfer uncertainty > 0.2 -> "Unknown" | Sikkema 2023 (HLCA) | Weighted-kNN neighbor-disagreement cutoff bounding false labels; recalibrate per reference |
+| Transfer uncertainty > 0.2 -> "Unknown" | Sikkema 2023 (HLCA) | Weighted-kNN neighbor-disagreement cutoff bounding false labels; recalibrate per reference; blind to a missing type adjacent to a reference type |
+| Marker retained < 0.6 -> label flagged | `scripts/label_marker_check.py`, set a priori, checked on the PBMC pair only | Detection of a label's markers in called cells relative to reference cells; recalibrate per tissue |
 | Surgery `weight_decay=0.0`, ~100-200 epochs | scvi-tools scArches tutorial | Frozen reference weights + no decay keep the shared latent fixed |
 | scIB total = 0.6*bio + 0.4*batch | Luecken 2022 | Benchmark weighting; scores the embedding, NOT query labels |
 | CellTypist input = log1p of CP10k | CellTypist docs | Wrong normalization silently degrades accuracy |
@@ -200,6 +179,7 @@ print(f'Flagged Unknown: {(uncertainty > 0.2).mean():.1%}')
 |-----------------|-------|----------|
 | Everything maps to one blob | `prepare_query_anndata` skipped; gene mismatch | Run it before `load_query_data`; check shared-gene fraction |
 | OOD cells pass a 0.5 softmax filter | Thresholding the wrong quantity | Gate on weighted-kNN uncertainty / OOD distance, not softmax |
+| Gate passes cells but a type looks mislabelled | Missing type adjacent to a reference type | Run `scripts/label_marker_check.py --markers` (curated); inspect markers |
 | Reference cells move between runs | Non-zero `weight_decay` or over-training in surgery | Set `weight_decay=0.0`, keep `freeze_*` defaults, modest epochs |
 | `load_query_data` errors on labels | scANVI needs `unlabeled_category` | Pass it to `from_scvi_model`; query labels filled with that category |
 | CellTypist labels look random | Raw or wrongly normalized counts | Feed log1p CP10k input |

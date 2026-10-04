@@ -1,6 +1,7 @@
 ---
 name: bio-machine-learning-biomarker-discovery
-description: Selects biomarker features from high-dimensional omics data using Boruta all-relevant selection, mRMR, LASSO/elastic-net, and stability selection, while controlling the leakage, irreproducibility, and correlated-feature traps that make most published signatures fail to replicate. Use when identifying candidate biomarkers, deciding between an all-relevant and a minimal-optimal selector, or judging whether a selected gene set is reproducible. For unbiased performance estimation of the resulting model see machine-learning/model-validation; for interpreting a trained model see machine-learning/prediction-explanation.
+category: Data Analysis
+description: Use when identifying candidate biomarkers from high-dimensional omics data, deciding between an all-relevant and a minimal-optimal selector, or judging whether a selected gene set is reproducible.
 tool_type: python
 primary_tool: boruta
 license: MIT
@@ -9,18 +10,18 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: numpy 1.26+, pandas 2.2+, scikit-learn 1.4+, boruta 0.4+, mrmr-selection 0.2+.
+Reference examples tested with: numpy 2.5, pandas 3.0, scikit-learn 1.9, boruta 0.4.3, mrmr-selection 0.2.8 (the bundled scripts were run against these).
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
 
-BorutaPy expects numpy arrays and breaks on newer numpy where the `np.float`/`np.int` aliases were removed -- pin a compatible numpy or use a maintained fork. On scikit-learn 1.8+ the `LogisticRegression(penalty=)` argument is deprecated (removed in 1.10) in favor of `l1_ratio`+`C`; the examples show the 1.4-1.7 form. If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
+BorutaPy expects numpy arrays (pass `X.values`); boruta 0.4+ works on current numpy, while 0.3.x breaks on the removed `np.float`/`np.int` aliases. scikit-learn 1.8 deprecated the `penalty=` argument of `LogisticRegression`/`LogisticRegressionCV` (removed in 1.10): leave `penalty` unset and express the penalty with `l1_ratio` (`l1_ratios` in the CV class) and `C`; `l1_ratio=1` is L1, `0` is L2, in between is elastic net. If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
 
 # Feature Selection for Biomarker Discovery
 
 **"Find the biomarkers in my omics data"** -> First decide which question is being answered (all-relevant vs minimal-optimal), then select features INSIDE a resampling loop, then quantify stability -- because a selected list means little without it.
 - All-relevant (which genes carry signal?): `BorutaPy(rf)`
-- Minimal-optimal (smallest predictive set?): `ElasticNetCV`, `LogisticRegressionCV(penalty='elasticnet')`
+- Minimal-optimal (smallest predictive set?): `ElasticNetCV`, `LogisticRegressionCV(solver='saga', l1_ratios=[...])`
 - Stability (does the list reproduce?): bootstrap selection frequencies + a stability index
 
 ## The Single Most Important Modern Insight -- Most Gene Signatures Do Not Replicate, and Significance Is the Wrong Bar
@@ -70,20 +71,54 @@ Decision rule: parsimonious assay with few measurements -> minimal-optimal; unde
 
 ```python
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.feature_selection import SelectKBest, f_classif
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 
 pipe = Pipeline([
+    ('scale', StandardScaler()),                            # fit on training folds only
     ('select', SelectKBest(f_classif, k=20)),               # re-fit per fold -> no leakage
-    ('clf', LogisticRegression(penalty='l2', max_iter=5000)),
+    ('clf', LogisticRegression(max_iter=5000)),
 ])
 cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=0)
-auc = cross_val_score(pipe, X, y, cv=cv, scoring='roc_auc')   # honest estimate
-print(f'Nested-safe AUC: {auc.mean():.3f} +/- {auc.std():.3f}')
+auc = cross_val_score(pipe, X, y, cv=cv, scoring='roc_auc')   # held-out folds, k fixed in advance
+print(f'In-pipeline CV AUC (k fixed): {auc.mean():.3f} +/- {auc.std():.3f}')
 ```
 
-The standalone Boruta/LASSO blocks below select features on a full matrix to *discover* candidates; that is fine for discovery, but any performance number must come from the Pipeline pattern above, with selection inside the fold.
+This is single-level CV: valid only because `k` was not tuned on these folds. If `k` (or any hyperparameter) is tuned, nest the search so the outer folds never see the tuning:
+
+```python
+from sklearn.model_selection import GridSearchCV
+
+tuned = GridSearchCV(pipe, {'select__k': [10, 20, 50]}, scoring='roc_auc',
+                     cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=1))
+nested_auc = cross_val_score(tuned, X, y, cv=cv, scoring='roc_auc')
+```
+
+Univariate selection is not the only in-fold option. mRMR needs a DataFrame/Series, so wrap it as a transformer whose `fit` runs on the training fold only:
+
+```python
+import numpy as np
+import pandas as pd
+from mrmr import mrmr_classif
+from sklearn.base import BaseEstimator, TransformerMixin
+
+class MRMRSelect(BaseEstimator, TransformerMixin):
+    def __init__(self, K=20):
+        self.K = K
+    def fit(self, X, y):
+        self.cols_ = mrmr_classif(X=pd.DataFrame(X), y=pd.Series(np.asarray(y)), K=self.K, show_progress=False)
+        return self
+    def transform(self, X):
+        return np.asarray(X)[:, self.cols_]
+
+mrmr_pipe = Pipeline([('scale', StandardScaler()), ('select', MRMRSelect(K=20)),
+                      ('clf', LogisticRegression(max_iter=5000))])
+mrmr_auc = cross_val_score(mrmr_pipe, X, y, cv=cv, scoring='roc_auc')
+```
+
+The standalone Boruta/elastic-net blocks below select features on a full matrix to *discover* candidates; that is fine for discovery, but any performance number must come from a Pipeline pattern above, with scaling and selection inside the fold.
 
 ## All-Relevant: Boruta
 
@@ -112,83 +147,61 @@ tentative = X.columns[boruta.support_weak_]
 
 ```python
 from sklearn.linear_model import LogisticRegressionCV
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-X_scaled = StandardScaler().fit_transform(X)               # for real scoring, do this inside the Pipeline
-# saga is the only solver supporting elasticnet; C = 1/lambda (opposite of alpha in Lasso/ElasticNet).
-enet = LogisticRegressionCV(penalty='elasticnet', solver='saga',
-                            l1_ratios=[0.1, 0.5, 0.9], Cs=20, cv=10, max_iter=10000)
-enet.fit(X_scaled, y)
-selected = X.columns[enet.coef_[0] != 0]
+# Scaler and penalty search live in one pipeline, so the scaler sees training rows only.
+# saga is the only solver supporting mixed L1/L2 (0 < l1_ratio < 1); C = 1/lambda (opposite of alpha in Lasso/ElasticNet).
+enet = make_pipeline(
+    StandardScaler(),
+    LogisticRegressionCV(solver='saga', l1_ratios=[0.1, 0.5, 0.9], Cs=20, cv=5, max_iter=10000,
+                         scoring='accuracy', use_legacy_attributes=False))
+enet.fit(X, y)
+selected = X.columns[enet[-1].coef_[0] != 0]
 ```
+
+**Scoring sets the signature size, so it is pinned.** `LogisticRegressionCV` scores its inner folds with accuracy unless told otherwise, and scikit-learn plans to change that default (1.11); leave `scoring` explicit. On Golub ALL/AML (72 samples, 1,000 highest-variance probes, one 5-fold partition) the selected-probe count was 601 for `neg_log_loss`, 203 for `roc_auc` and 148 for `accuracy`, and the held-out AUC was within 0.01 across all three (0.98-0.99, Golub is near-separable). With labels permuted, `neg_log_loss` still selected 16 probes while the other two selected none. For a compact signature the default here is `accuracy`; `neg_log_loss` favours probability fit and keeps many more features. Measured only on this one dataset and partition: re-check the size on your own data, and treat accuracy as coarse on small or imbalanced samples.
+
+**Cost.** Measured on Golub (72 samples, 24-thread Windows machine, another job running): this elastic-net block took about 34 s on the 1,000 probes and about 263 s on all 7,129; pre-filter before running it on more.
 
 ## Stability: Are the Selected Features Reproducible?
 
 **Goal:** Distinguish a robust signature from a resampling accident, and report stability alongside accuracy.
 
-**Approach:** Run the selector on many subsamples, count per-feature selection frequency, keep features above a threshold (0.6 is the common default), and compute a chance-corrected stability index. Use the Nogueira 2018 measure (handles variable-size selections, gives a confidence interval); the older Kuncheva index needs equal-size subsets and breaks for LASSO.
+**Approach:** Run an L1 selector on many n/2 subsamples, count per-feature selection frequency, keep features above a threshold (0.6 is the common default), and compute a chance-corrected stability index (Nogueira 2018: handles variable-size selections; the older Kuncheva index needs equal-size subsets and breaks for LASSO). Two choices make the result trustworthy rather than unit-dependent:
+
+- **Scale inside every resample, and fix the budget instead of C.** A fixed `C` means a different number of features for every choice of units (on raw Golub probes `C=0.1` kept ~100 per subsample and reported dozens of "stable" probes even for permuted labels). `scripts/stability_selection.py` standardizes each subsample, walks the L1 path from the strongest penalty, and stops at `q` selected features per subsample (Meinshausen-Buhlmann 2010). Under exchangeability the expected number of false selections is at most `q^2 / ((2*pi_thr - 1) * p)`; set the tolerated expected count `EV` (1 below) and solve for `q = sqrt(EV * (2*pi_thr - 1) * p)`.
+- **Report the permuted-label null next to the real count.** Re-run the identical procedure on shuffled labels; the null count should be near zero, and a real count that does not clearly exceed it is not a signature. Stability is not evidence of signal: the index can be high for a feature set that is stably wrong.
+
+The function is deterministic: the same data, `q` and `seed` give identical frequencies (checked twice on raw and rescaled input, 1,000 and 7,129 probes). Unit invariance is approximate, because rescaling perturbs the path's floating-point arithmetic and a marginal feature can flip; it held in the runs below. On Golub ALL/AML with `pi_thr` 0.6, `EV` 1 and `seed=0`:
+
+| Probes (`q`) | Stable, real labels (raw / standardized / rescaled units) | Stable, permuted labels |
+|---|---|---|
+| 1,000 highest-variance (14) | 2 / 2 / 2 | 0 in 10 of 11 permutations, 1 stable probe (frequency 0.81) in one |
+| all 7,129 (37) | 5 / 5 / 5 | 0 in all 11 permutations (highest frequency 0.57) |
+
+A non-zero null count is possible, so run several permutations and report the count over runs, not a single 0. One call (100 subsamples) took 1-6 s at 1,000 probes and 15-24 s at 7,129, so the repeats add up.
 
 ```python
+import sys
 import numpy as np
-from sklearn.linear_model import LogisticRegression
+sys.path.insert(0, 'scripts')                              # run from the Skill directory
+from stability_selection import stability_selection        # deterministic for a given seed; returns (frequencies, Nogueira index)
 
-n_subsample, p = 100, X.shape[1]
-counts = np.zeros(p)
-subsets = []
-for _ in range(n_subsample):
-    idx = np.random.choice(len(X), size=len(X) // 2, replace=False)   # n/2 subsampling
-    fit = LogisticRegression(penalty='l1', solver='liblinear', C=0.1, max_iter=2000).fit(X.iloc[idx], y.iloc[idx])
-    mask = fit.coef_[0] != 0
-    counts += mask
-    subsets.append(mask.astype(int))
-
-stable = X.columns[counts / n_subsample > 0.6]             # pi_thr=0.6: Meinshausen-Buhlmann default
-# Nogueira stability index (chance-corrected; 1 = identical selections, ~0 = random):
-Z = np.array(subsets); pbar = Z.mean(axis=0); k = Z.sum(axis=1)
-stability = 1 - (Z.var(axis=0, ddof=1).mean()) / ((k.mean() / p) * (1 - k.mean() / p))
-print(f'{len(stable)} stable features; Nogueira stability = {stability:.2f}')
+pi_thr, EV = 0.6, 1                                        # pi_thr: Meinshausen-Buhlmann default; EV: tolerated false selections
+q = int(np.sqrt(EV * (2 * pi_thr - 1) * X.shape[1]))       # per-subsample budget
+freq, stability = stability_selection(X, y, q=q, seed=0)
+stable = X.columns[freq > pi_thr]
+freq_null, _ = stability_selection(X, np.random.default_rng(1).permutation(y), q=q, seed=0)
+print(f'{len(stable)} stable features on real labels vs {(freq_null > pi_thr).sum()} on permuted labels')
+print('no features selected' if np.isnan(stability) else f'Nogueira stability = {stability:.2f}')
 ```
 
-## Per-Method Failure Modes
+`python scripts/lasso_biomarker.py` runs the leakage and stability demonstrations (with the permuted-label and rescaling checks) on synthetic data; `python scripts/boruta_feature_selection.py` compares Boruta with a cross-validated L1 fit on a co-expressed module. Both run from `scripts/`.
 
-### Interpreting minimal-optimal membership as biology
-- **Trigger:** Reporting "LASSO selected gene X but not its co-expressed partner Y" as a biological finding.
-- **Mechanism:** L1 geometry keeps one vertex of a correlated group arbitrarily; the choice flips across resamples.
-- **Symptom:** Selected genes change completely on a different train/test split though accuracy is stable.
-- **Fix:** Use elastic net (grouping effect) or report selection *frequencies*; never read membership as importance ordering.
+## Failure Modes
 
-### Selection-before-CV leakage
-- **Trigger:** Pick top-k features on all samples, then cross-validate the classifier on those features.
-- **Mechanism:** The held-out folds informed which genes were kept; selection is the dominant overfitting capacity in p>>n.
-- **Symptom:** Near-perfect CV accuracy, even reproducible on label-permuted (null) data; collapse on an external cohort.
-- **Fix:** Selection lives inside the CV fold (Pipeline); estimate by nested CV (machine-learning/model-validation).
-
-### Significance against the wrong null
-- **Trigger:** Concluding a signature is real because it significantly predicts outcome.
-- **Mechanism:** Random gene sets clear that bar; the transcriptome's proliferation axis is captured by almost any large set (Venet 2011).
-- **Symptom:** The signature does not beat a size-matched random signature or a proliferation meta-gene in independent data.
-- **Fix:** Benchmark against random-signature and proliferation-meta-gene nulls; require added value over clinical covariates in an *independent* cohort.
-
-### Winner's curse / inflated effect sizes
-- **Trigger:** Estimating effect sizes or AUC on the same data used to select features.
-- **Mechanism:** Selected features are disproportionately those whose noise inflated their apparent effect (Goring 2001); the inflation can be near-total for small true effects.
-- **Symptom:** Discovery AUC much higher than replication; replication is under-powered because it was sized to the inflated effect.
-- **Fix:** Estimate effects on an independent split (cross-fitting / data-splitting); size replication for the shrunken effect.
-
-### Pseudoreplication in single-cell selection
-- **Trigger:** Treating thousands of cells from a few donors as independent samples.
-- **Mechanism:** Cells within a donor are correlated; the effective n is the number of donors.
-- **Symptom:** Grossly inflated significance and false discoveries.
-- **Fix:** Pseudobulk per donor, select at the donor level (Squair 2021); confront the small true n.
-
-## Reconciliation: When Methods Disagree
-
-| Pattern | Likely cause | Action |
-|---------|--------------|--------|
-| Boruta keeps 200 genes, LASSO keeps 12 | All-relevant vs minimal-optimal answering different questions | Both can be right; pick by goal, do not "average" them |
-| A list barely overlaps a published signature | Many disjoint equally-predictive lists exist (Ein-Dor 2005) | Expected, not a contradiction; compare *performance* and stability, not membership |
-| High accuracy, low stability index | Resampling accident exploiting a dominant axis | Distrust the specific genes; prefer the lower-accuracy higher-stability candidate |
-| FDR-clean list still fails to replicate | FDR controls testing, not selection stability | They are orthogonal; add stability + independent validation |
+Read [`references/failure-modes.md`](references/failure-modes.md) when a selected list looks unstable, a signature fails to replicate, or selectors disagree.
 
 ## Quantitative Thresholds
 
@@ -205,9 +218,9 @@ print(f'{len(stable)} stable features; Nogueira stability = {stability:.2f}')
 
 | Error / symptom | Cause | Solution |
 |-----------------|-------|----------|
-| BorutaPy raises on `np.float`/pandas input | Newer numpy removed aliases; needs arrays | Pass `X.values`, `y.values`; pin numpy or use a fork |
+| BorutaPy raises on pandas input (or on `np.float` with boruta 0.3.x) | Needs numpy arrays; 0.3.x predates numpy's alias removal | Pass `X.values`, `y.values`; use boruta 0.4+ |
 | Regularization strength backwards | `C=1/lambda` (logistic) vs `alpha` (Lasso/ElasticNet) are opposite conventions | Verify which API; small C = strong shrinkage |
-| `elasticnet` penalty errors | Only `solver='saga'` supports it | Set `solver='saga'`, pass `l1_ratio(s)` |
+| Mixed-penalty solver error, or `penalty=` FutureWarning (sklearn 1.8+) | Only `solver='saga'` supports `0 < l1_ratio < 1`; `penalty=` is deprecated | Set `solver='saga'`, pass `l1_ratio(s)`, leave `penalty` unset |
 | `mrmr_classif` returns wrong type | Pandas backend needs a DataFrame X and Series y | Pass `X` DataFrame, `y=pd.Series(y)`; K must still be chosen |
 | glmnet signature unstable across runs (R) | Used `lambda.min` | Use `lambda.1se` for a sparser, more reproducible set |
 

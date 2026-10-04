@@ -5,7 +5,7 @@ competing event as censoring and reporting 1 - KM inflates the estimated inciden
 of the event of interest relative to the Aalen-Johansen cumulative incidence
 function (CIF). The gap grows with the competing-event rate.
 '''
-# Reference: lifelines 0.30+, numpy 1.26+ | Verify API if version differs
+# Reference: lifelines 0.30, numpy 2.5 | Verify API if version differs
 
 import numpy as np
 from lifelines import KaplanMeierFitter, AalenJohansenFitter

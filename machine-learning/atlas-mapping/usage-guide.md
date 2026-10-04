@@ -49,11 +49,12 @@ Tell your AI agent what you want to do:
 3. Run surgery (or linear/classifier mapping) with frozen reference weights and `weight_decay=0.0`
 4. Transfer labels and the latent embedding
 5. Compute a label-transfer uncertainty / OOD signal and gate low-confidence cells to "Unknown"
-6. Evaluate with held-out labels, marker sanity checks, and OOD on spiked-in unseen types -- not integration score alone
+6. Run `scripts/label_marker_check.py --markers` (curated markers, required) and report flagged and unverified labels; evaluate with held-out labels and OOD on spiked-in unseen types -- not integration score alone
 
 ## Tips
 
 - The softmax max from `predict(soft=True)` answers "which label," not "does it belong" -- gate on weighted-kNN uncertainty (HLCA threshold 0.2) or a Mahalanobis/ensemble OOD signal
+- The kNN gate misses a type that is absent from the reference but adjacent to a reference type; only the marker check with curated markers catches it, and labels it cannot check must be reported as unverified
 - `weight_decay=0.0` and frozen weights are not optional: they keep the shared latent fixed so queries mapped to the same atlas stay comparable
 - `prepare_query_anndata` is mandatory; skipping it silently corrupts the encoder input rather than raising an error
 - For trajectories or suspected novel states, prefer unsupervised scVI surgery and annotate the query independently

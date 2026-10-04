@@ -21,7 +21,7 @@ Tell your AI agent what you want to do:
 - "Plot a volcano for my DESeq2 results with shrunken LFC and FDR < 0.05"
 - "Make an MA plot diagnosing why my low-count genes have extreme fold changes"
 - "Label TP53, MYC, BRCA1 on the volcano and the top 10 hits by combined rank"
-- "Cap the y-axis at -log10(p) = 50 because one gene has p ~ 1e-200"
+- "Cap the y-axis at -log10(padj) = 50 because one gene has p ~ 1e-200, and mark the capped genes"
 - "Replace the raw-p threshold line with a padj = 0.05 line"
 
 ## Example Prompts
@@ -36,7 +36,7 @@ Tell your AI agent what you want to do:
 
 ### Handling extreme p-values
 
-> "Volcano with y-axis capped at -log10(p) = 50; points beyond the cap should remain visible at the edge."
+> "Volcano with y-axis capped at -log10(padj) = 50; points beyond the cap should remain visible at the cap, marked as capped."
 
 ### Single-cell pseudobulk DE
 
@@ -54,29 +54,29 @@ Tell your AI agent what you want to do:
 4. Select labels: explicit gene list if provided, otherwise top-N by combined rank.
 5. Render with ggplot2 + ggrepel (R) or matplotlib + adjustText (Python). Use Okabe-Ito for Up/Down/NS categories.
 6. Draw threshold lines at the actual padj-equivalent y-value and `±log2(FC threshold)` x-values.
-7. If extreme p-values dominate the y-axis, cap with `coord_cartesian` or `sqrt` transform.
-8. Rasterize the point layer for >5000 features so PDF stays under ~2 MB.
+7. If extreme p-values dominate the y-axis, use `y_cap` (capped genes drawn as triangles) or a `sqrt` transform; otherwise leave the axis uncapped.
+8. Optionally rasterize the point layer to shrink the PDF.
 9. Export at 300 DPI with `pdf.fonttype=42` (matplotlib) or `cairo_pdf` (ggsave) for journal compliance.
 
 ## Tips
 
 - **Plot shrunken LFC, not raw LFC.** Raw LFC at low counts is meaningless. apeglm (Zhu 2019) is the DESeq2 default since v1.28 and preserves large real effects while deflating noise. Run `lfcShrink(dds, coef=..., type='apeglm')` before plotting.
 
-- **Use padj as the y-axis, not raw p.** A threshold line at `-log10(0.05)` on a raw-p axis crosses many non-FDR-significant points and looks identical to a line on padj - so the plot is interpreted as FDR-controlled when it isn't.
+- **Use padj as the y-axis, not raw p.** A threshold line at `-log10(0.05)` on a raw-p axis is a raw-p line that does not coincide with the padj < 0.05 colour boundary, yet reads as FDR-controlled. On padj the line and the boundary are the same.
 
-- **Use s-values for sign-aware ranking.** Stephens 2017 introduced s-value (local false sign rate) as a stronger ranking criterion than padj for the question a volcano implicitly asks: do we know the sign? Use `ashr` to compute s-values.
+- **Use s-values for sign-aware ranking.** Stephens 2017 introduced s-value (local false sign rate) as a stronger ranking criterion than padj for the question a volcano implicitly asks: do we know the sign? Use `lfcShrink(..., svalue = TRUE)` (apeglm or ashr) to compute s-values; the result has no `padj`.
 
 - **Color categorically, not by gradient.** Up/Down/NS is a 3-category decision. A continuous color gradient implies that p-value is interpretable on a continuous scale - but the threshold decision is binary by design.
 
 - **Label by combined rank, not by smallest p.** With large N, the smallest p-values are housekeeping genes with tiny effects. Use `rank_score = -log10(p) * abs(log2FoldChange)` or pre-specify labels.
 
-- **Cap extreme y-values.** Cancer datasets routinely produce p < 1e-200. Use `coord_cartesian(ylim = c(0, 50))` (keeps points, just clips the display) or `sqrt(-log10(p))` transform.
+- **Cap extreme y-values only when needed, and mark them.** Cancer datasets routinely produce p < 1e-200. `y_cap` in `volcano_plot()` squishes higher genes onto the cap as triangles; `coord_cartesian(ylim = ...)` alone clips them out of view. `sqrt(-log10(p))` is the alternative.
 
 - **Set `ggrepel::max.overlaps = Inf`** or `options(ggrepel.max.overlaps = Inf)`. The default of 10 silently drops labels and only emits a warning - invisible in non-interactive renders.
 
-- **`EnhancedVolcano::selectLab` filters by thresholds.** Listed genes that fail pCutoff or FCcutoff are silently unlabeled. Use a manual ggrepel layer when this matters.
+- **`EnhancedVolcano::selectLab` ignores names absent from `lab`.** Genes failing pCutoff/FCcutoff are still labelled (1.24.0); check spelling and identifier type.
 
-- **Rasterize the point layer above ~5000 features.** Vector scatter at this scale crashes Illustrator and bloats PDFs. Axis labels and threshold lines should remain vector.
+- **Rasterize the point layer for smaller PDFs.** 17,994 points: 540 KB vector vs 38 KB rasterized. Axis labels and threshold lines should remain vector.
 
 - **MA plots diagnose shrinkage failure.** A fan-shaped MA with extreme |LFC| concentrated at low baseMean means LFC is unshrunken. A horizontal stripe of significant genes means batch is confounded with treatment.
 

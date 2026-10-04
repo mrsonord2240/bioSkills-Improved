@@ -47,7 +47,7 @@ Tell your AI agent what you want to do:
 1. Start with a regularized linear baseline (often the ceiling in p>>n)
 2. Escalate to RF/XGBoost only when nonlinear or interaction signal is present, with early stopping
 3. Run the batch-shortcut checks (predict the batch; leave-one-batch-out) before trusting any AUC
-4. Handle imbalance by class weighting or threshold tuning, not resampling, for risk models
+4. Handle imbalance by threshold tuning, without class weights or resampling, when the probability is the output
 5. Check and recalibrate probabilities; report AUPRC and MCC under imbalance
 6. Keep all preprocessing inside the CV fold and defer unbiased evaluation to model-validation
 
@@ -55,11 +55,12 @@ Tell your AI agent what you want to do:
 
 - "Random forest is the obvious choice for expression data" is a myth; regularized logistic/linear SVM frequently win in p>>n (Statnikov 2008)
 - GBDTs beat deep nets on tabular/omics matrices (Grinsztajn 2022); reserve deep nets for very large n or raw/multimodal inputs
-- RF compresses probabilities toward 0.5, boosting pushes them to the extremes -- both need recalibration if the probability is used
-- SMOTE/oversampling destroys calibration for no AUC gain on risk models; class-weight or tune the threshold instead, and if you must resample use an `imblearn` Pipeline
-- XGBoost 2.x: set `early_stopping_rounds` and `eval_metric` in the constructor, not `fit()`
+- Tree-ensemble probability direction depends on the learner, loss and rounds; check a reliability curve and recalibrate (sigmoid unless the calibration set has at least 1,000 samples and 100 in the rarer class) if the probability is used; at about 20 calibration samples recalibration can score worse than the raw probabilities, so compare Brier first
+- Class weights and SMOTE shift predicted risk (logistic AUC unchanged; RF AUC can change); tune the threshold instead, and if you must reweight or resample (hard-label problems), use an `imblearn` Pipeline and recalibrate on held-out data before reading a risk
+- XGBoost 2.x: set `early_stopping_rounds` and `eval_metric` in the constructor, not `fit()`; the early-stopping set is not the test set
 - XGBoost/LightGBM handle missing values natively; in omics, missingness is often informative (below detection limit)
 - Trees are scale-invariant; standardize for logistic/SVM/kNN/PCA
+- Not executed here: LightGBM, CatBoost, linear SVM and DLDA guidance in this skill is literature-based
 
 ## Related Skills
 

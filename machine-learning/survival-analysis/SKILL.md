@@ -1,6 +1,7 @@
 ---
 name: bio-machine-learning-survival-analysis
-description: Builds and validates predictive time-to-event models on clinical and omics data with penalized Cox, random survival forests, gradient-boosted and deep survival models, and prediction-grade evaluation (Uno's C, time-dependent AUC, integrated Brier, calibration, competing risks). Use when building an individualized risk predictor or prognostic omics signature, choosing a survival model, or evaluating one beyond the C-index. For Kaplan-Meier, log-rank, and classical Cox hazard-ratio inference in a trial see clinical-biostatistics/survival-analysis.
+category: Data Analysis
+description: Use when building an individualized time-to-event risk predictor or prognostic omics signature, choosing a survival model, or evaluating one beyond the C-index.
 tool_type: python
 primary_tool: scikit-survival
 license: MIT
@@ -9,12 +10,12 @@ author: GPTomics
 
 ## Version Compatibility
 
-Reference examples tested with: scikit-survival 0.22+, lifelines 0.30+, numpy 1.26+, pandas 2.2+ (pycox 0.3+ for deep models).
+Reference examples tested with: scikit-survival 0.28, lifelines 0.30, scikit-learn 1.9, numpy 2.5, pandas 2.3 (the bundled scripts were run against these).
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
 
-scikit-survival requires the target `y` to be a structured array with a boolean event field and a float time field; its IPCW metrics need the *training* `y` first. lifelines `concordance_index` expects higher-score = longer-survival (negate the partial hazard). If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
+scikit-survival 0.28 requires scikit-learn >=1.9,<1.10 and pandas >=2.2 (no upper cap). The pandas <3 cap comes from lifelines 0.30 alone, which only `scripts/competing_risks_cif.py` and the lifelines C-index note below need; give lifelines its own environment rather than installing it into a pandas 3 stack. scikit-survival requires the target `y` to be a structured array with a boolean event field and a float time field; its IPCW metrics need the *training* `y` first. lifelines `concordance_index` expects higher-score = longer-survival (negate the partial hazard). If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
 
 # Predictive Survival Modeling
 
@@ -46,12 +47,14 @@ PH concepts, censoring definitions, and the Cox partial likelihood are foundatio
 | Model | Assumes PH? | Handles p>>n? | Competing risks? | Best when |
 |-------|-------------|----------------|-------------------|-----------|
 | Penalized Cox (elastic-net, coxnet) | Yes | Yes -- the omics workhorse; elastic-net handles correlated genes | Cause-specific by recoding | Sparse, interpretable, reproducible risk score; the default |
-| Random Survival Forest | No | Yes (tune mtry/nodesize) | Yes (per-cause CIF) | Nonlinear/interaction effects, non-PH, moderate n |
+| Random Survival Forest | No | Yes (tune mtry/nodesize) | Not in scikit-survival (R `randomForestSRC` has per-cause CIF) | Nonlinear/interaction effects, non-PH, moderate n |
 | Gradient-boosted survival | Componentwise: yes (sparse); tree base: no | Yes (componentwise selects) | Via cause-specific | Boosting accuracy + sparsity, or relaxing PH with trees |
 | Survival SVM | No (optimizes concordance) | Yes (kernel) | No | Pure ranking goals; gives a score, not a survival function |
 | DeepSurv (pycox CoxPH) | Yes (NN replaces the linear predictor) | Needs large n | No | Large n, nonlinear main effects, PH plausible |
-| DeepHit | No (discrete-time PMF) | Needs large n | Yes -- purpose-built | Large n + competing risks + non-PH |
+| DeepHit | No (discrete-time PMF) | Needs large n | Yes -- purpose-built (pycox `DeepHit.predict_cif`) | Large n + competing risks + non-PH |
 | Cox-Time | No (time-dependent NN) | Needs large n | Discrete-hazard extensions | Large n, non-PH, flexible survival function |
+
+Only elastic-net Cox, RSF, Kaplan-Meier and Aalen-Johansen are bundled and run. Gradient boosting, survival SVM, Cox-Time, Fine-Gray, landmarking, calibration curves/ICI and nested CV are described here, not executed. pycox DeepSurv and DeepHit were only smoke-tested (30 epochs on CPU, GBSG2, outside the bundled scripts) and no pycox code is bundled.
 
 Load-bearing empirical fact: on typical clinical-omics n, **penalized Cox and RSF are very hard to beat**; deep survival models usually only pull ahead at large n and/or with genuine non-PH or competing-risk structure. Start with elastic-net Cox and RSF baselines; escalate to deep models only if they demonstrably beat those on a held-out set.
 
@@ -62,7 +65,7 @@ Load-bearing empirical fact: on typical clinical-omics n, **penalized Cox and RS
 | Prognostic omics signature, p>>n | Elastic-net Cox (coxnet), selection inside nested CV | Sparse + correlated-gene grouping; the workhorse |
 | Nonlinear/interaction effects, non-PH suspected | Random survival forest | Assumes no PH; captures interactions |
 | Large n, suspected nonlinear main effects | DeepSurv, benchmarked against coxnet/RSF | Deep only earns its keep at large n |
-| Competing events (death from other causes) | Fine-Gray (CIF) or DeepHit; report cause-specific too | 1-KM overestimates incidence; sHR is not the rate effect |
+| Competing events (death from other causes) | Fine-Gray (R `cmprsk`/`riskRegression`, not bundled) or DeepHit; report cause-specific too | 1-KM overestimates incidence; sHR is not the rate effect |
 | Dynamic prediction with updating biomarkers | Landmarking | Internal time-varying covariates cannot be plugged into the future |
 | Evaluating any survival model | Uno's C(tau) + AUC(t) + IBS-vs-KM + calibration | C-index alone is insufficient |
 | KM curve, log-rank, or a trial hazard ratio | -> clinical-biostatistics/survival-analysis | Confirmatory inference, not prediction |
@@ -75,18 +78,35 @@ Load-bearing empirical fact: on typical clinical-omics n, **penalized Cox and RS
 **Approach:** Build the structured `y` (boolean event, float time), fit coxnet with an elastic-net mix and a baseline model for survival functions, and an RSF for nonlinear structure.
 
 ```python
+import numpy as np
+from sklearn.model_selection import KFold, train_test_split
+from sksurv.datasets import load_gbsg2                 # bundled example cohort; replace with your own X and y
+from sksurv.preprocessing import OneHotEncoder
 from sksurv.util import Surv
 from sksurv.linear_model import CoxnetSurvivalAnalysis
+from sksurv.metrics import concordance_index_censored
 from sksurv.ensemble import RandomSurvivalForest
 
+X, y_raw = load_gbsg2()
+X = OneHotEncoder().fit_transform(X).astype(float).to_numpy()
 # event MUST be bool, time float. Field order in from_arrays is (event, time).
-y = Surv.from_arrays(event=df['status'].astype(bool), time=df['time'].astype(float))
+y = Surv.from_arrays(event=y_raw['cens'].astype(bool), time=y_raw['time'].astype(float))
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=0, stratify=y['event'])
 
-# Elastic-net Cox: l1_ratio in (0,1]; fit_baseline_model=True enables predict_survival_function.
-coxnet = CoxnetSurvivalAnalysis(l1_ratio=0.9, alpha_min_ratio=0.01, fit_baseline_model=True)
+# Elastic-net Cox: l1_ratio in (0,1]. A plain .fit() computes a whole alpha path and predict() then uses its
+# SMALLEST (least-penalized) alpha, so choose alpha by CV on the training split only and refit at that single alpha.
+path = CoxnetSurvivalAnalysis(l1_ratio=0.9, alpha_min_ratio=0.01).fit(X_train, y_train).alphas_
+cv_c = np.zeros((5, len(path)))
+for k, (i, j) in enumerate(KFold(5, shuffle=True, random_state=0).split(X_train)):
+    m = CoxnetSurvivalAnalysis(l1_ratio=0.9, alphas=path).fit(X_train[i], y_train[i])   # one path fit per fold
+    cv_c[k] = [concordance_index_censored(y_train[j]['event'], y_train[j]['time'], m.predict(X_train[j], alpha=a))[0]
+               for a in path]
+# fit_baseline_model=True enables predict_survival_function; the single alpha is the CV winner
+coxnet = CoxnetSurvivalAnalysis(l1_ratio=0.9, alphas=[path[cv_c.mean(axis=0).argmax()]], fit_baseline_model=True)
 coxnet.fit(X_train, y_train)
+print(f"alpha={coxnet.alphas_[0]:.4f}, nonzero coefficients: {(coxnet.coef_ != 0).sum()} of {X.shape[1]}")
 
-rsf = RandomSurvivalForest(n_estimators=500, min_samples_leaf=15, max_features='sqrt', n_jobs=-1)
+rsf = RandomSurvivalForest(n_estimators=500, min_samples_leaf=15, max_features='sqrt', n_jobs=-1, random_state=0)
 rsf.fit(X_train, y_train)
 risk = coxnet.predict(X_test)              # a risk score (higher = higher risk), NOT a probability
 ```
@@ -100,7 +120,9 @@ risk = coxnet.predict(X_test)              # a risk score (higher = higher risk)
 ```python
 import numpy as np
 from sksurv.metrics import concordance_index_ipcw, cumulative_dynamic_auc, integrated_brier_score
+from sksurv.nonparametric import kaplan_meier_estimator
 
+t_horizon = np.percentile(y_train['time'][y_train['event']], 90)   # tau: truncation horizon from training data
 c_uno = concordance_index_ipcw(y_train, y_test, risk, tau=t_horizon)[0]      # censoring-robust
 
 times = np.percentile(y_test['time'][y_test['event']], np.linspace(10, 80, 15))   # inside follow-up
@@ -108,15 +130,24 @@ auc_t, mean_auc = cumulative_dynamic_auc(y_train, y_test, risk, times)
 
 surv_fns = coxnet.predict_survival_function(X_test)              # needs fit_baseline_model=True
 surv_prob = np.vstack([[fn(t) for t in times] for fn in surv_fns])
-ibs = integrated_brier_score(y_train, y_test, surv_prob, times)  # compare against the KM-only IBS
-print(f"Uno C: {c_uno:.3f}  mean AUC(t): {mean_auc:.3f}  IBS: {ibs:.3f}")
+ibs = integrated_brier_score(y_train, y_test, surv_prob, times)
+
+# KM-only baseline, same estimator/grid/split. It must be a censoring-aware KM (np.mean(time > t) over events only is wrong).
+t_km, s_km = kaplan_meier_estimator(y_train['event'], y_train['time'])
+km_row = np.r_[1.0, s_km][np.searchsorted(t_km, times, side='right')]
+ibs_km = integrated_brier_score(y_train, y_test, np.tile(km_row, (len(y_test), 1)), times)
+print(f"Uno C: {c_uno:.3f}  mean AUC(t): {mean_auc:.3f}  IBS: {ibs:.3f} vs KM-only IBS: {ibs_km:.3f}")
 ```
+
+`python scripts/cox_regression.py [--data gbsg2]` runs this fit-and-evaluate comparison, including the Kaplan-Meier baseline IBS, on seeded synthetic data (default) or GBSG2. Selecting alpha by CV is `fit_coxnet_cv` in that script.
 
 Calibration (the most decision-relevant, most-ignored axis): at a clinical horizon, plot predicted P(event by t) against the observed event probability (KM within risk groups, or a smooth calibration curve), and summarize with ICI/E50/E90 (Austin 2020) -- never Hosmer-Lemeshow. Calibration is what usually breaks on external validation even when discrimination is preserved.
 
 ## Competing Risks
 
-A competing event precludes the event of interest (death from another cause precludes cause-specific death). Treating competing events as ordinary censoring is wrong: **Kaplan-Meier overestimates cumulative incidence** (1-KM >= the cumulative incidence function), so report the CIF (Aalen-Johansen), not 1-KM. Two hazards answer two questions: the **cause-specific hazard** (Cox censoring competing events) is the etiologic rate; the **Fine-Gray subdistribution hazard** maps to the CIF and is the prognostic/absolute-risk target -- but a Fine-Gray sHR is NOT the cause-specific HR and not an effect on the event rate (a covariate can raise a CIF purely by lowering the competing hazard). Since this skill is the prediction regime, the CIF is usually the target; report both models for a complete picture. DeepHit is purpose-built for competing risks at large n; evaluate with competing-risks-aware concordance (Wolbers 2009) and CIF-based Brier.
+A competing event precludes the event of interest (death from another cause precludes cause-specific death). Treating competing events as ordinary censoring is wrong: **Kaplan-Meier overestimates cumulative incidence** (1-KM >= the cumulative incidence function), so report the CIF (Aalen-Johansen), not 1-KM. Two hazards answer two questions: the **cause-specific hazard** (Cox censoring competing events) is the etiologic rate; the **Fine-Gray subdistribution hazard** maps to the CIF and is the prognostic/absolute-risk target -- but a Fine-Gray sHR is NOT the cause-specific HR and not an effect on the event rate (a covariate can raise a CIF purely by lowering the competing hazard). Since this skill is the prediction regime, the CIF is usually the target; report both models for a complete picture. DeepHit is purpose-built for competing risks at large n; evaluate with competing-risks-aware concordance (Wolbers 2009) and CIF-based Brier. `python scripts/competing_risks_cif.py` demonstrates the 1-KM versus Aalen-Johansen gap on synthetic data.
+
+Implementations: the covariate-free CIF is `lifelines.AalenJohansenFitter` (bundled script; it warns that tied event times are unsupported, so jitter ties) or `sksurv.nonparametric.cumulative_incidence_competing_risks` (row 0 of its array is all causes, row k is cause k); both give the same CIF on the script's data. Neither lifelines nor scikit-survival has Fine-Gray regression or a CIF-based Brier score or concordance, and no scikit-survival model takes a multi-cause target. Fine-Gray is R `cmprsk::crr` or `riskRegression::FGR`, CIF Brier is R `riskRegression::Score`, and per-cause forests are R `randomForestSRC`: named here, not bundled or executed.
 
 ## Censoring, Immortal Time, and Landmarking
 
@@ -128,37 +159,9 @@ A competing event precludes the event of interest (death from another cause prec
 
 In p>>n, elastic-net Cox beats LASSO for stability with correlated genes (LASSO arbitrarily keeps one of a correlated group). The same irreproducibility as biomarker discovery applies: different cohorts select near-disjoint gene sets at similar performance, so the deliverable is the *prediction*, not the gene list. Feature selection and tuning MUST live inside the resampling loop -- nested CV with survival metrics (Uno's C, IBS) as the objective; selecting genes on the full data then CV-ing the final model is leakage producing grossly optimistic signatures. Optimism-correct internal validation via Harrell's bootstrap, validate externally, and report per TRIPOD+AI (Collins 2024).
 
-## Per-Method Failure Modes
+## Failure Modes
 
-### Reporting only the C-index
-- **Trigger:** Summarizing a survival model by Harrell's C alone.
-- **Mechanism:** C is censoring-dependent, monotone-invariant (blind to calibration), and insensitive.
-- **Symptom:** Great C, badly miscalibrated absolute risks; ranking-equivalent models look identical.
-- **Fix:** Uno's C(tau) + AUC(t) + IBS-vs-KM + calibration curves on out-of-sample data.
-
-### Kaplan-Meier under competing risks
-- **Trigger:** Using 1-KM for incidence when a competing event exists.
-- **Mechanism:** 1-KM assumes competing-event subjects could still have the event; they cannot.
-- **Symptom:** Incidence overestimated; sums across causes exceed 1.
-- **Fix:** Report the CIF (Aalen-Johansen); use cause-specific and Fine-Gray models.
-
-### Misverbalizing a Fine-Gray coefficient
-- **Trigger:** Saying a Fine-Gray sHR "increases the rate of the event."
-- **Mechanism:** The subdistribution hazard maps to cumulative incidence, not the event rate.
-- **Symptom:** Causal/etiologic claims from a prognostic model.
-- **Fix:** State it as an effect on *cumulative incidence*; report cause-specific too.
-
-### Immortal time bias
-- **Trigger:** Grouping subjects by a post-baseline event.
-- **Mechanism:** Guaranteed event-free time is attributed to the exposed group.
-- **Symptom:** Spectacular development performance, external collapse.
-- **Fix:** Time-varying exposure, landmarking, or target-trial emulation.
-
-### Selection-before-CV in a signature
-- **Trigger:** Selecting genes on all data, then CV-ing the final Cox model.
-- **Mechanism:** Held-out folds informed selection (the dominant overfitting capacity in p>>n).
-- **Symptom:** Optimistic, irreproducible signature.
-- **Fix:** Selection inside nested CV with survival metrics; elastic net for stability.
+Read [`references/failure-modes.md`](references/failure-modes.md) when a survival model result looks too good, incidence is estimated, or evaluation is being chosen.
 
 ## Quantitative Thresholds
 
@@ -179,7 +182,7 @@ In p>>n, elastic-net Cox beats LASSO for stability with correlated genes (LASSO 
 | `predict_survival_function` errors | coxnet without baseline | `CoxnetSurvivalAnalysis(fit_baseline_model=True)` |
 | lifelines C reported as 1-C | partial hazard not negated | `concordance_index(time, -predict_partial_hazard(df), event)` |
 | pycox survival nonsense | baseline hazard not computed | `model.compute_baseline_hazards()` before `predict_surv_df` |
-| `times` for AUC/IBS out of range | beyond largest uncensored test time | Clip `times` to the observed follow-up |
+| `times` for AUC/IBS out of range | a time at or above the largest test time of any status (censored or not); times below it are accepted, even past the largest uncensored time | Keep `times` strictly below the largest test time |
 
 ## References
 

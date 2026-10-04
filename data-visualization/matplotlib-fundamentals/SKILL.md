@@ -1,25 +1,26 @@
 ---
 name: bio-data-visualization-matplotlib-fundamentals
-description: Build publication-quality figures with matplotlib using the object-oriented Figure/Axes API, constrained_layout, rcParams customization, TrueType (Type-42) font embedding for journal submission, and CVD-safe palettes. Covers seaborn integration, common chart types, axis formatting, and the small gotchas that distinguish reproducible matplotlib from notebook scratch. Use when producing publication figures in Python — RNA-seq scatter, single-cell embeddings, generic biological plotting.
+description: Use when producing publication figures in Python with matplotlib, such as RNA-seq scatter plots, single-cell embeddings, or general biological plots.
 tool_type: python
 primary_tool: matplotlib
 goal_approach_exempt: true
 license: MIT
 author: GPTomics
+category: Data Analysis
 ---
 
 ## Version Compatibility
 
-Reference examples tested with: matplotlib 3.8+, seaborn 0.13+, numpy 1.26+, pandas 2.2+.
+Reference examples tested with: matplotlib 3.8+ (re-checked on matplotlib 3.11.2), seaborn 0.13+ (0.13.2), numpy 1.26+ (2.5.3), pandas 2.2+ (3.0.6), cmcrameri 1.9+ (1.10).
 
 Before using code patterns, verify installed versions match. If versions differ:
 - Python: `pip show <package>` then `help(module.function)` to check signatures
 
-If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying.
+If code throws ImportError, AttributeError, or TypeError, introspect the installed package and adapt the example to match the actual API rather than retrying. Renamed keywords seen on 3.11: `Axes.boxplot(labels=)` is now `tick_labels=`.
 
 # matplotlib Fundamentals
 
-**"Make a publication figure in Python"** -> Build via the **object-oriented Figure/Axes API** (not pyplot state-machine), with `constrained_layout` for axes alignment, `pdf.fonttype=42` for journal-compliant TrueType fonts, CVD-safe palettes, and rasterized point layers for large scatter. The pyplot interface is for notebook scratch; the Figure/Axes API is for reproducible figures.
+**"Make a publication figure in Python"** -> Build via the **object-oriented Figure/Axes API** (not pyplot state-machine), with constrained layout for axes alignment, `pdf.fonttype=42` for journal-compliant TrueType fonts, CVD-safe palettes, and rasterized point layers for large scatter. The pyplot interface is for notebook scratch; the Figure/Axes API is for reproducible figures.
 
 - Python: `fig, ax = plt.subplots()` -> `ax.scatter` / `ax.plot` / `ax.bar`; `seaborn.objects` (new grammar API) for ggplot-like
 
@@ -27,7 +28,7 @@ If code throws ImportError, AttributeError, or TypeError, introspect the install
 
 1. **Object-oriented API** — `fig, ax = plt.subplots(figsize=(4, 3))` then `ax.scatter(x, y)`, `ax.set_xlabel(...)`. The pyplot state-machine (`plt.scatter`, `plt.xlabel`) hides which axes are being modified and breaks in multi-subplot figures.
 
-2. **constrained_layout** — `plt.subplots(constrained_layout=True)` automatically prevents axis-label clipping and tight-packs subplots. Replaces the older `tight_layout()` and is the default in matplotlib 3.6+.
+2. **Constrained layout** — `plt.subplots(layout='constrained')` automatically prevents axis-label clipping and tight-packs subplots. It replaces the older `tight_layout()`, is opt-in (the default layout engine is none), and supersedes the `constrained_layout=True` keyword.
 
 3. **Type-42 (TrueType) font embedding** — `plt.rcParams['pdf.fonttype']=42` produces searchable/editable PDF text. Default Type-3 PostScript glyphs are not searchable and **rejected by Nature, IEEE, ACM, and many other publishers**.
 
@@ -45,14 +46,12 @@ mpl.rcParams.update({
     'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
     'font.size': 7,                     # Nature requires 5-7 pt body text
     'axes.labelsize': 7,
-    'axes.titlesize': 8,
+    'axes.titlesize': 7,
     'xtick.labelsize': 6,
     'ytick.labelsize': 6,
     'legend.fontsize': 6,
     'figure.dpi': 100,                  # display
     'savefig.dpi': 300,                 # save
-    'savefig.bbox': 'tight',
-    'savefig.pad_inches': 0.05,
     'axes.linewidth': 0.5,
     'xtick.major.width': 0.5,
     'ytick.major.width': 0.5,
@@ -68,7 +67,7 @@ import matplotlib.pyplot as plt
 
 # Single axes
 fig, ax = plt.subplots(figsize=(89/25.4, 70/25.4),       # 89mm x 70mm in inches; Nature single col
-                       constrained_layout=True)
+                       layout='constrained')
 ax.scatter(x, y, c='#0072B2', s=10, alpha=0.7, edgecolors='none', rasterized=True)
 ax.set_xlabel('PC1 (45%)')
 ax.set_ylabel('PC2 (12%)')
@@ -77,39 +76,10 @@ fig.savefig('scatter.pdf')
 
 # Grid of axes
 fig, axes = plt.subplots(2, 3, figsize=(180/25.4, 100/25.4),  # 180mm double col
-                          constrained_layout=True)
-for ax, (label, panel_data) in zip(axes.flat, data.items()):
+                          layout='constrained')
+for ax, (label, panel_data) in zip(axes.flat, panel_data.items()):
     ax.plot(panel_data['x'], panel_data['y'])
-    ax.set_title(label, fontsize=8)
-```
-
-## Common Chart Types
-
-```python
-# Scatter -- always rasterized for >1000 points
-ax.scatter(x, y, c=values, cmap='viridis', s=8, alpha=0.6,
-           edgecolors='none', rasterized=True)
-plt.colorbar(ax.collections[0], ax=ax, label='Expression', shrink=0.8)
-
-# Line
-ax.plot(x, y1, color='#0072B2', label='Control', linewidth=1)
-ax.plot(x, y2, color='#D55E00', label='Treatment', linewidth=1)
-ax.fill_between(x, y_low, y_high, color='#0072B2', alpha=0.2)
-ax.legend(frameon=False, fontsize=6)
-
-# Bar
-ax.bar(categories, values, color='#0072B2', edgecolor='black', linewidth=0.5)
-
-# Box / violin (prefer seaborn for these -- see distribution-plots)
-ax.boxplot([group_a, group_b, group_c], labels=['A', 'B', 'C'],
-           patch_artist=True, boxprops=dict(facecolor='#0072B2', alpha=0.7))
-
-# Histogram
-ax.hist(values, bins=30, color='#0072B2', edgecolor='white', linewidth=0.5)
-
-# Heatmap (prefer seaborn for clustered; see heatmaps-clustering)
-im = ax.imshow(matrix, cmap='RdBu_r', aspect='auto', vmin=-vmax, vmax=vmax)
-plt.colorbar(im, ax=ax, label='Z-score')
+    ax.text(-0.15, 1.05, label, transform=ax.transAxes, fontsize=7, fontweight='bold', va='top')  # panel tag
 ```
 
 ## seaborn Integration
@@ -118,41 +88,22 @@ plt.colorbar(im, ax=ax, label='Z-score')
 import seaborn as sns
 
 # seaborn shares the matplotlib Figure/Axes -- pass ax= argument
-fig, ax = plt.subplots(figsize=(4, 3), constrained_layout=True)
+fig, ax = plt.subplots(figsize=(4, 3), layout='constrained')
+# Bind colours to category names: a list palette follows data order and can swap Up and Down.
+sig_palette = {'NS': '#999999', 'Down': '#0072B2', 'Up': '#D55E00'}
 sns.scatterplot(data=df, x='log_fold_change', y='neg_log_p',
-                hue='significance', palette=['#999999', '#0072B2', '#D55E00'],
+                hue='significance', hue_order=['NS', 'Down', 'Up'], palette=sig_palette,
                 s=10, alpha=0.7, ax=ax, rasterized=True)
 
 # seaborn 0.13+ has the `objects` grammar interface (ggplot-like)
 import seaborn.objects as so
 (so.Plot(df, x='log_fold_change', y='neg_log_p')
    .add(so.Dots(pointsize=2), color='significance')
-   .scale(color=['#999999', '#0072B2', '#D55E00']))
+   .scale(color=sig_palette))     # dict, not list
+# so.Plot restyles with its own theme; pass .theme({**sns.axes_style('ticks'), **mpl.rcParams}) to keep the rcParams above.
 ```
 
 **Return-type gotcha:** seaborn axes-level functions (`scatterplot`, `boxplot`, `barplot`) return Axes. Figure-level (`displot`, `relplot`, `catplot`) return FacetGrid — needs `.set_axis_labels(x, y)` not `.set_xlabel(x)`.
-
-## Axis Formatting
-
-```python
-# Log scale
-ax.set_yscale('log')
-
-# Scientific notation
-from matplotlib.ticker import ScalarFormatter
-ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-
-# Date axis
-import matplotlib.dates as mdates
-ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-
-# Tick frequency
-ax.set_xticks(np.arange(0, 10, 2))
-ax.set_xticklabels(['A', 'B', 'C'], rotation=45, ha='right')
-
-# Grid
-ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
-```
 
 ## Color and Palette
 
@@ -162,13 +113,15 @@ okabe_ito = ['#E69F00', '#56B4E9', '#009E73', '#F0E442',
              '#0072B2', '#D55E00', '#CC79A7', '#000000']
 
 # Perceptually-uniform sequential (Crameri batlow / viridis cividis)
+import numpy as np
 from cmcrameri import cm as cmc
-plt.imshow(data, cmap=cmc.batlow)
-plt.imshow(data, cmap='viridis')                          # built-in
+fig, ax = plt.subplots(layout='constrained')
+im = ax.imshow(data, cmap=cmc.batlow)                    # or cmap='viridis' (built-in)
+fig.colorbar(im, ax=ax, shrink=0.6, aspect=20)
 
 # Diverging symmetric for LFC / z-score
 vmax = np.quantile(np.abs(data), 0.99)
-plt.imshow(data, cmap='RdBu_r', vmin=-vmax, vmax=vmax)   # symmetric
+im = ax.imshow(data, cmap='RdBu_r', vmin=-vmax, vmax=vmax)   # symmetric
 ```
 
 See `data-visualization/color-palettes` for full palette decision tree.
@@ -177,112 +130,36 @@ See `data-visualization/color-palettes` for full palette decision tree.
 
 ```python
 # PDF for vector text + raster scatter (best of both)
-fig.savefig('figure.pdf', dpi=300, bbox_inches='tight')
+fig.savefig('figure.pdf')
 
-# PNG for raster (web, presentations)
-fig.savefig('figure.png', dpi=300, bbox_inches='tight')
+# PNG for raster (web, presentations); dpi comes from rcParams savefig.dpi
+fig.savefig('figure.png', dpi=300)
 
 # TIFF for some journals
 fig.savefig('figure.tiff', dpi=300, pil_kwargs={'compression': 'tiff_lzw'})
 
-# SVG for editable vector
-fig.savefig('figure.svg', bbox_inches='tight')
+# SVG: text is converted to paths by default; keep it editable as <text> (the viewer needs the font installed)
+with mpl.rc_context({'svg.fonttype': 'none'}):
+    fig.savefig('figure.svg')
 ```
 
-## Common Failure Modes
+## Guardrails
 
-### Default Type-3 fonts rejected by journals
+- Set `pdf.fonttype=42` and `ps.fonttype=42` before any PDF/EPS save; verify with `pdffonts figure.pdf` (no Type 3 rows).
+- Use `layout='constrained'`, not `tight_layout()`, when colorbars or shared axes are present.
+- Do not set `bbox_inches='tight'` (or `savefig.bbox`) for journal-width figures: it re-crops the page, so 89 mm becomes ~92 mm. Check the saved page size in mm.
+- Map categories to colours with a dict palette (`palette={'Up': ...}`, plus `hue_order`), never a list in assumed data order.
+- Address axes explicitly (`ax.set_xlabel`), never `plt.xlabel` after `plt.subplots(n, m)`.
+- `rasterized=True` on scatter/imshow above ~1000 elements; axes and text stay vector.
+- `figsize` is inches: `mm / 25.4`. Colorbar: `shrink=0.6, aspect=20` on small axes.
+- seaborn figure-level functions (`displot`, `relplot`, `catplot`) return a FacetGrid (`.set_axis_labels`); axes-level ones accept `ax=`.
 
-**Trigger:** Default `pdf.fonttype=3` (PostScript Type 3 glyphs as drawing operators).
+Trigger/mechanism/symptom/fix and the error table: `references/failure-modes.md`. Chart-type and axis-formatting recipes: `references/chart-recipes.md`.
 
-**Mechanism:** Type-3 glyphs are not searchable or selectable; many journals reject.
+## Resources
 
-**Symptom:** Submission rejected at automated check; "Type 3 fonts not permitted."
-
-**Fix:** `mpl.rcParams['pdf.fonttype']=42` AND `ps.fonttype=42`. Verify with `pdffonts figure.pdf` showing `TrueType`.
-
-### tight_layout fails on complex grids
-
-**Trigger:** `plt.tight_layout()` on a figure with colorbars or shared axes.
-
-**Mechanism:** tight_layout doesn't account for axes added after-the-fact (colorbars).
-
-**Symptom:** Labels clipped; subplots overlap colorbar.
-
-**Fix:** Use `constrained_layout=True` in `plt.subplots()` instead; or `fig.set_constrained_layout(True)` after creation.
-
-### pyplot state-machine in multi-subplot
-
-**Trigger:** `plt.xlabel(...)` after `plt.subplots(2, 3)`.
-
-**Mechanism:** pyplot calls modify the *current* axes — usually the last created. Multi-subplot code becomes order-dependent.
-
-**Symptom:** Wrong subplot gets the label.
-
-**Fix:** Use `ax.set_xlabel(...)` with explicit axes reference.
-
-### Scatter of 100000 points crashes PDF viewer
-
-**Trigger:** Vector scatter at large N; one PDF page becomes 50 MB.
-
-**Mechanism:** Each scatter point is a vector circle.
-
-**Symptom:** PDF takes 30 seconds to open; Illustrator crashes; reviewer files complaint.
-
-**Fix:** `rasterized=True` on the scatter call. Keep axes and text vector.
-
-### seaborn FacetGrid vs Axes return-type confusion
-
-**Trigger:** `g = sns.displot(...)`; calling `g.set_xlabel('x')` fails.
-
-**Mechanism:** displot returns FacetGrid; needs `.set_axis_labels(x, y)` or per-axes iteration.
-
-**Symptom:** AttributeError on .set_xlabel.
-
-**Fix:** Use `set_axis_labels` for FacetGrid; `set_xlabel` for Axes. Switch to axes-level `sns.histplot(ax=ax)` to get Axes-API behavior.
-
-### figsize in inches when mm was intended
-
-**Trigger:** `figsize=(89, 70)` thinking mm; matplotlib expects inches.
-
-**Mechanism:** Default figure unit is inches.
-
-**Symptom:** Figure is 89 inches wide.
-
-**Fix:** Convert: `figsize=(89/25.4, 70/25.4)` for mm input.
-
-### Colorbar over-fills the axes
-
-**Trigger:** Default `plt.colorbar(im, ax=ax)`.
-
-**Mechanism:** Colorbar takes the same height as the axes; on small subplots dominates.
-
-**Symptom:** Subplot looks squished.
-
-**Fix:** `plt.colorbar(im, ax=ax, shrink=0.6, aspect=20)`; or use `make_axes_locatable` for fine control.
-
-### Vector grid + rasterized scatter mixed properly
-
-**Trigger:** Want vector axes + raster scatter; save as PDF.
-
-**Mechanism:** Default rasterization can include axes if not controlled.
-
-**Symptom:** Whole plot rasterized; axis text blurry on zoom.
-
-**Fix:** Per-element `rasterized=True` on scatter only; axes and text stay vector. Set `fig.set_rasterization_zorder(0)` to globally control.
-
-## Common Errors
-
-| Error / symptom | Cause | Solution |
-|-----------------|-------|----------|
-| PDF rejected by journal | Type-3 fonts | `pdf.fonttype=42` |
-| Subplots overlap | No constrained_layout | `plt.subplots(constrained_layout=True)` |
-| Wrong subplot labeled | pyplot state-machine | Use ax.set_xlabel explicitly |
-| 50 MB PDF | Vector scatter at large N | `rasterized=True` on scatter |
-| Figure too big | mm interpreted as inches | Divide by 25.4 |
-| Colorbar dominates | Default size | `shrink=0.6, aspect=20` |
-| seaborn .set_xlabel fails | FacetGrid not Axes | `g.set_axis_labels(x, y)` |
-| Axes spine missing | Wrong API | `ax.spines[['top','right']].set_visible(False)` |
+- `scripts/matplotlib_phd.py` — runnable end-to-end example (rcParams, 89 mm scatter, 2x3 grid, Crameri heatmap, seaborn, seaborn.objects; its legend recipe uses the private `Plot.plot()._figure` (seaborn 0.13.2 only) and a fixed 22% page reserve that a longer legend title overflows, a 29-character title covered 13 mm of data; the public alternative is `Plot.on(fig)`, move `fig.legends[0]`, `fig.subplots_adjust(right=0.76)`). Writes five PDFs at their stated mm sizes to the working directory; needs cmcrameri.
+- `usage-guide.md` — prerequisites and example prompts.
 
 ## References
 

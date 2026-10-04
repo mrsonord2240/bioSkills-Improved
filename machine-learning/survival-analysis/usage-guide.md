@@ -47,7 +47,7 @@ Tell your AI agent what you want to do:
 2. Fit penalized Cox and RSF baselines before escalating to deep models
 3. Keep feature selection and tuning inside nested CV with survival metrics
 4. Evaluate with Uno's C(tau), time-dependent AUC, IBS versus KM, and calibration at clinical horizons
-5. Handle competing risks with the CIF and report both cause-specific and Fine-Gray models
+5. Handle competing risks with the CIF and report cause-specific models (Fine-Gray needs R `cmprsk`/`riskRegression`; not bundled)
 6. Check censoring assumptions, immortal time bias, and use landmarking for dynamic prediction
 
 ## Tips

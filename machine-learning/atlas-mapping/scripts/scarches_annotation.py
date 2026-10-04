@@ -1,16 +1,24 @@
 '''scArches scANVI label transfer with out-of-distribution gating (real-data template).
 
-Requires a saved reference scANVI model and a query h5ad. The non-obvious point:
-gate transferred labels on a weighted-kNN transfer uncertainty (does the cell
+Input contract (both files in the working directory):
+  reference_labeled.h5ad  raw integer counts in layers['counts']; obs['cell_type'] (reference labels),
+                          obs['batch']; genes = the HVGs to use.
+  query.h5ad              raw counts in layers['counts'] (same gene naming); obs['batch'] present (as in the reference).
+Trains the reference scVI/scANVI itself (about 90 s on CPU for ~1.2k + 2.6k cells), maps the query by
+surgery, and writes query_annotated.h5ad (predicted_label, transfer_uncertainty, X_scANVI). Seeded:
+identical input gives identical output on the same CPU and package versions.
+The non-obvious point: gate transferred labels on a weighted-kNN transfer uncertainty (does the cell
 belong?), NOT on the classifier softmax max (which only says which label). See
 ood_gating_demo.py for a synthetic, runnable version of the gating logic.
 '''
-# Reference: anndata 0.10+, scanpy 1.10+, scvi-tools 1.1+, scikit-learn 1.3+ | Verify API if version differs
+# Reference: anndata 0.13, scanpy 1.12, scvi-tools 1.5, scikit-learn 1.9 | Verify API if version differs
 
 import scvi
 import scanpy as sc
 import numpy as np
 from sklearn.neighbors import KNeighborsClassifier
+
+scvi.settings.seed = 0   # reproducibility: same input -> same labels (CPU, same package versions)
 
 adata_ref = sc.read_h5ad('reference_labeled.h5ad')
 
@@ -40,3 +48,6 @@ adata_query.obs.loc[uncertainty > 0.2, 'predicted_label'] = 'Unknown'   # 0.2: H
 
 print(f'Flagged Unknown (OOD / novel): {(uncertainty > 0.2).mean():.1%}')
 print(adata_query.obs['predicted_label'].value_counts())
+
+adata_query.write_h5ad('query_annotated.h5ad')
+print('Wrote query_annotated.h5ad. Next: python scripts/label_marker_check.py --markers <curated.json> (the gate cannot see a missing type).')

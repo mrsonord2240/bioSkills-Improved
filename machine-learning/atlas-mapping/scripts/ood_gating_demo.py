@@ -1,14 +1,13 @@
-'''Why an out-of-distribution signal (not the softmax) catches novel cell types.
+'''Why an out-of-distribution signal (not a class-probability) catches a novel population FAR from every reference type.
 
-Runs end-to-end on synthetic latent coordinates: three reference cell types and
-a query containing a fourth, NOVEL population that belongs to none of them. The
-classifier softmax assigns every novel cell a confident label, while a distance-
-based OOD signal (here, distance to the nearest reference cell -- the idea behind
-Symphony's Mahalanobis gate) flags them. Weighted-kNN label-transfer uncertainty
-(HLCA's 0.2 cutoff) is the other standard gate; it best catches cells that fall
-BETWEEN reference types, while a distance gate best catches cells far from all of them.
+Synthetic latent: three reference cell types and a query with a fourth population far from all of them.
+A kNN class-vote probability (stand-in for a classifier softmax) gives every novel cell a confident label,
+while a distance gate (mean distance to the nearest reference cells, calibrated on the reference itself;
+the idea behind Symphony's Mahalanobis gate) flags them. LIMIT: this demonstrates the easy case only. On real
+data a missing type that lands next to a reference type is NOT flagged by this gate or by the kNN
+uncertainty gate; see SKILL.md and scripts/label_marker_check.py.
 '''
-# Reference: scikit-learn 1.3+, anndata 0.10+ | Verify API if version differs
+# Reference: scikit-learn 1.9, anndata 0.13 | Verify API if version differs
 
 import numpy as np
 import anndata as ad
@@ -27,7 +26,7 @@ novel_mask = np.array([False] * query_known.shape[0] + [True] * query_novel.shap
 
 knn = KNeighborsClassifier(n_neighbors=15).fit(ref_latent, ref_labels)
 predicted = knn.predict(query_latent)
-softmax_conf = knn.predict_proba(query_latent).max(axis=1)    # WRONG signal: which label, not whether
+vote_conf = knn.predict_proba(query_latent).max(axis=1)    # WRONG signal: which label, not whether
 
 # Distance-based OOD gate: mean distance to the k nearest REFERENCE cells. Calibrate the
 # threshold on the reference itself (99th percentile of its own nearest-neighbor distances).
@@ -37,7 +36,7 @@ query_dist = knn.kneighbors(query_latent)[0].mean(axis=1)
 gated = predicted.copy()
 gated[query_dist > threshold] = 'Unknown'
 
-print(f'Novel cells passing a 0.5 softmax filter (WRONG): {(softmax_conf[novel_mask] >= 0.5).mean():.0%}')
+print(f'Novel cells passing a 0.5 kNN-probability filter (WRONG): {(vote_conf[novel_mask] >= 0.5).mean():.0%}')
 print(f'Novel cells caught by distance OOD gate (RIGHT):  {(gated[novel_mask] == "Unknown").mean():.0%}')
 print(f'Known cells wrongly flagged Unknown:              {(gated[~novel_mask] == "Unknown").mean():.0%}')
 
