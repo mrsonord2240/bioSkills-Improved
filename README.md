@@ -4,7 +4,7 @@ Upstream [GPTomics/bioSkills](https://github.com/GPTomics/bioSkills) was archive
 commit `d91ed3d`, and its README asks people to branch and customize rather than wait for updates.
 This fork does that.
 
-Skills here are audited against the `skill-auditor` rubric and fixed where the audit demonstrated a
+Skills here are audited against the [skill-auditor](https://github.com/aipoch/medical-research-skills/tree/main/skill-auditor) rubric and fixed where the audit demonstrated a
 defect — broken commands, renamed flags, version drift, snippets that ran but computed the wrong
 thing, and routines a Skill promised but shipped no code for. Nothing is restyled, no frontmatter
 `name` changes, and a Skill that passed with no findings stays byte-identical to `d91ed3d`.
