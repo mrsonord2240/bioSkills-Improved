@@ -4,7 +4,7 @@ Upstream [GPTomics/bioSkills](https://github.com/GPTomics/bioSkills) was archive
 commit `d91ed3d`, and its README asks people to branch and customize rather than wait for updates.
 This fork does that.
 
-**195 of the 562 Skills here have been audited, fixed and re-audited.** The other 367 are upstream
+**195 of the 562 standard Skills here have been audited, fixed and re-audited.** The other 367 are upstream
 `d91ed3d` unchanged. Every audit executed the Skill's own code against real or synthetic data and
 scored what it produced, not the prose. At first audit the 195 averaged 78/100 and 126 of them fell
 below the Production Ready line of 85; every one now scores 85 or more with no open P0 finding.
@@ -19,7 +19,8 @@ public in
 under `audits/skills/<skill-id>/`, with the process itself under `.claude/skills/`. Skills reach this
 fork one way, exported from
 [mrsonord2240/optimized-scientific-skills](https://github.com/mrsonord2240/optimized-scientific-skills)
-once their final audit passes.
+once their final audit passes. Separately, [experimental normalized drafts](experimental/README.md)
+are published with explicit partial-status notes and do not inherit those audit grades.
 
 Fixes cannot go back upstream — an archived repository accepts no pull requests. If GPTomics
 unarchives, or names a successor, they are yours to take.
@@ -49,12 +50,13 @@ Benchmarking). Applied to `alternative-splicing/splicing-quantification`, `data-
 `machine-learning/` `atlas-mapping`, `biomarker-discovery`, `omics-classifiers` and
 `survival-analysis`.
 
-**In development, not in this fork: router layout.** `SKILL.md` becomes a short table of routes, each
-`routes/<task>.md` starts with its command and ends with a "done when" check, and `scripts/` holds one
-entry point per route. Background and citations move to `references/`. A layout check and a routing
-test (does a small model open the right route and run its script?) gate it before the usual audit.
-Four Skills have been rebuilt this way; they stay in the records repository until the approach has
-been reassessed.
+**Experimental router layout: 24 partially complete drafts are now included.**
+The [experimental collection](experimental/README.md) contains the `ca-` versions,
+their source hashes, and individual status notes. One has a historical
+candidate-ready result, three have limited evaluations without audits, and
+twenty were normalized only. They are not certified replacements for the
+standard Skills. Normalization-only work has resumed for the remaining 171
+Skills on the optimized shelf; new drafts will carry the same explicit status.
 
 ## Benchmarking
 
