@@ -50,11 +50,11 @@ Benchmarking). Applied to `alternative-splicing/splicing-quantification`, `data-
 `machine-learning/` `atlas-mapping`, `biomarker-discovery`, `omics-classifiers` and
 `survival-analysis`.
 
-**Experimental router layout: 24 partially complete drafts are now included.**
+**Experimental router layout: 42 partially complete drafts are now included.**
 The [experimental collection](experimental/README.md) contains the `ca-` versions,
 their source hashes, and individual status notes. One has a historical
 candidate-ready result, three have limited evaluations without audits, and
-twenty were normalized only. They are not certified replacements for the
+38 are normalization-only drafts. They are not certified replacements for the
 standard Skills. Normalization-only work has resumed for the remaining 171
 Skills on the optimized shelf; new drafts will carry the same explicit status.
 

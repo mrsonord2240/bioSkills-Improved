@@ -34,7 +34,8 @@ FORCE=false
 
 # Top-level directories that are not skill categories. clawhub-installer is a
 # ClawHub meta-skill living at the repo root; it must never be installed or counted.
-NON_SKILL_DIRS=("clawhub-installer")
+# Experimental drafts require explicit selection and keep their own ca- names.
+NON_SKILL_DIRS=("clawhub-installer" "experimental")
 
 is_non_skill_dir() {
     local name="$1"
